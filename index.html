@@ -1,0 +1,200 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#020407" />
+    <meta
+      name="description"
+      content="可交互的相对论黑洞、吸积盘与引力透镜观测模拟。"
+    />
+    <title>Schwarzschild 深空观测台</title>
+    <link rel="icon" href="data:," />
+    <link rel="stylesheet" href="./src/styles.css" />
+  </head>
+  <body>
+    <main class="app" aria-label="相对论黑洞观测模拟">
+      <canvas id="universe" aria-label="可拖动的黑洞与深空观测画面"></canvas>
+
+      <dl class="system-status" aria-label="实时渲染状态">
+        <div class="status-item status-wide">
+          <dt>计算后端</dt>
+          <dd id="backendStatus">正在初始化</dd>
+        </div>
+        <div class="status-item status-secondary">
+          <dt>图形处理器</dt>
+          <dd id="gpuStatus">检测中</dd>
+        </div>
+        <div class="status-item">
+          <dt>显示输出</dt>
+          <dd id="hdrStatus">检测中</dd>
+        </div>
+        <div class="status-item">
+          <dt>帧率</dt>
+          <dd><span id="fpsValue">—</span> FPS</dd>
+        </div>
+        <div class="status-item status-secondary">
+          <dt>实际倍率</dt>
+          <dd id="renderScaleValue">—</dd>
+        </div>
+      </dl>
+
+      <aside id="panel" class="science-panel" aria-labelledby="panelTitle">
+        <header class="panel-header">
+          <span class="sheet-handle" aria-hidden="true"></span>
+          <div class="panel-heading">
+            <p class="eyebrow">GPU 零测地线实时成像</p>
+            <h1 id="panelTitle">Schwarzschild 黑洞</h1>
+          </div>
+          <div class="panel-actions" aria-label="视角操作">
+            <button
+              id="toggleMotion"
+              class="icon-button"
+              type="button"
+              aria-label="暂停自动环绕"
+              title="暂停自动环绕"
+            >
+              <span aria-hidden="true">Ⅱ</span>
+            </button>
+            <button
+              id="resetView"
+              class="icon-button"
+              type="button"
+              aria-label="重置观测视角"
+              title="重置观测视角"
+            >
+              <span aria-hidden="true">↺</span>
+            </button>
+            <button
+              id="togglePanel"
+              class="panel-toggle"
+              type="button"
+              aria-controls="panelContent"
+              aria-expanded="false"
+              aria-label="展开观测参数"
+            >
+              <span class="toggle-label">参数</span>
+              <span class="toggle-chevron" aria-hidden="true">⌃</span>
+            </button>
+          </div>
+        </header>
+
+        <div id="panelContent" class="panel-content">
+          <div class="mode-switch" role="group" aria-label="成像色彩模式">
+            <button
+              id="modeScience"
+              class="mode-button"
+              type="button"
+              aria-pressed="false"
+            >
+              科学真色
+            </button>
+            <button
+              id="modeHubble"
+              class="mode-button is-active"
+              type="button"
+              aria-pressed="true"
+            >
+              哈勃调色
+            </button>
+          </div>
+
+          <dl class="physical-readout" aria-label="物理观测读数">
+            <div class="readout-primary">
+              <dt>观测位置</dt>
+              <dd id="observerValue">50.0 r<sub>g</sub> · 18.9°</dd>
+            </div>
+            <div>
+              <dt>史瓦西半径</dt>
+              <dd id="rsValue">2.00 r<sub>g</sub></dd>
+            </div>
+            <div>
+              <dt>阴影半径</dt>
+              <dd id="shadowValue">5.20 r<sub>g</sub></dd>
+            </div>
+          </dl>
+
+          <section class="parameter-section" aria-labelledby="parameterTitle">
+            <div class="section-heading">
+              <h2 id="parameterTitle">观测参数</h2>
+              <span>实时</span>
+            </div>
+
+            <div class="control-list">
+              <label class="control" for="mass">
+                <span class="control-name">黑洞质量</span>
+                <output id="massValue" for="mass">6.50 × 10⁹ M☉</output>
+                <input id="mass" type="range" min="6" max="10" step="0.01" value="9.81" />
+              </label>
+
+              <label class="control" for="accretion">
+                <span class="control-name">吸积率</span>
+                <output id="accretionValue" for="accretion">0.006% Edd</output>
+                <input
+                  id="accretion"
+                  type="range"
+                  min="-6"
+                  max="-1"
+                  step="0.01"
+                  value="-4.20"
+                />
+              </label>
+
+              <label class="control" for="exposure">
+                <span class="control-name">曝光</span>
+                <output id="exposureValue" for="exposure">1.00×</output>
+                <input
+                  id="exposure"
+                  type="range"
+                  min="0.55"
+                  max="1.55"
+                  step="0.01"
+                  value="1.00"
+                />
+              </label>
+
+              <label class="control" for="timeScale">
+                <span class="control-name">时间倍率</span>
+                <output id="timeScaleValue" for="timeScale">24 M/s</output>
+                <input
+                  id="timeScale"
+                  type="range"
+                  min="0"
+                  max="64"
+                  step="1"
+                  value="24"
+                />
+              </label>
+
+              <label class="control" for="quality">
+                <span class="control-name">画质上限</span>
+                <output id="qualityValue" for="quality">1.00×</output>
+                <input
+                  id="quality"
+                  type="range"
+                  min="0.50"
+                  max="1.25"
+                  step="0.05"
+                  value="1.00"
+                />
+              </label>
+            </div>
+          </section>
+
+          <p class="physics-note">
+            采用非旋转 Schwarzschild 度规。成像模式只改变谱段映射与望远镜响应；测地线、遮挡和频移保持一致。默认盘峰值约 4500 K，颜色由黑体谱与相对论频移计算，并非金色滤镜。
+            全天球数据：<a href="https://sci.esa.int/web/gaia/-/the-colour-of-the-sky-from-gaia-s-early-data-release-3-equirectangular-projection" target="_blank" rel="noreferrer">ESA/Gaia/DPAC · A. Moitinho</a>；6K 摄影回退：<a href="https://www.eso.org/public/images/eso0932a/" target="_blank" rel="noreferrer">ESO/S. Brunier</a>。
+          </p>
+        </div>
+      </aside>
+
+      <div id="interactionHint" class="interaction-hint" role="status" aria-live="polite">
+        <span class="pointer-mark" aria-hidden="true"></span>
+        <span class="desktop-hint">拖动环绕 · 滚轮缩放</span>
+        <span class="touch-hint">单指环绕 · 双指缩放</span>
+      </div>
+    </main>
+
+    <script type="module" src="./src/main.js"></script>
+  </body>
+</html>

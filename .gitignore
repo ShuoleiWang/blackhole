@@ -1,0 +1,6 @@
+.DS_Store
+artifacts/
+assets/gaia-edr3-16k.png
+assets/gaia-edr3-16k.png.part
+__pycache__/
+*.py[cod]
