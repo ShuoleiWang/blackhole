@@ -83,17 +83,17 @@
           <div class="mode-switch" role="group" aria-label="成像色彩模式">
             <button
               id="modeScience"
-              class="mode-button"
+              class="mode-button is-active"
               type="button"
-              aria-pressed="false"
+              aria-pressed="true"
             >
               科学真色
             </button>
             <button
               id="modeHubble"
-              class="mode-button is-active"
+              class="mode-button"
               type="button"
-              aria-pressed="true"
+              aria-pressed="false"
             >
               哈勃调色
             </button>
@@ -109,8 +109,8 @@
               <dd id="rsValue">2.00 r<sub>g</sub></dd>
             </div>
             <div>
-              <dt>阴影半径</dt>
-              <dd id="shadowValue">5.20 r<sub>g</sub></dd>
+              <dt>阴影角直径</dt>
+              <dd id="shadowValue">11.69°</dd>
             </div>
           </dl>
 
@@ -190,7 +190,7 @@
 
       <div id="interactionHint" class="interaction-hint" role="status" aria-live="polite">
         <span class="pointer-mark" aria-hidden="true"></span>
-        <span class="desktop-hint">拖动环绕 · 滚轮缩放</span>
+        <span class="desktop-hint">拖动环绕 · 滚轮缩放 · 0 键侧视</span>
         <span class="touch-hint">单指环绕 · 双指缩放</span>
       </div>
     </main>

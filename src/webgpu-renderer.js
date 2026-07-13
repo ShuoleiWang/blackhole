@@ -6,6 +6,35 @@ import {
 
 const HDR_FORMAT = "rgba16float";
 const UNIFORM_FLOATS = 40;
+const ULTRA_SKY_DIMENSION = 16000;
+
+function isApplePlatform() {
+  const platform = navigator.userAgentData?.platform || navigator.platform || "";
+  return /Mac|iPhone|iPad/i.test(platform);
+}
+
+function finiteLimit(value, fallback) {
+  const number = Number(value);
+  return Number.isFinite(number) && number > 0 ? Math.floor(number) : fallback;
+}
+
+function skyCandidates(urls, maxTextureDimension, includeUltra = true) {
+  const source = typeof urls === "string" ? { high: urls, fallback: urls } : urls;
+  const candidates = includeUltra && maxTextureDimension >= ULTRA_SKY_DIMENSION
+    ? [source.ultra, source.high, source.fallback]
+    : maxTextureDimension >= 6000
+      ? [source.high, source.fallback]
+      : [source.fallback];
+  return [...new Set(candidates.filter(Boolean))];
+}
+
+function scheduleBackgroundTask(callback) {
+  if (typeof requestIdleCallback === "function") {
+    requestIdleCallback(callback, { timeout: 2500 });
+  } else {
+    setTimeout(callback, 1200);
+  }
+}
 
 async function loadBitmap(url) {
   const response = await fetch(url);
@@ -38,27 +67,71 @@ async function loadBitmap(url) {
   }
 }
 
-async function loadBestSkyBitmap(urls, maxTextureDimension) {
-  const source = typeof urls === "string" ? { high: urls, fallback: urls } : urls;
-  const candidates = maxTextureDimension >= 16000
-    ? [source.ultra, source.high, source.fallback]
-    : maxTextureDimension >= 6000
-      ? [source.high, source.fallback]
-      : [source.fallback];
+async function uploadSkyTexture(device, bitmap, url) {
+  device.pushErrorScope("out-of-memory");
+  device.pushErrorScope("validation");
+  let texture;
+  let thrownError;
+  try {
+    texture = device.createTexture({
+      label: `Celestial sphere · ${url}`,
+      size: [bitmap.width, bitmap.height, 1],
+      format: "rgba8unorm-srgb",
+      mipLevelCount: 1,
+      usage: GPUTextureUsage.TEXTURE_BINDING
+        | GPUTextureUsage.COPY_DST
+        | GPUTextureUsage.RENDER_ATTACHMENT,
+    });
+    device.queue.copyExternalImageToTexture(
+      { source: bitmap },
+      { texture },
+      [bitmap.width, bitmap.height],
+    );
+    await device.queue.onSubmittedWorkDone();
+  } catch (error) {
+    thrownError = error;
+  }
+  const validationError = await device.popErrorScope();
+  const memoryError = await device.popErrorScope();
+  const uploadError = thrownError || validationError || memoryError;
+  if (uploadError) {
+    texture?.destroy();
+    throw uploadError;
+  }
+  return texture;
+}
+
+async function loadBestSkyTexture(device, urls, includeUltra = true) {
+  const maxTextureDimension = finiteLimit(device.limits.maxTextureDimension2D, 4096);
   let lastError;
-  for (const url of [...new Set(candidates.filter(Boolean))]) {
+  for (const url of skyCandidates(urls, maxTextureDimension, includeUltra)) {
+    let bitmap;
     try {
-      return { bitmap: await loadBitmap(url), url };
+      bitmap = await loadBitmap(url);
+      if (bitmap.width > maxTextureDimension || bitmap.height > maxTextureDimension) {
+        throw new Error(
+          `${bitmap.width}×${bitmap.height} exceeds the device ${maxTextureDimension}px texture limit`,
+        );
+      }
+      const texture = await uploadSkyTexture(device, bitmap, url);
+      return { texture, width: bitmap.width, height: bitmap.height, url };
     } catch (error) {
       lastError = error;
       console.info(`Sky candidate ${url} unavailable; trying the next size.`, error);
+    } finally {
+      bitmap?.close?.();
     }
   }
   throw lastError || new Error("No celestial panorama could be loaded");
 }
 
 function adapterLabel(adapter) {
-  const info = adapter.info || {};
+  let info = {};
+  try {
+    info = adapter.info || {};
+  } catch (error) {
+    console.info("WebGPU adapter details are privacy-restricted by the browser.", error);
+  }
   const pieces = [info.vendor, info.architecture, info.device, info.description]
     .filter(Boolean)
     .map((item) => String(item).trim())
@@ -68,7 +141,55 @@ function adapterLabel(adapter) {
     return pieces.join(" · ");
   }
 
-  return /Mac|iPhone|iPad/.test(navigator.platform) ? "Apple GPU · Metal" : "High-performance GPU";
+  return isApplePlatform() ? "Apple GPU · Metal" : "High-performance GPU";
+}
+
+async function requestCompatibleAdapter() {
+  let highPerformanceError;
+  try {
+    const adapter = await navigator.gpu.requestAdapter({ powerPreference: "high-performance" });
+    if (adapter) {
+      return adapter;
+    }
+  } catch (error) {
+    highPerformanceError = error;
+  }
+
+  console.info(
+    "A high-performance WebGPU adapter was not available; retrying with the browser default.",
+    highPerformanceError,
+  );
+  return navigator.gpu.requestAdapter();
+}
+
+async function requestCompatibleDevice(adapter) {
+  const adapterTextureLimit = finiteLimit(adapter.limits.maxTextureDimension2D, 4096);
+  if (adapterTextureLimit < ULTRA_SKY_DIMENSION) {
+    return {
+      device: await adapter.requestDevice(),
+      requestedUltraLimit: false,
+      limitFallbackReason: "adapter-limit",
+    };
+  }
+
+  try {
+    return {
+      device: await adapter.requestDevice({
+        requiredLimits: { maxTextureDimension2D: ULTRA_SKY_DIMENSION },
+      }),
+      requestedUltraLimit: true,
+      limitFallbackReason: "",
+    };
+  } catch (error) {
+    // Some browser/Metal combinations advertise the native 16K limit but do
+    // not allow a page to raise the device's conservative default limit.
+    console.info("Unable to request the 16K WebGPU texture limit; using the default device limits.", error);
+    return {
+      device: await adapter.requestDevice(),
+      requestedUltraLimit: false,
+      limitFallbackReason: error instanceof Error ? error.message : String(error),
+    };
+  }
 }
 
 export class WebGPURenderer {
@@ -77,38 +198,38 @@ export class WebGPURenderer {
       throw new Error("WebGPU is not available");
     }
 
-    const adapter = await navigator.gpu.requestAdapter({ powerPreference: "high-performance" });
+    const adapter = await requestCompatibleAdapter();
     if (!adapter) {
-      throw new Error("No high-performance WebGPU adapter was returned");
+      throw new Error("No WebGPU adapter was returned");
     }
 
-    const supportedTextureLimit = adapter.limits.maxTextureDimension2D;
-    const requiredLimits = supportedTextureLimit >= 16000
-      ? { maxTextureDimension2D: 16000 }
-      : {};
     // WebGPU devices otherwise expose only the conservative default limit
     // even when Metal reports native 16K textures.  Request the real limit so
     // the scientific Gaia sky is not silently downgraded to the 6K fallback.
-    const device = await adapter.requestDevice({ requiredLimits });
+    const negotiation = await requestCompatibleDevice(adapter);
+    const { device } = negotiation;
     const context = canvas.getContext("webgpu");
     if (!context) {
       throw new Error("Unable to create a WebGPU canvas context");
     }
 
-    const instance = new WebGPURenderer(canvas, context, adapter, device);
+    const instance = new WebGPURenderer(canvas, context, adapter, device, negotiation);
     await instance.init(skyUrl);
     return instance;
   }
 
-  constructor(canvas, context, adapter, device) {
+  constructor(canvas, context, adapter, device, negotiation) {
     this.canvas = canvas;
     this.context = context;
     this.adapter = adapter;
     this.device = device;
     this.preferredFormat = navigator.gpu.getPreferredCanvasFormat();
     this.format = this.preferredFormat;
-    this.backend = "WebGPU · Metal";
+    this.backend = isApplePlatform() ? "WebGPU · Metal" : "WebGPU · GPU";
     this.gpu = adapterLabel(adapter);
+    this.requestedUltraLimit = negotiation.requestedUltraLimit;
+    this.limitFallbackReason = negotiation.limitFallbackReason;
+    this.maxRenderDimension = finiteLimit(device.limits.maxTextureDimension2D, 4096);
     this.outputHDR = false;
     this.displayP3 = false;
     this.hdrPeak = 1;
@@ -122,6 +243,8 @@ export class WebGPURenderer {
     this.traceView = null;
     this.postBindGroup = null;
     this.lost = false;
+    this.outputFallbackReason = "";
+    this.resizeWasClamped = false;
     device.addEventListener?.("uncapturederror", (event) => {
       console.error("Uncaptured WebGPU validation error", event.error);
     });
@@ -142,24 +265,28 @@ export class WebGPURenderer {
       alphaMode: "opaque",
     };
     const hdrDisabled = new URLSearchParams(location.search).get("hdr") === "0";
+    this.outputHDR = false;
+    this.displayP3 = false;
+    this.hdrPeak = 1;
+    this.outputFallbackReason = hdrDisabled ? "disabled-by-query" : "";
 
     if (!hdrDisabled) {
       try {
-        this.format = HDR_FORMAT;
         this.context.configure({
           ...common,
-          format: this.format,
+          format: HDR_FORMAT,
           colorSpace: "display-p3",
           toneMapping: { mode: "extended" },
         });
         const applied = this.context.getConfiguration?.();
-        if (applied && (
+        if (!applied || (
           applied.format !== HDR_FORMAT
           || applied.colorSpace !== "display-p3"
           || applied.toneMapping?.mode !== "extended"
         )) {
           throw new Error("Browser did not retain the requested extended HDR canvas configuration");
         }
+        this.format = HDR_FORMAT;
         this.outputHDR = true;
         this.displayP3 = true;
         // Relative to SDR diffuse white.  The WebGPU canvas compositor maps
@@ -169,6 +296,7 @@ export class WebGPURenderer {
         return;
       } catch (error) {
         console.info("Extended WebGPU HDR unavailable; trying wide-gamut SDR.", error);
+        this.outputFallbackReason = error instanceof Error ? error.message : String(error);
         this.context.unconfigure?.();
       }
     }
@@ -179,10 +307,9 @@ export class WebGPURenderer {
         ...common,
         format: this.format,
         colorSpace: "display-p3",
-        toneMapping: { mode: "standard" },
       });
       const applied = this.context.getConfiguration?.();
-      if (applied && applied.colorSpace !== "display-p3") {
+      if (!applied || applied.format !== this.format || applied.colorSpace !== "display-p3") {
         throw new Error("Browser did not retain Display-P3 output");
       }
       this.displayP3 = true;
@@ -194,12 +321,49 @@ export class WebGPURenderer {
     }
 
     this.format = this.preferredFormat;
-    this.context.configure({
-      ...common,
-      format: this.format,
-      colorSpace: "srgb",
-    });
+    try {
+      this.context.configure({
+        ...common,
+        format: this.format,
+        colorSpace: "srgb",
+      });
+    } catch (error) {
+      // Baseline WebGPU implementations may predate colorSpace.  The preferred
+      // format without optional canvas members is the final compatibility path.
+      console.info("Explicit sRGB canvas configuration unavailable; using baseline WebGPU output.", error);
+      this.context.unconfigure?.();
+      this.context.configure({ ...common, format: this.format });
+    }
     this.outputDescription = "sRGB 标准动态范围";
+  }
+
+  reportCapabilities() {
+    let features = [];
+    try {
+      features = [...this.device.features].sort();
+    } catch (error) {
+      console.info("WebGPU feature enumeration is unavailable.", error);
+    }
+    this.capabilities = Object.freeze({
+      api: "webgpu",
+      backend: this.backend,
+      adapter: this.gpu,
+      adapterMaxTextureDimension2D: finiteLimit(this.adapter.limits.maxTextureDimension2D, 0),
+      deviceMaxTextureDimension2D: this.maxRenderDimension,
+      requestedUltraTextureLimit: this.requestedUltraLimit,
+      limitFallbackReason: this.limitFallbackReason,
+      features,
+      canvasFormat: this.format,
+      canvasColorSpace: this.displayP3 ? "display-p3" : "srgb",
+      canvasToneMapping: this.outputHDR ? "extended" : "standard",
+      screenDynamicRange: matchMedia("(dynamic-range: high)").matches ? "high" : "standard",
+      skyTexture: this.skyTexture
+        ? `${this.skyTextureWidth}×${this.skyTextureHeight}`
+        : "unavailable",
+      skyUrl: this.skyUrl || "",
+      outputFallbackReason: this.outputFallbackReason,
+    });
+    console.info("Black-hole renderer capabilities", this.capabilities);
   }
 
   async init(skyUrl) {
@@ -228,25 +392,19 @@ export class WebGPURenderer {
       minFilter: "linear",
     });
 
-    const { bitmap, url: selectedSkyUrl } = await loadBestSkyBitmap(
-      skyUrl,
-      device.limits.maxTextureDimension2D,
-    );
+    const skyMode = new URLSearchParams(location.search).get("sky");
+    const blockForUltra = skyMode === "ultra";
+    const {
+      texture,
+      width: skyTextureWidth,
+      height: skyTextureHeight,
+      url: selectedSkyUrl,
+    } = await loadBestSkyTexture(device, skyUrl, blockForUltra);
     this.skyRadianceScale = /gaia-edr3/i.test(selectedSkyUrl) ? 0.16 : 0.55;
-    this.skyDetail = `${bitmap.width}×${bitmap.height} 原始全景 · 解析恒星层`;
-    this.skyTexture = device.createTexture({
-      label: "Authored deep-field celestial sphere",
-      size: [bitmap.width, bitmap.height, 1],
-      format: "rgba8unorm-srgb",
-      mipLevelCount: 1,
-      usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST | GPUTextureUsage.RENDER_ATTACHMENT,
-    });
-    device.queue.copyExternalImageToTexture(
-      { source: bitmap },
-      { texture: this.skyTexture },
-      [bitmap.width, bitmap.height],
-    );
-    bitmap.close?.();
+    this.skyTexture = texture;
+    this.skyTextureWidth = skyTextureWidth;
+    this.skyTextureHeight = skyTextureHeight;
+    this.skyDetail = `${skyTextureWidth}×${skyTextureHeight} 原始全景 · 解析恒星层`;
     this.skyUrl = selectedSkyUrl;
 
     const vertexModule = device.createShaderModule({
@@ -295,25 +453,80 @@ export class WebGPURenderer {
       primitive: { topology: "triangle-list" },
     });
 
-    this.traceBindGroup = device.createBindGroup({
-      label: "Trace resources",
-      layout: this.tracePipeline.getBindGroupLayout(0),
-      entries: [
-        { binding: 0, resource: { buffer: this.uniformBuffer } },
-        { binding: 1, resource: this.skyTexture.createView() },
-        { binding: 2, resource: this.skySampler },
-      ],
-    });
+    this.traceBindGroup = this.createTraceBindGroup(this.skyTexture);
 
     device.lost.then((info) => {
       this.lost = true;
       this.onLost?.(info);
     });
+    this.reportCapabilities();
+
+    const source = typeof skyUrl === "string" ? {} : skyUrl;
+    if (
+      skyMode !== "high"
+      && !blockForUltra
+      && source.ultra
+      && source.ultra !== selectedSkyUrl
+      && this.maxRenderDimension >= ULTRA_SKY_DIMENSION
+    ) {
+      scheduleBackgroundTask(() => {
+        void this.upgradeSkyTexture(source.ultra);
+      });
+    }
+  }
+
+  createTraceBindGroup(texture) {
+    return this.device.createBindGroup({
+      label: "Trace resources",
+      layout: this.tracePipeline.getBindGroupLayout(0),
+      entries: [
+        { binding: 0, resource: { buffer: this.uniformBuffer } },
+        { binding: 1, resource: texture.createView() },
+        { binding: 2, resource: this.skySampler },
+      ],
+    });
+  }
+
+  async upgradeSkyTexture(url) {
+    try {
+      const next = await loadBestSkyTexture(this.device, url, false);
+      if (this.lost) {
+        next.texture.destroy();
+        return;
+      }
+      const previousTexture = this.skyTexture;
+      this.skyTexture = next.texture;
+      this.skyTextureWidth = next.width;
+      this.skyTextureHeight = next.height;
+      this.skyUrl = next.url;
+      this.skyRadianceScale = /gaia-edr3/i.test(next.url) ? 0.16 : 0.55;
+      this.skyDetail = `${next.width}×${next.height} 原始全景 · 解析恒星层`;
+      this.traceBindGroup = this.createTraceBindGroup(next.texture);
+      previousTexture?.destroy();
+      this.reportCapabilities();
+      this.onSkyChanged?.();
+    } catch (error) {
+      console.info("The 16K sky upgrade was unavailable; keeping the responsive fallback.", error);
+    }
   }
 
   resize(width, height) {
-    const nextWidth = Math.max(1, Math.floor(width));
-    const nextHeight = Math.max(1, Math.floor(height));
+    const requestedWidth = Math.max(1, Math.floor(Number.isFinite(width) ? width : 1));
+    const requestedHeight = Math.max(1, Math.floor(Number.isFinite(height) ? height : 1));
+    const limitScale = Math.min(
+      1,
+      this.maxRenderDimension / requestedWidth,
+      this.maxRenderDimension / requestedHeight,
+    );
+    const nextWidth = Math.max(1, Math.floor(requestedWidth * limitScale));
+    const nextHeight = Math.max(1, Math.floor(requestedHeight * limitScale));
+    if (limitScale < 1 && !this.resizeWasClamped) {
+      this.resizeWasClamped = true;
+      console.info(
+        `Render target ${requestedWidth}×${requestedHeight} exceeds the WebGPU limit; `
+        + `using ${nextWidth}×${nextHeight}.`,
+      );
+    }
     if (nextWidth === this.width && nextHeight === this.height && this.traceTexture) {
       return;
     }

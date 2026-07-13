@@ -77,7 +77,7 @@ function valueOrPower(input, powerThreshold = 20) {
 const state = {
   running: true,
   phase: 0.55,
-  orbitTilt: 0.08,
+  orbitTilt: 0.42,
   distance: 50,
   time: 0,
   massSolar: valueOrPower(ui.mass),
@@ -85,7 +85,9 @@ const state = {
   exposure: Number(ui.exposure.value),
   timeScale: Number(ui.timeScale.value),
   quality: Number(ui.quality.value),
-  mode: 1,
+  // Start in the physically neutral display transform.  The warmer, more
+  // saturated Hubble treatment remains available as an explicit style choice.
+  mode: 0,
   dynamicScale: 1,
   renderScale: 1,
   frame: 0,
@@ -203,7 +205,7 @@ function setMotion(running) {
 
 function resetView() {
   state.phase = 0.55;
-  state.orbitTilt = 0.08;
+  state.orbitTilt = 0.42;
   state.distance = 50;
   state.dynamicScale = 1;
   state.userHoldUntil = performance.now() + 1200;
@@ -304,6 +306,7 @@ function bindInteractions() {
     else if (event.key === "ArrowRight") state.phase -= 0.06;
     else if (event.key === "ArrowUp") state.orbitTilt = clamp(state.orbitTilt - 0.05, -1.46, 1.46);
     else if (event.key === "ArrowDown") state.orbitTilt = clamp(state.orbitTilt + 0.05, -1.46, 1.46);
+    else if (event.key === "0") state.orbitTilt = 0;
     else if (event.key === "+" || event.key === "=") state.distance = clamp(state.distance - 1.5, 34, 90);
     else if (event.key === "-" || event.key === "_") state.distance = clamp(state.distance + 1.5, 34, 90);
     else if (event.key === " ") setMotion(!state.running);
@@ -321,6 +324,9 @@ function cameraFrame() {
   const sinPhase = Math.sin(state.phase);
   const cosTilt = Math.cos(state.orbitTilt);
   const sinTilt = Math.sin(state.orbitTilt);
+  // A Schwarzschild circular geodesic lies in a plane through the origin.  The
+  // user tilts that orbital plane; setting the tilt to zero makes the entire
+  // orbit exactly coplanar with the accretion disk.
   const orbitBasis = [cosTilt, sinTilt, 0];
   const tangent = normalize([
     -sinPhase * orbitBasis[0],
@@ -350,7 +356,10 @@ function cameraFrame() {
 function effectiveRenderScale() {
   const deviceScale = Math.min(window.devicePixelRatio || 1, 2);
   let scale = deviceScale * state.quality * state.dynamicScale;
-  scale = clamp(scale, 0.55, 2);
+  // Let the 1.25x quality setting supersample a Retina canvas on GPUs with
+  // spare headroom.  The pixel budget and feedback governor below still keep
+  // the default path at native display density on M3/M4 Macs.
+  scale = clamp(scale, 0.65, 2.5);
 
   const pixels = window.innerWidth * window.innerHeight * scale * scale;
   // Keep the ray-traced sky at or above native CSS resolution on ordinary
@@ -360,7 +369,7 @@ function effectiveRenderScale() {
   if (pixels > pixelBudget) {
     scale *= Math.sqrt(pixelBudget / pixels);
   }
-  return clamp(scale, 0.55, 2);
+  return clamp(scale, 0.65, 2.5);
 }
 
 function resizeRenderer(force = false) {
@@ -381,17 +390,23 @@ function resizeRenderer(force = false) {
 }
 
 function adaptQuality(now) {
-  if (now - state.lastAdaptation < 2200 || state.fps <= 0) {
+  if (now - state.lastAdaptation < 1600 || state.fps <= 0) {
     return;
   }
   state.lastAdaptation = now;
-  const lowTarget = matchMedia("(max-width: 760px)").matches ? 28 : 34;
-  const highTarget = matchMedia("(max-width: 760px)").matches ? 48 : 55;
+  const compactViewport = matchMedia("(max-width: 760px)").matches;
+  const lowTarget = compactViewport ? 26 : 30;
+  const highTarget = compactViewport ? 46 : 52;
+  const minimumDynamicScale = compactViewport ? 0.34 : 0.38;
   const previous = state.dynamicScale;
   if (state.fps < lowTarget) {
-    state.dynamicScale = Math.max(0.58, state.dynamicScale - 0.08);
+    // Resolution cost is approximately quadratic.  A proportional reduction
+    // converges much faster than fixed 0.08 steps when a lower-core-count GPU
+    // starts far below target, while the floor still leaves a usable image.
+    const correction = clamp(Math.sqrt(state.fps / lowTarget) * 0.96, 0.72, 0.92);
+    state.dynamicScale = Math.max(minimumDynamicScale, state.dynamicScale * correction);
   } else if (state.fps > highTarget && state.dynamicScale < 1) {
-    state.dynamicScale = Math.min(1, state.dynamicScale + 0.035);
+    state.dynamicScale = Math.min(1, state.dynamicScale + 0.04);
   }
   if (Math.abs(previous - state.dynamicScale) > 0.001) {
     state.resizePending = true;
@@ -400,8 +415,10 @@ function adaptQuality(now) {
 
 function stepBudget() {
   let steps = matchMedia("(max-width: 760px)").matches ? 236 : 288;
-  if (state.dynamicScale < 0.76) steps -= 28;
-  if (state.fps > 0 && state.fps < 24) steps -= 24;
+  if (state.dynamicScale < 0.82) steps -= 32;
+  if (state.dynamicScale < 0.64) steps -= 40;
+  if (state.dynamicScale < 0.48) steps -= 32;
+  if (state.fps > 0 && state.fps < 24) steps -= 32;
   return clamp(steps, 184, 288);
 }
 
@@ -426,7 +443,7 @@ function frameParameters() {
     up: camera.up,
     diskOuterRadius: 18,
     renderScale: state.renderScale,
-    bloom: state.mode === 1 ? 0.15 : 0,
+    bloom: state.mode === 1 ? 0.06 : 0,
     motion: state.running ? 1 : 0,
     frame: state.frame,
     observerVelocity: camera.observerVelocity,
@@ -484,7 +501,11 @@ function showFatalError(message) {
 let lastFrameTime = performance.now();
 
 function animate(now) {
-  const dt = Math.min(Math.max((now - lastFrameTime) / 1000, 0), 0.1);
+  const frameElapsed = Math.max((now - lastFrameTime) / 1000, 0);
+  // Clamp only the physical simulation delta after a long stall.  FPS must use
+  // the real wall-clock duration or the quality governor overestimates slow
+  // frames and never reaches its lower compatibility tiers.
+  const dt = Math.min(frameElapsed, 0.1);
   lastFrameTime = now;
 
   if (!document.hidden) {
@@ -503,7 +524,7 @@ function animate(now) {
       renderer.render(frameParameters());
       state.frame = (state.frame + 1) % 16_777_216;
       state.needsRender = false;
-      updateFps(dt);
+      updateFps(frameElapsed);
       adaptQuality(now);
     }
   }
@@ -514,18 +535,25 @@ function animate(now) {
 async function start() {
   bindUi();
   updateReadouts();
-  setMode(1);
+  setMode(state.mode);
   setMotion(true);
 
   try {
     renderer = await createRenderer();
     ui.backendStatus.textContent = renderer.backend;
     ui.gpuStatus.textContent = renderer.gpu;
-    ui.hdrStatus.textContent = renderer.hdrMode;
-    ui.hdrStatus.title = `${renderer.outputDescription} · ${renderer.skyDetail}`;
+    const updateOutputStatus = () => {
+      ui.hdrStatus.textContent = renderer.hdrMode;
+      ui.hdrStatus.title = `${renderer.outputDescription} · ${renderer.skyDetail}`;
+    };
+    updateOutputStatus();
+    renderer.onSkyChanged = () => {
+      updateOutputStatus();
+      state.needsRender = true;
+    };
     const dynamicRange = matchMedia("(dynamic-range: high)");
     dynamicRange.addEventListener?.("change", () => {
-      ui.hdrStatus.textContent = renderer.hdrMode;
+      updateOutputStatus();
       state.needsRender = true;
     });
     if (rendererFallbackReason) {

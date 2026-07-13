@@ -76,6 +76,28 @@ def main() -> None:
     if max(shader_inside_error, shader_outside_error) > 3.0e-5:
         raise AssertionError("shader-budget invariant drift exceeded 3e-5")
 
+    # The dynamic quality floor must still advance ordinary near-critical rays
+    # far enough to reach infinity.  Shorter historical floors (144/152) left
+    # these rays unresolved and sampled the panorama from a direction that was
+    # still tens of degrees away from its asymptote.
+    adaptive_floor_errors: list[float] = []
+    for observer_radius in (34.0, 50.0, 90.0):
+        for offset in (0.45, 0.70, 1.00):
+            outcome, _, error = trace_impact_parameter(
+                critical + offset,
+                observer_radius=observer_radius,
+                step=0.03,
+                max_steps=184,
+            )
+            if outcome != "escaped":
+                raise AssertionError(
+                    "adaptive-floor escape regression failed: "
+                    f"R={observer_radius:g}, offset={offset:g}, outcome={outcome}"
+                )
+            adaptive_floor_errors.append(error)
+    if max(adaptive_floor_errors) > 3.0e-5:
+        raise AssertionError("adaptive-floor invariant drift exceeded 3e-5")
+
     weak_b = 50.0
     observer_radius = 100_000.0
     outcome, psi, weak_error = trace_impact_parameter(
@@ -108,6 +130,10 @@ def main() -> None:
         "  shader budget (h=0.03, 288 steps) = "
         f"{shader_inside}/{shader_outside}, max error "
         f"{max(shader_inside_error, shader_outside_error):.3e}"
+    )
+    print(
+        "  adaptive floor (h=0.03, 184 steps) = escaped, max error "
+        f"{max(adaptive_floor_errors):.3e}"
     )
 
 

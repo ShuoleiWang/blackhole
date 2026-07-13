@@ -221,10 +221,10 @@ fn proceduralStars(
     var maximumRadiance = 8.0;
     if (layer == 1) {
       grid = 384.0;
-      threshold = 0.993;
+      threshold = 0.990;
       coreRadius = 0.055;
-      minimumRadiance = 0.08;
-      maximumRadiance = 2.5;
+      minimumRadiance = 0.055;
+      maximumRadiance = 2.2;
     }
 
     let coordinates = mapped.xy * grid;
@@ -270,6 +270,14 @@ fn proceduralStars(
         distanceToStar
       );
       let rank = clamp((random.z - threshold) / (1.0 - threshold), 0.0, 1.0);
+      // A compact, energy-light PSF skirt gives bright stars a readable HDR
+      // hierarchy without softening their lensed image.  It is suppressed on
+      // the critical curve, where even a tiny source-plane halo becomes a wide
+      // tangential streak and the dedicated 2x2 coverage already resolves it.
+      let haloRadius = coreRadius * mix(3.2, 2.2, rank);
+      let halo = pow(max(1.0 - distanceToStar / haloRadius, 0.0), 3.0);
+      let psf = core + 0.10 * rank * halo
+              * (1.0 - clamp(criticalWeight, 0.0, 1.0));
       let stellarTemperature = mix(
         3000.0,
         11000.0,
@@ -277,7 +285,7 @@ fn proceduralStars(
       ) * observerShift;
       let radiance = mix(minimumRadiance, maximumRadiance, pow(rank, 0.42));
       result = result + planckChromaticity(stellarTemperature)
-               * radiance * core;
+               * radiance * psf;
     }
   }
   return result;
@@ -292,6 +300,35 @@ fn sampleSkyLevelZero(uv: vec2<f32>) -> vec3<f32> {
     textureSampleLevel(tSky, skySampler, uv, 0.0).rgb,
     vec3<f32>(0.0)
   );
+}
+
+fn filterSkyPanorama(
+  uv: vec2<f32>,
+  centre: vec3<f32>,
+  criticalWeight: f32
+) -> vec3<f32> {
+  // sampleEnvironment is reached after a per-pixel variable-length ray loop,
+  // where quad derivatives are non-portable.  Use the already-computed smooth
+  // critical-curve coverage instead and explicitly sample a small isotropic
+  // footprint.  Ordinary rays still take only the authored centre sample.
+  let weight = 0.62 * smoothstep(
+    0.08,
+    0.92,
+    clamp(criticalWeight, 0.0, 1.0)
+  );
+  if (weight <= 0.001) {
+    return centre;
+  }
+  let dimensions = vec2<f32>(textureDimensions(tSky));
+  let texel = vec2<f32>(1.0) / dimensions;
+  let radius = mix(1.0, 10.0, clamp(criticalWeight, 0.0, 1.0));
+  let filtered = 0.25 * (
+    sampleSkyLevelZero(uv + vec2<f32>(radius * texel.x, 0.0))
+    + sampleSkyLevelZero(uv - vec2<f32>(radius * texel.x, 0.0))
+    + sampleSkyLevelZero(uv + vec2<f32>(0.0, radius * texel.y))
+    + sampleSkyLevelZero(uv - vec2<f32>(0.0, radius * texel.y))
+  );
+  return mix(centre, filtered, weight);
 }
 
 fn suppressBakedStarPsf(
@@ -346,9 +383,10 @@ fn sampleEnvironment(
   // a shifted blackbody spectrum; observerShift^4 is the common bolometric
   // gravitational/kinematic transfer for both sky components.
   let rawPanorama = sampleSkyLevelZero(uv);
+  let filteredPanorama = filterSkyPanorama(uv, rawPanorama, criticalWeight);
   let panorama = suppressBakedStarPsf(
     uv,
-    rawPanorama,
+    filteredPanorama,
     clamp(criticalWeight, 0.0, 1.0)
   );
   let shift2 = observerShift * observerShift;
@@ -391,11 +429,11 @@ fn diskNoiseField(
     seedZ + 13.1
   )) - 1.0;
   let strandNoise = 2.0 * valueNoise3(vec3<f32>(
-    warpedPosition * 0.58 + 0.45 * warp,
+    warpedPosition * 0.72 + 0.45 * warp,
     seedZ + 29.7
   )) - 1.0;
   let fine = 2.0 * valueNoise3(vec3<f32>(
-    warpedPosition * 1.16 + 0.72 * warp,
+    warpedPosition * 1.75 + 0.72 * warp,
     seedZ + 47.3
   )) - 1.0;
   return vec3<f32>(cloud, strandNoise, fine);
@@ -409,14 +447,16 @@ fn accretionDiskSample(
   observerShift: f32,
   travelDelay: f32
 ) -> vec4<f32> {
-  let radius = length(hitPosition);
+  let height = dot(hitPosition, diskNormal);
+  let planarPosition = hitPosition - height * diskNormal;
+  let radius = length(planarPosition);
   let outerRadius = max(params.cameraUpDiskOuter.w, ISCO + 0.5);
   let x = ISCO / max(radius, ISCO);
   let fluxShapeRaw = x * x * x * max(1.0 - sqrt(x), 0.0);
   let xPeak = 36.0 / 49.0;
   let fluxPeak = xPeak * xPeak * xPeak * (1.0 - sqrt(xPeak));
   let innerFade = smoothstep(ISCO, ISCO + 0.35, radius);
-  let outerFade = 1.0 - smoothstep(outerRadius * 0.78, outerRadius, radius);
+  let outerFade = 1.0 - smoothstep(outerRadius * 0.82, outerRadius, radius);
   let fluxShape = (fluxShapeRaw / fluxPeak) * innerFade * outerFade;
 
   var referenceAxis = vec3<f32>(0.0, 1.0, 0.0);
@@ -425,7 +465,7 @@ fn accretionDiskSample(
   }
   let diskX = safeNormalize(cross(referenceAxis, diskNormal));
   let diskY = cross(diskNormal, diskX);
-  let azimuth = atan2(dot(hitPosition, diskY), dot(hitPosition, diskX));
+  let azimuth = atan2(dot(planarPosition, diskY), dot(planarPosition, diskX));
   let omega = inverseSqrt(max(radius * radius * radius, 1.0e-8));
 
   let massSolar = max(params.resolutionTimeMass.w, 1.0);
@@ -459,28 +499,39 @@ fn accretionDiskSample(
   let cloud = turbulence.x;
   let strandNoise = turbulence.y;
   let fine = turbulence.z;
+
+  let filamentRidge = smoothstep(
+    0.05,
+    0.82,
+    0.62 * strandNoise + 0.38 * cloud
+  );
+  // Surface density keeps the turbulent hierarchy.  The artificial m=2 wave is
+  // removed, and the smaller high-frequency weights below keep the effective
+  // temperature smoother than the density filaments; T responds to the local
+  // dissipation through the fourth root further down.
   let densityContrast = clamp(
-    0.62 * cloud + 0.24 * strandNoise + 0.11 * fine,
-    -0.82,
-    0.82
+    0.62 * cloud + 0.30 * strandNoise + 0.12 * fine
+    + 0.16 * (filamentRidge - 0.42),
+    -0.85,
+    0.85
   );
   let localHeating = exp(clamp(
-    0.58 * cloud + 0.36 * strandNoise + 0.28 * fine,
+    0.45 * cloud + 0.30 * strandNoise + 0.14 * fine
+    + 0.12 * (filamentRidge - 0.42),
     -0.50,
-    0.50
+    0.58
   ));
 
-  // The disk is marginally optically thick, not an opaque painted plane.
-  // Log-normal surface density makes genuine transparent lanes between dense
-  // filaments; unresolved clumps supply a physical covering fraction.
-  let tauMean = 0.55
-              * pow(max(radius / 8.17, 0.1), -0.5)
+  // A marginally optically thick surface layer keeps foreground absorption
+  // while allowing low-density MRI lanes and secondary images to retain depth.
+  let tauMean = 1.45
+              * pow(max(radius / 8.17, 0.1), -0.62)
               * innerFade * outerFade;
-  let tauFace = tauMean * exp(0.90 * densityContrast);
+  let tauFace = tauMean * exp(0.75 * densityContrast);
   let covering = mix(
-    0.74,
+    0.82,
     1.0,
-    smoothstep(-0.78, 0.70, densityContrast)
+    smoothstep(-0.75, 0.75, densityContrast)
   );
 
   let accretion = max(params.renderControls.x, 1.0e-6);
@@ -493,13 +544,19 @@ fn accretionDiskSample(
     peakTemperature * pow(max(fluxShape * localHeating, 1.0e-8), 0.25)
   );
 
+  // Electron scattering hardens hot, optically thick zones without changing
+  // their bolometric flux (planckChromaticity is luminance-normalised).
+  let spectralHardening = 1.0
+    + 0.15 * smoothstep(8000.0, 30000.0, emittedTemperature)
+           * smoothstep(0.25, 2.0, tauFace);
+
   // Exact circular-orbit frequency transfer in Schwarzschild.  The numerator
   // contains the moving observer's gravitational + SR Doppler factor.
   let emitterUt = inverseSqrt(max(1.0 - 3.0 / radius, 1.0e-5));
   let orbitalDenominator = max(1.0 - omega * lambdaZ, 0.015);
   let transferDenominator = emitterUt * orbitalDenominator;
   let g = clamp(observerShift / transferDenominator, 0.04, 8.0);
-  let observedTemperature = emittedTemperature * g;
+  let observedTemperature = emittedTemperature * spectralHardening * g;
   let g2 = g * g;
   let bolometricTransfer = g2 * g2;
 
@@ -520,10 +577,10 @@ fn accretionDiskSample(
   // The colour is luminance-normalised, so g^4 is applied exactly once.
   let radiance = max(fluxShape, 0.0)
                * localHeating * accretion * bolometricTransfer * limbDarkening;
-  // Absolute luminosity cannot be represented by a display texture; 9000 is a
+  // Absolute luminosity cannot be represented by a display texture; 6500 is a
   // single global camera calibration, while all radial and frequency ratios
   // above remain physical.
-  let source = planckChromaticity(observedTemperature) * radiance * 9000.0;
+  let source = planckChromaticity(observedTemperature) * radiance * 6500.0;
   return vec4<f32>(source * opacity, opacity);
 }
 
@@ -584,6 +641,10 @@ fn traceSchwarzschild(
 
   let tangentBasis = tangentVector / tangentLength;
   let impact = cameraRadius * tangentLength / staticLapse;
+  let environmentFilterWeight = max(
+    criticalWeight,
+    0.68 * (1.0 - smoothstep(0.30, 2.40, abs(impact - PHOTON_IMPACT)))
+  );
   var inverseRadius = 1.0 / cameraRadius;
   var inverseRadiusDerivative = -inverseRadius * staticLapse * radialDirection / tangentLength;
   var planeAngle = 0.0;
@@ -644,16 +705,25 @@ fn traceSchwarzschild(
     let midpointLapse = max(1.0 - 2.0 * midpointU, 1.0e-5);
     let delayIncrement = stepAngle / max(impact * midpointU * midpointU * midpointLapse, 1.0e-7);
 
-    if (previousDiskSide * nextDiskSide <= 0.0 && abs(previousDiskSide - nextDiskSide) > 1.0e-7) {
-      let diskFraction = clamp(previousDiskSide / (previousDiskSide - nextDiskSide), 0.0, 1.0);
+    if (
+      previousDiskSide * nextDiskSide <= 0.0
+      && abs(previousDiskSide - nextDiskSide) > 1.0e-7
+    ) {
+      let diskFraction = clamp(
+        previousDiskSide / (previousDiskSide - nextDiskSide),
+        0.0,
+        1.0
+      );
       if (diskFraction > 1.0e-5 && diskFraction < boundaryFraction) {
         let hitU = mix(previousU, nextU, diskFraction);
         if (hitU > 0.0) {
           let hitRadius = 1.0 / hitU;
-          if (hitRadius >= ISCO && hitRadius <= outerRadius) {
-            let hitAngle = mix(previousAngle, nextAngle, diskFraction);
-            let hitDirection = safeNormalize(mix(previousDirection, nextDirection, diskFraction));
-            let hitPosition = hitDirection * hitRadius;
+          let hitAngle = mix(previousAngle, nextAngle, diskFraction);
+          let hitDirection = safeNormalize(mix(previousDirection, nextDirection, diskFraction));
+          let hitPosition = hitDirection * hitRadius;
+          let hitHeight = dot(hitPosition, diskNormal);
+          let hitPlanarRadius = length(hitPosition - hitHeight * diskNormal);
+          if (hitPlanarRadius >= ISCO && hitPlanarRadius <= outerRadius) {
             let hitDerivative = mix(previousV, nextV, diskFraction);
             let tangentAtHit = -sin(hitAngle) * radialBasis + cos(hitAngle) * tangentBasis;
             let hitLapse = sqrt(max(1.0 - 2.0 * hitU, 1.0e-5));
@@ -692,7 +762,7 @@ fn traceSchwarzschild(
            + throughput * sampleEnvironment(
                escapeDirection,
                observerShift,
-               criticalWeight
+               environmentFilterWeight
              );
     }
 
@@ -714,7 +784,7 @@ fn traceSchwarzschild(
        + throughput * sampleEnvironment(
            directionOnPlane,
            observerShift,
-           criticalWeight
+           environmentFilterWeight
          );
 }
 
@@ -816,7 +886,11 @@ fn luminance(color: vec3<f32>) -> f32 {
 
 fn brightPart(color: vec3<f32>, threshold: f32) -> vec3<f32> {
   let light = luminance(color);
-  return color * max(light - threshold, 0.0) / max(light, 1.0e-5);
+  let knee = max(0.25 * threshold, 1.0e-5);
+  let soft = clamp(light - threshold + knee, 0.0, 2.0 * knee);
+  let softContribution = soft * soft / (4.0 * knee);
+  let contribution = max(light - threshold, softContribution);
+  return color * contribution / max(light, 1.0e-5);
 }
 
 fn acesFitted(color: vec3<f32>) -> vec3<f32> {
@@ -825,9 +899,25 @@ fn acesFitted(color: vec3<f32>) -> vec3<f32> {
   let c = 2.43;
   let d = 0.59;
   let e = 0.14;
-  return clamp((color * (a * color + vec3<f32>(b))) /
-               (color * (c * color + vec3<f32>(d)) + vec3<f32>(e)),
-               vec3<f32>(0.0), vec3<f32>(1.0));
+  let positive = max(color, vec3<f32>(0.0));
+  let mapped = clamp((positive * (a * positive + vec3<f32>(b))) /
+                     (positive * (c * positive + vec3<f32>(d)) + vec3<f32>(e)),
+                     vec3<f32>(0.0), vec3<f32>(1.0));
+  // Re-introduce part of the scene-linear chromaticity after the per-channel
+  // fit.  This keeps hot Doppler highlights coloured instead of driving all
+  // three channels to identical display white, while the gamut scale prevents
+  // clipping from becoming a second hard shoulder.
+  let sourceLight = max(luminance(positive), 1.0e-5);
+  let mappedLight = luminance(mapped);
+  var huePreserved = positive * (mappedLight / sourceLight);
+  let hueMaximum = max(max(huePreserved.r, huePreserved.g), huePreserved.b);
+  huePreserved = huePreserved / max(hueMaximum, 1.0);
+  let chromaWeight = 0.34 * smoothstep(0.10, 0.85, mappedLight);
+  return clamp(
+    mix(mapped, huePreserved, chromaWeight),
+    vec3<f32>(0.0),
+    vec3<f32>(1.0)
+  );
 }
 
 fn linearSrgbToDisplayP3(color: vec3<f32>) -> vec3<f32> {
@@ -847,11 +937,20 @@ fn encodeSrgbTransfer(color: vec3<f32>) -> vec3<f32> {
 
 fn extendedHdrShoulder(color: vec3<f32>, peak: f32) -> vec3<f32> {
   let safePeak = max(peak, 1.01);
-  let excess = max(color - vec3<f32>(1.0), vec3<f32>(0.0));
-  let shoulder = vec3<f32>(1.0)
-               + (safePeak - 1.0)
-               * (vec3<f32>(1.0) - exp(-excess / (safePeak - 1.0)));
-  return select(color, shoulder, color > vec3<f32>(1.0));
+  let positive = max(color, vec3<f32>(0.0));
+  let brightest = max(max(positive.r, positive.g), positive.b);
+  if (brightest <= 1.0) {
+    return positive;
+  }
+  let headroom = safePeak - 1.0;
+  let excess = brightest - 1.0;
+  // A rational shoulder has unit slope at SDR white and approaches the panel
+  // peak more slowly than the previous exponential.  Scaling all channels by
+  // the same factor preserves both hue and fine gradients on the approaching
+  // side of the disk.
+  let mappedBrightest = 1.0
+    + headroom * excess / (excess + headroom);
+  return positive * (mappedBrightest / brightest);
 }
 
 fn hashPixel(pixel: vec2<f32>, frame: f32) -> f32 {
@@ -869,21 +968,28 @@ fn fsMain(input: FragmentInput) -> @location(0) vec4<f32> {
   // below one pixel at this field of view.  Only bright sources receive a
   // restrained, additive telescope halo.
   var color = sampleScene(input.uv) * exposure;
-  let cssScale = max(params.postMotionFrame.x, 0.5);
-  let bloomRadius = texel * cssScale * mix(2.0, 3.0, mode);
-  let bloomSamples = brightPart(sampleScene(input.uv + vec2<f32>( bloomRadius.x, 0.0)) * exposure, 1.0)
-                   + brightPart(sampleScene(input.uv + vec2<f32>(-bloomRadius.x, 0.0)) * exposure, 1.0)
-                   + brightPart(sampleScene(input.uv + vec2<f32>(0.0,  bloomRadius.y)) * exposure, 1.0)
-                   + brightPart(sampleScene(input.uv + vec2<f32>(0.0, -bloomRadius.y)) * exposure, 1.0)
-                   + brightPart(sampleScene(input.uv + bloomRadius) * exposure, 1.0)
-                   + brightPart(sampleScene(input.uv - bloomRadius) * exposure, 1.0);
-  color = color + bloomSamples * (max(params.postMotionFrame.y, 0.0) / 24.0);
+  let bloomStrength = max(params.postMotionFrame.y, 0.0);
+  if (bloomStrength > 1.0e-5) {
+    let cssScale = max(params.postMotionFrame.x, 0.5);
+    let bloomRadius = texel * cssScale * mix(2.0, 3.0, mode);
+    let bloomSamples = brightPart(sampleScene(input.uv + vec2<f32>( bloomRadius.x, 0.0)) * exposure, 1.0)
+                     + brightPart(sampleScene(input.uv + vec2<f32>(-bloomRadius.x, 0.0)) * exposure, 1.0)
+                     + brightPart(sampleScene(input.uv + vec2<f32>(0.0,  bloomRadius.y)) * exposure, 1.0)
+                     + brightPart(sampleScene(input.uv + vec2<f32>(0.0, -bloomRadius.y)) * exposure, 1.0)
+                     + 0.5 * (
+                         brightPart(sampleScene(input.uv + bloomRadius) * exposure, 1.0)
+                         + brightPart(sampleScene(input.uv - bloomRadius) * exposure, 1.0)
+                         + brightPart(sampleScene(input.uv + vec2<f32>(bloomRadius.x, -bloomRadius.y)) * exposure, 1.0)
+                         + brightPart(sampleScene(input.uv + vec2<f32>(-bloomRadius.x, bloomRadius.y)) * exposure, 1.0)
+                       );
+    color = color + bloomSamples * (bloomStrength / 24.0);
+  }
 
   // Hubble mode changes only the display colour response and PSF.  It never
   // changes the geodesic, shadow, disk intersection, or frequency transfer.
   let light = luminance(color);
-  let hubbleColour = mix(vec3<f32>(light), color, 1.16)
-                    * vec3<f32>(1.045, 1.0, 0.965);
+  let hubbleColour = mix(vec3<f32>(light), color, 1.06)
+                    * vec3<f32>(1.018, 1.0, 0.985);
   color = max(mix(color, hubbleColour, mode), vec3<f32>(0.0));
 
   let extendedHdr = params.displayOutput.x > 0.5;
@@ -1068,10 +1174,10 @@ vec3 proceduralStars(
     float maximumRadiance = 8.0;
     if (layer == 1) {
       grid = 384.0;
-      threshold = 0.993;
+      threshold = 0.990;
       coreRadius = 0.055;
-      minimumRadiance = 0.08;
-      maximumRadiance = 2.5;
+      minimumRadiance = 0.055;
+      maximumRadiance = 2.2;
     }
 
     vec2 coordinates = mapped.xy * grid;
@@ -1112,6 +1218,10 @@ vec3 proceduralStars(
         distanceToStar
       );
       float rank = clamp((random.z - threshold) / (1.0 - threshold), 0.0, 1.0);
+      float haloRadius = coreRadius * mix(3.2, 2.2, rank);
+      float halo = pow(max(1.0 - distanceToStar / haloRadius, 0.0), 3.0);
+      float psf = core + 0.10 * rank * halo
+                * (1.0 - clamp(criticalWeight, 0.0, 1.0));
       float stellarTemperature = mix(
         3000.0,
         11000.0,
@@ -1119,7 +1229,7 @@ vec3 proceduralStars(
       ) * observerShift;
       float radiance = mix(minimumRadiance, maximumRadiance, pow(rank, 0.42));
       result += planckChromaticity(stellarTemperature)
-                * radiance * core;
+                * radiance * psf;
     }
   }
   return result;
@@ -1131,6 +1241,31 @@ float skyLuminance(vec3 color) {
 
 vec3 sampleSkyLevelZero(vec2 skyUv) {
   return max(textureLod(tSky, skyUv, 0.0).rgb, vec3(0.0));
+}
+
+vec3 filterSkyPanorama(
+  vec2 skyUv,
+  vec3 centre,
+  float criticalWeight
+) {
+  float weight = 0.62 * smoothstep(
+    0.08,
+    0.92,
+    clamp(criticalWeight, 0.0, 1.0)
+  );
+  if (weight <= 0.001) {
+    return centre;
+  }
+  vec2 dimensions = vec2(textureSize(tSky, 0));
+  vec2 texel = 1.0 / dimensions;
+  float radius = mix(1.0, 10.0, clamp(criticalWeight, 0.0, 1.0));
+  vec3 filtered = 0.25 * (
+    sampleSkyLevelZero(skyUv + vec2(radius * texel.x, 0.0))
+    + sampleSkyLevelZero(skyUv - vec2(radius * texel.x, 0.0))
+    + sampleSkyLevelZero(skyUv + vec2(0.0, radius * texel.y))
+    + sampleSkyLevelZero(skyUv - vec2(0.0, radius * texel.y))
+  );
+  return mix(centre, filtered, weight);
 }
 
 vec3 suppressBakedStarPsf(
@@ -1181,9 +1316,10 @@ vec3 sampleEnvironment(
     clamp(0.5 - latitude / PI, 0.00001, 0.99999)
   );
   vec3 rawPanorama = sampleSkyLevelZero(skyUv);
+  vec3 filteredPanorama = filterSkyPanorama(skyUv, rawPanorama, criticalWeight);
   vec3 panorama = suppressBakedStarPsf(
     skyUv,
-    rawPanorama,
+    filteredPanorama,
     clamp(criticalWeight, 0.0, 1.0)
   );
   float shift2 = observerShift * observerShift;
@@ -1221,11 +1357,11 @@ vec3 diskNoiseField(
     seedZ + 13.1
   )) - 1.0;
   float strandNoise = 2.0 * valueNoise3(vec3(
-    warpedPosition * 0.58 + 0.45 * warp,
+    warpedPosition * 0.72 + 0.45 * warp,
     seedZ + 29.7
   )) - 1.0;
   float fine = 2.0 * valueNoise3(vec3(
-    warpedPosition * 1.16 + 0.72 * warp,
+    warpedPosition * 1.75 + 0.72 * warp,
     seedZ + 47.3
   )) - 1.0;
   return vec3(cloud, strandNoise, fine);
@@ -1239,14 +1375,16 @@ vec4 accretionDiskSample(
   float observerShift,
   float travelDelay
 ) {
-  float radius = length(hitPosition);
+  float height = dot(hitPosition, diskNormal);
+  vec3 planarPosition = hitPosition - height * diskNormal;
+  float radius = length(planarPosition);
   float outerRadius = max(uDiskOuterRadius, ISCO + 0.5);
   float x = ISCO / max(radius, ISCO);
   float fluxShapeRaw = x * x * x * max(1.0 - sqrt(x), 0.0);
   float xPeak = 36.0 / 49.0;
   float fluxPeak = xPeak * xPeak * xPeak * (1.0 - sqrt(xPeak));
   float innerFade = smoothstep(ISCO, ISCO + 0.35, radius);
-  float outerFade = 1.0 - smoothstep(outerRadius * 0.78, outerRadius, radius);
+  float outerFade = 1.0 - smoothstep(outerRadius * 0.82, outerRadius, radius);
   float fluxShape = (fluxShapeRaw / fluxPeak) * innerFade * outerFade;
 
   vec3 referenceAxis = vec3(0.0, 1.0, 0.0);
@@ -1255,7 +1393,7 @@ vec4 accretionDiskSample(
   }
   vec3 diskX = safeNormalize(cross(referenceAxis, diskNormal));
   vec3 diskY = cross(diskNormal, diskX);
-  float azimuth = atan(dot(hitPosition, diskY), dot(hitPosition, diskX));
+  float azimuth = atan(dot(planarPosition, diskY), dot(planarPosition, diskX));
   float omega = inversesqrt(max(radius * radius * radius, 1.0e-8));
   float massSolar = max(uMassSolar, 1.0);
   float timeGeometric = uTime;
@@ -1284,24 +1422,31 @@ vec4 accretionDiskSample(
   float cloud = turbulence.x;
   float strandNoise = turbulence.y;
   float fine = turbulence.z;
+  float filamentRidge = smoothstep(
+    0.05,
+    0.82,
+    0.62 * strandNoise + 0.38 * cloud
+  );
   float densityContrast = clamp(
-    0.62 * cloud + 0.24 * strandNoise + 0.11 * fine,
-    -0.82,
-    0.82
+    0.62 * cloud + 0.30 * strandNoise + 0.12 * fine
+    + 0.16 * (filamentRidge - 0.42),
+    -0.85,
+    0.85
   );
   float localHeating = exp(clamp(
-    0.58 * cloud + 0.36 * strandNoise + 0.28 * fine,
+    0.45 * cloud + 0.30 * strandNoise + 0.14 * fine
+    + 0.12 * (filamentRidge - 0.42),
     -0.50,
-    0.50
+    0.58
   ));
-  float tauMean = 0.55
-                * pow(max(radius / 8.17, 0.1), -0.5)
+  float tauMean = 1.45
+                * pow(max(radius / 8.17, 0.1), -0.62)
                 * innerFade * outerFade;
-  float tauFace = tauMean * exp(0.90 * densityContrast);
+  float tauFace = tauMean * exp(0.75 * densityContrast);
   float covering = mix(
-    0.74,
+    0.82,
     1.0,
-    smoothstep(-0.78, 0.70, densityContrast)
+    smoothstep(-0.75, 0.75, densityContrast)
   );
 
   float accretion = max(uAccretion, 1.0e-6);
@@ -1310,11 +1455,14 @@ vec4 accretionDiskSample(
     600.0,
     peakTemperature * pow(max(fluxShape * localHeating, 1.0e-8), 0.25)
   );
+  float spectralHardening = 1.0
+    + 0.15 * smoothstep(8000.0, 30000.0, emittedTemperature)
+           * smoothstep(0.25, 2.0, tauFace);
   float emitterUt = inversesqrt(max(1.0 - 3.0 / radius, 1.0e-5));
   float orbitalDenominator = max(1.0 - omega * lambdaZ, 0.015);
   float transferDenominator = emitterUt * orbitalDenominator;
   float g = clamp(observerShift / transferDenominator, 0.04, 8.0);
-  float observedTemperature = emittedTemperature * g;
+  float observedTemperature = emittedTemperature * spectralHardening * g;
   float g2 = g * g;
   float localLapse = sqrt(max(1.0 - 2.0 / radius, 1.0e-5));
   float emitterEnergyOverStatic = localLapse * emitterUt * orbitalDenominator;
@@ -1329,7 +1477,7 @@ vec4 accretionDiskSample(
   float limbDarkening = mix(1.0, thickLimb, smoothstep(0.25, 1.5, tauFace));
   float radiance = max(fluxShape, 0.0)
                  * localHeating * accretion * g2 * g2 * limbDarkening;
-  vec3 source = planckChromaticity(observedTemperature) * radiance * 9000.0;
+  vec3 source = planckChromaticity(observedTemperature) * radiance * 6500.0;
   return vec4(source * opacity, opacity);
 }
 
@@ -1381,6 +1529,10 @@ vec3 traceSchwarzschild(vec3 comovingRay, float criticalWeight) {
 
   vec3 tangentBasis = tangentVector / tangentLength;
   float impact = cameraRadius * tangentLength / staticLapse;
+  float environmentFilterWeight = max(
+    criticalWeight,
+    0.68 * (1.0 - smoothstep(0.30, 2.40, abs(impact - PHOTON_IMPACT)))
+  );
   float inverseRadius = 1.0 / cameraRadius;
   float inverseRadiusDerivative = -inverseRadius * staticLapse * radialDirection / tangentLength;
   float planeAngle = 0.0;
@@ -1436,15 +1588,25 @@ vec3 traceSchwarzschild(vec3 comovingRay, float criticalWeight) {
     float midpointLapse = max(1.0 - 2.0 * midpointU, 1.0e-5);
     float delayIncrement = stepAngle / max(impact * midpointU * midpointU * midpointLapse, 1.0e-7);
 
-    if (previousDiskSide * nextDiskSide <= 0.0 && abs(previousDiskSide - nextDiskSide) > 1.0e-7) {
-      float diskFraction = clamp(previousDiskSide / (previousDiskSide - nextDiskSide), 0.0, 1.0);
+    if (
+      previousDiskSide * nextDiskSide <= 0.0
+      && abs(previousDiskSide - nextDiskSide) > 1.0e-7
+    ) {
+      float diskFraction = clamp(
+        previousDiskSide / (previousDiskSide - nextDiskSide),
+        0.0,
+        1.0
+      );
       if (diskFraction > 1.0e-5 && diskFraction < boundaryFraction) {
         float hitU = mix(previousU, nextU, diskFraction);
         if (hitU > 0.0) {
           float hitRadius = 1.0 / hitU;
-          if (hitRadius >= ISCO && hitRadius <= outerRadius) {
-            float hitAngle = mix(previousAngle, nextAngle, diskFraction);
-            vec3 hitDirection = safeNormalize(mix(previousDirection, nextDirection, diskFraction));
+          float hitAngle = mix(previousAngle, nextAngle, diskFraction);
+          vec3 hitDirection = safeNormalize(mix(previousDirection, nextDirection, diskFraction));
+          vec3 hitPosition = hitDirection * hitRadius;
+          float hitHeight = dot(hitPosition, diskNormal);
+          float hitPlanarRadius = length(hitPosition - hitHeight * diskNormal);
+          if (hitPlanarRadius >= ISCO && hitPlanarRadius <= outerRadius) {
             float hitDerivative = mix(previousV, nextV, diskFraction);
             vec3 tangentAtHit = -sin(hitAngle) * radialBasis + cos(hitAngle) * tangentBasis;
             float hitLapse = sqrt(max(1.0 - 2.0 * hitU, 1.0e-5));
@@ -1456,7 +1618,7 @@ vec3 traceSchwarzschild(vec3 comovingRay, float criticalWeight) {
               + tangentialDirection * tangentAtHit
             );
             vec4 diskSample = accretionDiskSample(
-              hitDirection * hitRadius,
+              hitPosition,
               diskNormal,
               traceDirectionAtHit,
               lambdaZ,
@@ -1483,7 +1645,7 @@ vec3 traceSchwarzschild(vec3 comovingRay, float criticalWeight) {
            + throughput * sampleEnvironment(
                escapeDirection,
                observerShift,
-               criticalWeight
+               environmentFilterWeight
              );
     }
 
@@ -1502,7 +1664,7 @@ vec3 traceSchwarzschild(vec3 comovingRay, float criticalWeight) {
        + throughput * sampleEnvironment(
            directionOnPlane,
            observerShift,
-           criticalWeight
+           environmentFilterWeight
          );
 }
 
@@ -1604,7 +1766,11 @@ float luminance(vec3 color) {
 
 vec3 brightPart(vec3 color, float threshold) {
   float light = luminance(color);
-  return color * max(light - threshold, 0.0) / max(light, 1.0e-5);
+  float knee = max(0.25 * threshold, 1.0e-5);
+  float soft = clamp(light - threshold + knee, 0.0, 2.0 * knee);
+  float softContribution = soft * soft / (4.0 * knee);
+  float contribution = max(light - threshold, softContribution);
+  return color * contribution / max(light, 1.0e-5);
 }
 
 vec3 acesFitted(vec3 color) {
@@ -1613,7 +1779,19 @@ vec3 acesFitted(vec3 color) {
   const float c = 2.43;
   const float d = 0.59;
   const float e = 0.14;
-  return clamp((color * (a * color + b)) / (color * (c * color + d) + e), 0.0, 1.0);
+  vec3 positive = max(color, 0.0);
+  vec3 mapped = clamp(
+    (positive * (a * positive + b)) / (positive * (c * positive + d) + e),
+    0.0,
+    1.0
+  );
+  float sourceLight = max(luminance(positive), 1.0e-5);
+  float mappedLight = luminance(mapped);
+  vec3 huePreserved = positive * (mappedLight / sourceLight);
+  float hueMaximum = max(max(huePreserved.r, huePreserved.g), huePreserved.b);
+  huePreserved /= max(hueMaximum, 1.0);
+  float chromaWeight = 0.34 * smoothstep(0.10, 0.85, mappedLight);
+  return clamp(mix(mapped, huePreserved, chromaWeight), 0.0, 1.0);
 }
 
 vec3 encodeSrgbTransfer(vec3 color) {
@@ -1633,18 +1811,25 @@ void main() {
   float mode = clamp(uMode, 0.0, 1.0);
   float exposure = max(uExposure, 0.0);
   vec3 color = sampleScene(vUv) * exposure;
-  float cssScale = max(uRenderScale, 0.5);
-  vec2 bloomRadius = texel * cssScale * mix(2.0, 3.0, mode);
-  vec3 bloomSamples = brightPart(sampleScene(vUv + vec2( bloomRadius.x, 0.0)) * exposure, 1.0)
-                    + brightPart(sampleScene(vUv + vec2(-bloomRadius.x, 0.0)) * exposure, 1.0)
-                    + brightPart(sampleScene(vUv + vec2(0.0,  bloomRadius.y)) * exposure, 1.0)
-                    + brightPart(sampleScene(vUv + vec2(0.0, -bloomRadius.y)) * exposure, 1.0)
-                    + brightPart(sampleScene(vUv + bloomRadius) * exposure, 1.0)
-                    + brightPart(sampleScene(vUv - bloomRadius) * exposure, 1.0);
-  color += bloomSamples * (max(uBloom, 0.0) / 24.0);
+  float bloomStrength = max(uBloom, 0.0);
+  if (bloomStrength > 1.0e-5) {
+    float cssScale = max(uRenderScale, 0.5);
+    vec2 bloomRadius = texel * cssScale * mix(2.0, 3.0, mode);
+    vec3 bloomSamples = brightPart(sampleScene(vUv + vec2( bloomRadius.x, 0.0)) * exposure, 1.0)
+                      + brightPart(sampleScene(vUv + vec2(-bloomRadius.x, 0.0)) * exposure, 1.0)
+                      + brightPart(sampleScene(vUv + vec2(0.0,  bloomRadius.y)) * exposure, 1.0)
+                      + brightPart(sampleScene(vUv + vec2(0.0, -bloomRadius.y)) * exposure, 1.0)
+                      + 0.5 * (
+                          brightPart(sampleScene(vUv + bloomRadius) * exposure, 1.0)
+                          + brightPart(sampleScene(vUv - bloomRadius) * exposure, 1.0)
+                          + brightPart(sampleScene(vUv + vec2(bloomRadius.x, -bloomRadius.y)) * exposure, 1.0)
+                          + brightPart(sampleScene(vUv + vec2(-bloomRadius.x, bloomRadius.y)) * exposure, 1.0)
+                        );
+    color += bloomSamples * (bloomStrength / 24.0);
+  }
 
   float light = luminance(color);
-  vec3 hubbleColour = mix(vec3(light), color, 1.16) * vec3(1.045, 1.0, 0.965);
+  vec3 hubbleColour = mix(vec3(light), color, 1.06) * vec3(1.018, 1.0, 0.985);
   color = max(mix(color, hubbleColour, mode), 0.0);
   color = acesFitted(color);
   color = encodeSrgbTransfer(color);
