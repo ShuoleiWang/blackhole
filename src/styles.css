@@ -81,6 +81,16 @@ button {
   cursor: grabbing;
 }
 
+html.is-presentation .system-status,
+html.is-presentation .science-panel,
+html.is-presentation .interaction-hint {
+  display: none;
+}
+
+html.is-presentation #universe {
+  cursor: none;
+}
+
 .system-status {
   position: fixed;
   top: calc(16px + var(--safe-top));

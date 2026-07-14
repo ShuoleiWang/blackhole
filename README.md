@@ -1,87 +1,110 @@
-# Schwarzschild 深空观测台
+# Schwarzschild Black Hole Renderer
 
-一个直接在浏览器 GPU 上运行的实时黑洞观测模拟。程序优先使用 **WebGPU**；在 macOS 上由浏览器的 **Metal** 后端驱动 Apple GPU，并优先建立 **16 位浮点 Display‑P3 扩展 HDR** 交换链。若 WebGPU 不可用，会自动切换到 WebGL2 硬件加速路径。
+基于 **WebGPU / WebGL2** 的交互式 Schwarzschild 黑洞实时成像实验。
 
-画面不是屏幕空间扭曲：每个像素都从运动观测者的局部标架反向追踪一条 Schwarzschild 零测地线，同一条光线同时决定事件视界捕获、吸积盘命中和 360° 银河背景的逃逸方向。
+程序在 GPU fragment shader 中反向积分过去指向的零测地线，并用同一条光路计算事件视界捕获、理想薄吸积盘交点、相对论频移，以及全天球银河背景的引力透镜成像。项目面向实时可视化与教学演示，不是 Kerr、GRMHD 或高精度辐射转移求解器。
 
-## 运行
+![Schwarzschild 黑洞、薄吸积盘与引力透镜化银河背景](./docs/images/blackhole-galaxy-hero.webp)
 
-项目无需构建：
+<sub>项目原生 WebGPU/Metal 画面，科学显示模式（未启用哈勃调色）、严格侧视、SDR 导出，2560×1440。银河素材：ESO/S. Brunier；经本项目测地线追踪变形、合成并转码，原素材按 [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/) 使用；完整来源见 [`assets/SOURCES.md`](./assets/SOURCES.md)。</sub>
+
+## 核心特性
+
+- **逐像素零测地线积分**：使用 Störmer–Verlet 数值积分 `u'' = -u + 3u²`，而不是屏幕空间扭曲。
+- **统一光路合成**：同一条光线负责黑洞捕获、多个盘面交点和天空逃逸方向，银河与恒星自然产生临界环和高阶像。
+- **相对论薄盘显示**：包含 Schwarzschild 圆轨道频移、`g⁴` 总辐射强度变换、近似黑体色度、表面光学深度与肢暗化。
+- **实时程序化盘面**：受盘湍流启发的有限寿命噪声场随局部 Kepler 角速度平流；它是视觉近似，不是 MHD 模拟。
+- **WebGPU 优先、WebGL2 回退**：根据浏览器实际暴露的 GPU limits、纹理尺寸和 framebuffer 能力选择路径，不按芯片型号硬编码。
+- **渐进式天空资源**：仓库内置 ESO 6K 与 4K 回退；可选加载 ESA/Gaia 16000×8000 全天图。
+- **诚实的 HDR 降级**：尝试请求 Display-P3、FP16 与扩展范围输出，并检查浏览器是否保留配置；否则依次退回 P3 SDR、sRGB SDR 或 WebGL2。
+
+## 快速开始
+
+项目没有构建步骤，也不需要安装 JavaScript 依赖。Python 仅用于启动静态服务器。
 
 ```bash
-./scripts/fetch_gaia_sky.sh
+git clone https://github.com/ShuoleiWang/blackhole.git
+cd blackhole
 python3 -m http.server 4173
 ```
 
-首次运行先执行下载脚本。它从 ESA 官方源恢复未降采样的 16000×8000
-Gaia 全天图，并在安装前核对固定 SHA‑256；原图不存入 Git 仓库。随后打开
-`http://localhost:4173`。WebGPU 需要 localhost 或 HTTPS 安全上下文。
+打开 <http://localhost:4173>。WebGPU 需要 `localhost` 或 HTTPS 安全上下文；不支持 WebGPU 时程序会自动尝试 WebGL2。
 
-- 默认：优先 WebGPU / Metal
-- 调试回退：`http://localhost:4173/?renderer=webgl`
-- 强制关闭扩展 HDR：`http://localhost:4173/?hdr=0`
-- 保持 6K 快速背景：`http://localhost:4173/?sky=high`
-- 阻塞等待 16K 背景（诊断用）：`http://localhost:4173/?sky=ultra`
+仓库内的 6K 银河背景可以直接运行。若希望使用约 236 MiB 的 Gaia 16K 全天图，可额外执行：
 
-右上角会显示实际后端、GPU、HDR/色域模式、FPS 与内部渲染分辨率。显示器进入 HDR 时会显示 `HDR · P3 · FP16`；若窗口所在屏幕只提供 SDR，则同一扩展管线会如实显示 `P3 扩展 · 屏幕 SDR`。画质会在用户设置的上限内动态调整，以维持交互帧率。
+```bash
+./scripts/fetch_gaia_sky.sh
+```
 
-## macOS HDR 输出
-
-WebGPU 路径优先请求 `rgba16float`、`display-p3` 与 `toneMapping: extended`。后处理在 Display‑P3 中保留最高约 4 倍 SDR 漫反射白的高光，不做 1.0 上限裁切，也不做 8 位抖动；macOS 合成器负责将扩展值映射到当前显示器的可用 EDR 余量。Safari 还会使用 `dynamic-range-limit: no-limit` 渐进增强。
-
-扩展 HDR 不等于强行提高全画面亮度：银河漫反射背景保持在纸白以下，吸积盘内缘和亮星才进入 HDR 高光。WebGL2 是明确标注的 sRGB/SDR 回退，不伪装成 HDR。
-
-## M3 Pro / M4 兼容性
-
-渲染器不按芯片名称分支，也不依赖 M4 独有指令。M3 与 M4 均属于 Apple9 GPU family，并支持本项目使用的 Metal 3/4、16K 2D 纹理与扩展范围像素格式；程序仍以浏览器实际返回的 WebGPU/WebGL limits、HDR canvas 配置和 RGBA16F framebuffer 完整性作为最终依据。Apple 官方能力表：<https://developer.apple.com/metal/capabilities/>。
-
-- M3 Pro 已实测 WebGPU/Metal、WebGL2/Metal、16K 后台升级、Display‑P3 FP16 HDR 与 SDR 降级。
-- M4 走同一 Apple9 能力路径；本轮没有 M4 实机，因此仍建议发布前在目标 M4 浏览器做一次 smoke test。
-- 动态画质按真实帧时自适应，不假设 M4 一定比 M3 Pro 快；普通光线会在 184–288 步间调节，临界光子环保持 384 步。
-- 16K 解码或 GPU 上传失败时保留已显示的 6K 背景；HDR 配置未被浏览器实际保留时依次降为 Display‑P3 SDR、sRGB SDR，最后才切 WebGL2。
+下载脚本会从 ESA 官方地址获取原图，并在安装前校验固定 SHA-256；该大文件不会提交到 Git。
 
 ## 交互
 
-- 鼠标拖动 / 单指拖动：改变观测相位和圆轨道所在平面
-- 滚轮 / 双指缩放：改变观测半径
-- 方向键：微调视角；`0`：令圆轨道与吸积盘共面并严格侧视；`+` / `-`：改变观测半径；空格：暂停或继续
-- “科学真色 / 哈勃调色”只改变显示谱段、PSF 与色调，不改变测地线、遮挡或频移
-- 质量改变物理半径、盘温度与时间尺度；吸积率改变薄盘温度和辐射通量
+| 操作 | 效果 |
+| --- | --- |
+| 鼠标拖动 / 单指拖动 | 改变观测相位与圆轨道所在平面 |
+| 滚轮 / 双指缩放 | 改变观测半径 |
+| 双击画面 | 重置观测视角 |
+| 方向键 | 微调相位与轨道平面 |
+| `0` | 令观测轨道与吸积盘共面，进入严格侧视 |
+| `+` / `-` | 减小 / 增大观测半径 |
+| 空格 | 暂停 / 继续物理时间 |
 
-## 物理模型
+“科学真色 / 哈勃调色”只改变显示映射与轻量 PSF，不改变测地线、盘面遮挡或频移。
 
-使用几何单位 `G = c = M = 1`：
+## 运行参数
 
-- 事件视界 `r = 2M`
-- 光子球 `r = 3M`
-- 临界冲量参数 `b_c = 3√3 M`
-- 非旋转薄盘 ISCO `r = 6M`
-- 零测地线方程 `u'' = -u + 3u²`，以 Störmer–Verlet 在 GPU fragment shader 中积分
-- 相机屏幕光线先从圆轨道共动标架做 Lorentz 变换，再进入局部 Schwarzschild 静态标架
-- 吸积盘采用差分 Kepler 转动、零力矩薄盘温度轮廓、Planck 可见波段颜色及 `g⁴` 辐射转移；UI 中的 Eddington 比定义为 `L/L_Edd`，默认峰值温度约 4500 K
-- 盘面不是纯色带：有限寿命、无固定旋臂的二维 MRI 湍流单元随局部 Kepler 角速度平流；温度起伏、面密度、视线光学深度、覆盖率和肢暗化分别参与辐射，并累积一条光线的多次盘面交叉
-- 背景在世界天球上保持固定，仅由逃逸光线方向采样；引力透镜因此自然复制、拉伸并环化银河结构
-- 解析恒星同样只在逃逸方向上生成，其黑体色温还会随观测者频移改变；不是后期贴在屏幕上的点。临界曲线使用局部 2×2 测地线覆盖采样，并只在窄临界带剥离底图中已烘焙的摄影 PSF 星核
+| URL 参数 | 用途 |
+| --- | --- |
+| `?renderer=webgl` | 强制使用 WebGL2 回退路径 |
+| `?hdr=0` | 关闭扩展 HDR，使用稳定的 SDR 输出 |
+| `?sky=high` | 固定使用仓库内的 ESO 6K 银河背景 |
+| `?sky=ultra` | 启动时阻塞尝试本地 Gaia 16K 背景 |
+| `?presentation=1` | 隐藏控制面板与状态栏，适合展示和截图 |
 
-### 为什么不是整圈纯白或整圈同一种金色
+参数可以组合，例如：
 
-吸积盘没有唯一固定颜色；它由质量、吸积率、半径、观测波段和相对论频移共同决定。默认超大质量、低吸积率薄盘的峰值约 4500 K，因此本征颜色是太阳金/暖白。接近观测者的一侧会被 Doppler 增亮并蓝移到黄白色，远离侧则更暗、更橙红，这个不对称才是保留完整频移后的物理结果。
+```text
+http://localhost:4173/?presentation=1&sky=high&hdr=0
+```
 
-电影《星际穿越》的盘由美术人员设为处处 4500 K，并为了大众可读性关闭了强烈的 Doppler 颜色与亮度不对称，再加入 IMAX 镜头眩光。本项目采用相近的默认温标，但不关闭这些物理效应，也没有给盘乘统一金色滤镜。
+## 渲染管线
 
-### 为什么严格侧视时直接像是一条线
+1. 从圆轨道观测者的局部共动标架生成相机光线。
+2. 做 Lorentz 变换，进入局部 Schwarzschild 静态标架。
+3. 在 fragment shader 中积分零测地线并判断捕获、逃逸和盘面交叉。
+4. 按从近到远的顺序累积薄盘辐射与透过率，再采样逃逸方向上的全天球背景。
+5. WebGPU 在 FP16 中间目标上完成光追，再根据实际显示能力输出扩展 HDR 或 SDR；WebGL2 提供 sRGB/SDR 回退。
 
-当前几何采用经典的**理想零厚度薄盘**。当视线与盘面严格平行时，盘的直接投影在数学上必然退化成一条零测度的线；这不是透视错误。黑洞附近的完整图像仍不应只有直线：远侧盘和盘底发出的光会被 Schwarzschild 引力弯折，在阴影上、下方形成次级像和贴近临界曲线的细环。`0` 键可固定复现这个极限；由于程序逐像素追踪中心光线，它不会人为给这条零测度直接像添加一个会发光的“径向侧壁”。
+主要实现：
 
-真实吸积流具有有限尺度高度 `H(R)`；有限厚度但仍几何薄的盘在严格侧视时会是一条窄带，RIAF 或厚盘则可能呈现更厚的环或晕。当前没有用屏幕空间把它假加粗；若继续升级为有限厚度模型，需要沿测地线积分三维发射与吸收，而不是简单扩大二维交点。经典薄盘直接像/次级像可参见 [Luminet 1979](https://ui.adsabs.harvard.edu/abs/1979A%26A....75..228L/abstract)，电影级相对论成像与艺术取舍可参见 [James 等 2015](https://doi.org/10.1088/0264-9381/32/6/065001)。
+- [`src/shaders.js`](./src/shaders.js)：WGSL / GLSL 测地线、薄盘辐射、天空采样与后处理
+- [`src/webgpu-renderer.js`](./src/webgpu-renderer.js)：WebGPU 双阶段渲染与 HDR/P3 配置协商
+- [`src/webgl-renderer.js`](./src/webgl-renderer.js)：WebGL2 硬件回退与半浮点 framebuffer 探测
+- [`src/main.js`](./src/main.js)：相机轨道、物理参数、交互和动态画质
 
-这是数值实时模型，而不是无限精度求解器。当前有意采用物理自洽的非旋转 Schwarzschild 度规；没有把不完整的“自旋特效”冒充 Kerr 光线追踪。最靠近临界光子轨道、需要超过 384 个角步长的指数级窄区域会受实时步数上限影响。
+## 模型范围与限制
 
-## 360° 银河素材
+| 已实现 | 当前边界 |
+| --- | --- |
+| 非旋转 Schwarzschild 时空 | 不支持 Kerr 自旋和 frame dragging |
+| GPU 零测地线数值积分 | 临界曲线最窄区域受有限步数与像素采样限制 |
+| `r = 6M` 至 `18M` 的理想零厚度薄盘 | 不含有限尺度高度和三维体辐射积分 |
+| 引力 / Doppler 频移与实时薄盘发射近似 | 不是完整光谱、偏振或自洽辐射转移 |
+| 受湍流启发的程序化盘面结构 | 不求解磁流体方程，也不声称复现真实 MRI 数据 |
+| WebGPU 主路径、WebGL2 回退 | HDR、P3、FP16 与 16K 纹理由运行时能力决定 |
 
-默认先显示 ESO/S. Brunier 的 6000×3000 全天摄影，再在后台升级到 ESA/Gaia EDR3 的 **The colour of the sky** 等距柱状投影，即官方未缩放的 16000×8000 PNG（约 1.28 亿像素），由超过 18 亿颗恒星的数据生成。这样首次画面不会被 236 MiB 解码阻塞；WebGPU 会显式请求 Metal 暴露的 16K 原生纹理上限，并在上传前后检查实际 GPU 错误。不支持 16K 或内存不足时会保留 6K，再回退到 4096×2048 WebP。完整来源、许可、处理说明与哈希见 [`assets/SOURCES.md`](./assets/SOURCES.md)。Gaia 官方页面：<https://sci.esa.int/web/gaia/-/the-colour-of-the-sky-from-gaia-s-early-data-release-3-equirectangular-projection>。
+几何单位、临界轨道、侧视图像和颜色不对称的详细说明见 [`docs/physics-notes.md`](./docs/physics-notes.md)。
 
-`assets/deep-field.webp` 与 `scripts/generate_deep_field.py` 是可复现的自生成深空备用素材，不是默认背景。
+## 兼容性与 HDR
+
+渲染器没有 M3、M4 或其他 GPU 型号的专用分支。它依据浏览器返回的 texture limits、canvas 配置、半浮点 framebuffer 完整性以及显示动态范围逐级选择能力，因此同一代码可以在不同 Apple Silicon 上使用相应的 WebGPU/Metal 或 WebGL2/Metal 路径。
+
+- **M3 Pro**：已实测 WebGPU/Metal、WebGL2/Metal、Display-P3 FP16 路径、SDR 降级和 16K 后台升级。
+- **M4**：设计上使用相同的能力协商路径，不依赖 M4 独有功能；当前仓库尚未记录 M4 实机 smoke test。
+- **其他平台**：能否启用 WebGPU、HDR 或大纹理由浏览器、操作系统、驱动、显示器及窗口所在屏幕共同决定。
+
+右上角状态栏显示实际后端、GPU、输出模式、FPS 与内部渲染分辨率。动态画质会在用户设置的上限内调整普通光线步数与分辨率；临界光子环保持更高积分预算。
 
 ## 验证
 
@@ -89,11 +112,24 @@ WebGPU 路径优先请求 `rgba16float`、`display-p3` 与 `toneMapping: extende
 python3 scripts/verify_physics.py
 ```
 
-回归检查覆盖临界阴影、有限距离阴影角、弱场偏折和积分守恒量。
+数值回归覆盖：
 
-主要代码：
+- 临界冲量参数 `b_c = 3√3 M`
+- 弱场偏折与 `4M/b` 的一致性
+- 有限距离观察者的阴影角直径
+- 零测地线积分守恒量
+- 184 / 288 步实时预算下的捕获与逃逸行为
 
-- `src/shaders.js`：WGSL / GLSL 的测地线、薄盘辐射与 HDR 后处理
-- `src/webgpu-renderer.js`：WebGPU / Metal 双通道渲染管线
-- `src/webgl-renderer.js`：WebGL2 GPU 回退管线
-- `src/main.js`：物理参数、相机轨道、鼠标/触控和动态画质
+该脚本验证的是一组明确的 Schwarzschild 数值性质，不等价于完整画面、辐射模型或所有 GPU 的自动化验证。当前仓库尚未配置 GPU 图像回归 CI。
+
+## 天空素材与署名
+
+- **ESA/Gaia/DPAC · A. Moitinho**：可选 16000×8000 Gaia EDR3 全天图，CC BY-SA 3.0 IGO。
+- **ESO/S. Brunier**：仓库内置 6000×3000 银河摄影背景，CC BY 4.0。
+- `assets/deep-field.webp`：由仓库脚本生成的备用深空素材，不是默认背景。
+
+下载地址、处理方式、哈希和完整许可信息见 [`assets/SOURCES.md`](./assets/SOURCES.md)。第三方素材不会因本项目代码未来采用某种许可证而被重新授权。
+
+## License
+
+当前仓库尚未声明项目代码许可证。第三方天空素材与 vendored 依赖仍分别遵循其原始许可；在选择项目代码许可证前，请不要假设仓库内容已按 MIT、Apache-2.0 等许可证授权。

@@ -1,6 +1,11 @@
 import { WebGPURenderer } from "./webgpu-renderer.js";
 import { WebGLRenderer } from "./webgl-renderer.js";
 
+const query = new URLSearchParams(window.location.search);
+if (query.get("presentation") === "1") {
+  document.documentElement.classList.add("is-presentation");
+}
+
 const SKY_URLS = {
   ultra: "./assets/gaia-edr3-16k.png",
   high: "./assets/milky-way-360-6k.jpg",
@@ -117,7 +122,7 @@ function replaceCanvasForFallback() {
 }
 
 async function createRenderer() {
-  const requestedBackend = new URLSearchParams(location.search).get("renderer");
+  const requestedBackend = query.get("renderer");
   if (requestedBackend === "webgl") {
     return WebGLRenderer.create(canvas, SKY_URLS);
   }
@@ -358,7 +363,7 @@ function effectiveRenderScale() {
   let scale = deviceScale * state.quality * state.dynamicScale;
   // Let the 1.25x quality setting supersample a Retina canvas on GPUs with
   // spare headroom.  The pixel budget and feedback governor below still keep
-  // the default path at native display density on M3/M4 Macs.
+  // the default path at native display density on Apple Silicon Macs.
   scale = clamp(scale, 0.65, 2.5);
 
   const pixels = window.innerWidth * window.innerHeight * scale * scale;
