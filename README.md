@@ -6,7 +6,7 @@
 
 ![Schwarzschild 黑洞、薄吸积盘与引力透镜化银河背景](./docs/images/blackhole-galaxy-hero.webp)
 
-<sub>项目原生 WebGPU/Metal 画面，科学显示模式（未启用哈勃调色）、严格侧视、SDR 导出，2560×1440。银河素材：ESO/S. Brunier；经本项目测地线追踪变形、合成并转码，原素材按 [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/) 使用；完整来源见 [`assets/SOURCES.md`](./assets/SOURCES.md)。</sub>
+<sub>项目在 Apple Silicon 上运行 WebGPU/Metal 的 5120×2576 实际截图，保留控制面板与后端、输出模式、帧率等运行状态。银河素材：ESO/S. Brunier；经本项目测地线追踪变形、合成并转码，原素材按 [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/) 使用；完整来源见 [`assets/SOURCES.md`](./assets/SOURCES.md)。</sub>
 
 ## 核心特性
 
@@ -16,7 +16,7 @@
 - **实时程序化盘面**：受盘湍流启发的有限寿命噪声场随局部 Kepler 角速度平流；它是视觉近似，不是 MHD 模拟。
 - **WebGPU 优先、WebGL2 回退**：根据浏览器实际暴露的 GPU limits、纹理尺寸和 framebuffer 能力选择路径，不按芯片型号硬编码。
 - **渐进式天空资源**：仓库内置 ESO 6K 与 4K 回退；可选加载 ESA/Gaia 16000×8000 全天图。
-- **诚实的 HDR 降级**：尝试请求 Display-P3、FP16 与扩展范围输出，并检查浏览器是否保留配置；否则依次退回 P3 SDR、sRGB SDR 或 WebGL2。
+- **能力检测与 HDR 降级**：尝试请求 Display-P3、FP16 与扩展范围输出，并检查浏览器是否保留配置；否则依次退回 P3 SDR、sRGB SDR 或 WebGL2。
 
 ## 快速开始
 
@@ -104,7 +104,7 @@ http://localhost:4173/?presentation=1&sky=high&hdr=0
 - **M4**：设计上使用相同的能力协商路径，不依赖 M4 独有功能；当前仓库尚未记录 M4 实机 smoke test。
 - **其他平台**：能否启用 WebGPU、HDR 或大纹理由浏览器、操作系统、驱动、显示器及窗口所在屏幕共同决定。
 
-右上角状态栏显示实际后端、GPU、输出模式、FPS 与内部渲染分辨率。动态画质会在用户设置的上限内调整普通光线步数与分辨率；临界光子环保持更高积分预算。
+右上角状态栏显示实际后端、GPU、输出模式、FPS 与内部渲染分辨率。动态画质会在用户设置的上限内调整普通光线步数与分辨率；临界冲量参数附近的光线保持更高积分预算。
 
 ## 验证
 
@@ -130,6 +130,6 @@ python3 scripts/verify_physics.py
 
 下载地址、处理方式、哈希和完整许可信息见 [`assets/SOURCES.md`](./assets/SOURCES.md)。第三方素材不会因本项目代码未来采用某种许可证而被重新授权。
 
-## License
+## 许可证
 
 当前仓库尚未声明项目代码许可证。第三方天空素材与 vendored 依赖仍分别遵循其原始许可；在选择项目代码许可证前，请不要假设仓库内容已按 MIT、Apache-2.0 等许可证授权。

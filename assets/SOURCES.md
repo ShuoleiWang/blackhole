@@ -2,13 +2,15 @@
 
 ## `docs/images/blackhole-galaxy-hero.webp` (README hero)
 
-- Description: project-native 2560×1440 screenshot captured from the WebGPU/Metal path in science display mode, strict edge-on view, with `?presentation=1&sky=high&hdr=0`
+- Description: project-native 5120×2576 screenshot captured from the WebGPU/Metal path on Apple Silicon, with the science display mode, control panel, and live renderer status visible
 - Capture date: 2026-07-14
+- Source capture: `ScreenShot_2026-07-14_215821_601.png`
 - Sky source included in the rendered image: **ESO/S. Brunier**, `eso0932a`
 - License for the incorporated sky panorama: [Creative Commons Attribution 4.0 International (CC BY 4.0)](https://creativecommons.org/licenses/by/4.0/), under the [ESO image and video usage policy](https://www.eso.org/public/outreach/copyright/)
-- Modification: the panorama was distorted by this project's Schwarzschild ray tracer, composited with the rendered accretion disk and analytic stars, then encoded as WebP; no crop or AI generation
-- Encoding: PNG canvas export converted to WebP with `cwebp -q 92 -m 6 -sharp_yuv`
-- WebP SHA-256: `7535c4bc0ff4a05c97ac0a49d68ef263315c1e5c6961ecf06c43d51bd1a9bfc9`
+- Modification: the panorama was distorted by this project's Schwarzschild ray tracer and composited with the rendered accretion disk and analytic stars; the resulting PNG screenshot was encoded as WebP without cropping or AI generation
+- Encoding: PNG screenshot converted to WebP with `cwebp -q 92 -m 6 -sharp_yuv`
+- Source PNG SHA-256: `a47c8fe25acbec6377f64b1559c43180ad170dc01616db1c0e56d0ae64f451e1`
+- WebP SHA-256: `5ae6ad166809fca75af69cfc851620965af750f91ca73d7592334268fe11ddca`
 
 The screenshot demonstrates this repository's renderer but incorporates and
 modifies the ESO panorama below. Redistribution outside the context of this
