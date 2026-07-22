@@ -1,26 +1,28 @@
 # Schwarzschild Black Hole Renderer
 
-基于 **WebGPU / WebGL2** 的交互式 Schwarzschild 黑洞实时成像实验。
+**English** | [简体中文](./README.zh-CN.md)
 
-程序在 GPU fragment shader 中反向积分过去指向的零测地线，并用同一条光路计算事件视界捕获、理想薄吸积盘交点、相对论频移，以及全天球银河背景的引力透镜成像。项目面向实时可视化与教学演示，不是 Kerr、GRMHD 或高精度辐射转移求解器。
+An interactive, real-time Schwarzschild black hole renderer built with **WebGPU and WebGL2**.
 
-![Schwarzschild 黑洞、薄吸积盘与引力透镜化银河背景](./docs/images/blackhole-galaxy-hero.webp)
+The renderer numerically integrates past-directed null geodesics in a GPU fragment shader. The same ray path determines capture by the event horizon, intersections with an idealized accretion disk, relativistic frequency shifts, and gravitational lensing of an all-sky Milky Way background. This project is intended for real-time visualization and education; it is not a Kerr, GRMHD, or high-precision radiative-transfer solver.
 
-<sub>项目在 Apple Silicon 上运行 WebGPU/Metal 的 5120×2576 实际截图，保留控制面板与后端、输出模式、帧率等运行状态。银河素材：ESO/S. Brunier；经本项目测地线追踪变形、合成并转码，原素材按 [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/) 使用；完整来源见 [`assets/SOURCES.md`](./assets/SOURCES.md)。</sub>
+![A Schwarzschild black hole, accretion disk, and gravitationally lensed Milky Way](./docs/images/blackhole-galaxy-hero.webp)
 
-## 核心特性
+<sub>A 5120×2576 in-app screenshot of the WebGPU/Metal renderer running on Apple Silicon, with the controls and live backend, output, and performance readouts visible. Milky Way source: ESO/S. Brunier; geodesically transformed, composited, and transcoded by this project from an original used under [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/). See [`assets/SOURCES.md`](./assets/SOURCES.md) for full provenance.</sub>
 
-- **逐像素零测地线积分**：使用 Störmer–Verlet 数值积分 `u'' = -u + 3u²`，而不是屏幕空间扭曲。
-- **统一光路合成**：同一条光线负责黑洞捕获、多个盘面交点和天空逃逸方向，银河与恒星自然产生临界环和高阶像。
-- **相对论薄盘显示**：包含 Schwarzschild 圆轨道频移、`g⁴` 总辐射强度变换、近似黑体色度、表面光学深度与肢暗化。
-- **实时程序化盘面**：受盘湍流启发的有限寿命噪声场随局部 Kepler 角速度平流；它是视觉近似，不是 MHD 模拟。
-- **WebGPU 优先、WebGL2 回退**：根据浏览器实际暴露的 GPU limits、纹理尺寸和 framebuffer 能力选择路径，不按芯片型号硬编码。
-- **渐进式天空资源**：仓库内置 ESO 6K 与 4K 回退；可选加载 ESA/Gaia 16000×8000 全天图。
-- **能力检测与 HDR 降级**：尝试请求 Display-P3、FP16 与扩展范围输出，并检查浏览器是否保留配置；否则依次退回 P3 SDR、sRGB SDR 或 WebGL2。
+## Key features
 
-## 快速开始
+- **Per-pixel null-geodesic integration** — Uses Störmer–Verlet integration of `u'' = -u + 3u²` instead of a screen-space distortion effect.
+- **Unified ray-path composition** — A single traced ray handles capture, multiple disk-plane intersections, and the final sky escape direction, producing critical-curve arcs and higher-order images.
+- **Relativistic disk appearance** — Includes frequency shifts from Schwarzschild circular motion, the bolometric intensity transfer factor `g⁴`, approximate blackbody chromaticity, surface optical depth, and limb darkening.
+- **Real-time procedural disk structure** — Turbulence-inspired, finite-lifetime noise is advected at the local Keplerian angular velocity. This is a visual approximation, not an MHD simulation.
+- **WebGPU first, WebGL2 fallback** — Chooses the rendering path from the GPU limits, texture dimensions, and framebuffer capabilities exposed at runtime, without chip-model-specific branches.
+- **Progressive sky assets** — Ships with ESO 6K and 4K fallbacks and can optionally load the 16000×8000 ESA/Gaia all-sky map.
+- **Capability-negotiated HDR** — Requests Display-P3, FP16, and extended-range output where available, then falls back to P3 or sRGB SDR. WebGL2 is used when WebGPU initialization is unavailable or fails.
 
-项目没有构建步骤，也不需要安装 JavaScript 依赖。Python 仅用于启动静态服务器。
+## Quick start
+
+There is no build step and no JavaScript package installation. Python is used only to serve the static files.
 
 ```bash
 git clone https://github.com/ShuoleiWang/blackhole.git
@@ -28,108 +30,110 @@ cd blackhole
 python3 -m http.server 4173
 ```
 
-打开 <http://localhost:4173>。WebGPU 需要 `localhost` 或 HTTPS 安全上下文；不支持 WebGPU 时程序会自动尝试 WebGL2。
+Open <http://localhost:4173>. WebGPU requires a secure context such as `localhost` or HTTPS; the application automatically attempts the WebGL2 fallback when WebGPU is unavailable.
 
-仓库内的 6K 银河背景可以直接运行。若希望使用约 236 MiB 的 Gaia 16K 全天图，可额外执行：
+The current application interface is in Simplified Chinese; this does not affect the rendering controls or URL parameters documented below.
+
+The bundled 6K Milky Way background works immediately. To install the optional, approximately 236 MiB Gaia 16K map:
 
 ```bash
 ./scripts/fetch_gaia_sky.sh
 ```
 
-下载脚本会从 ESA 官方地址获取原图，并在安装前校验固定 SHA-256；该大文件不会提交到 Git。
+The script downloads the original asset from ESA and verifies a pinned SHA-256 digest before installation. The large source file is intentionally excluded from Git.
 
-## 交互
+## Controls
 
-| 操作 | 效果 |
+| Input | Action |
 | --- | --- |
-| 鼠标拖动 / 单指拖动 | 改变观测相位与圆轨道所在平面 |
-| 滚轮 / 双指缩放 | 改变观测半径 |
-| 双击画面 | 重置观测视角 |
-| 方向键 | 微调相位与轨道平面 |
-| `0` | 令观测轨道与吸积盘共面，进入严格侧视 |
-| `+` / `-` | 减小 / 增大观测半径 |
-| 空格 | 暂停 / 继续物理时间 |
+| Mouse drag / one-finger drag | Change orbital phase and the observer's orbital plane |
+| Wheel / pinch | Change observer radius |
+| Double-click the canvas | Reset the view |
+| Arrow keys | Fine-tune orbital phase and plane |
+| `0` | Place the observer orbit in the disk plane for a strict edge-on view |
+| `+` / `-` | Decrease / increase observer radius |
+| Space | Pause / resume simulation time |
 
-“科学真色 / 哈勃调色”只改变显示映射与轻量 PSF，不改变测地线、盘面遮挡或频移。
+The neutral science color mode and the stylized Hubble palette alter only the display mapping and lightweight PSF. They do not change geodesics, disk occlusion, or frequency shifts.
 
-## 运行参数
+## URL parameters
 
-| URL 参数 | 用途 |
+| Parameter | Purpose |
 | --- | --- |
-| `?renderer=webgl` | 强制使用 WebGL2 回退路径 |
-| `?hdr=0` | 关闭扩展 HDR，使用稳定的 SDR 输出 |
-| `?sky=high` | 固定使用仓库内的 ESO 6K 银河背景 |
-| `?sky=ultra` | 启动时阻塞尝试本地 Gaia 16K 背景 |
-| `?presentation=1` | 隐藏控制面板与状态栏，适合展示和截图 |
+| `?renderer=webgl` | Force the WebGL2 fallback path |
+| `?hdr=0` | Disable extended HDR and use stable SDR output |
+| `?sky=high` | Force the bundled ESO 6K Milky Way background |
+| `?sky=ultra` | Block at startup while attempting to load the local Gaia 16K map |
+| `?presentation=1` | Hide controls and status readouts for presentation or capture |
 
-参数可以组合，例如：
+Parameters can be combined:
 
 ```text
 http://localhost:4173/?presentation=1&sky=high&hdr=0
 ```
 
-## 渲染管线
+## Rendering pipeline
 
-1. 从圆轨道观测者的局部共动标架生成相机光线。
-2. 做 Lorentz 变换，进入局部 Schwarzschild 静态标架。
-3. 在 fragment shader 中积分零测地线并判断捕获、逃逸和盘面交叉。
-4. 按从近到远的顺序累积薄盘辐射与透过率，再采样逃逸方向上的全天球背景。
-5. WebGPU 在 FP16 中间目标上完成光追，再根据实际显示能力输出扩展 HDR 或 SDR；WebGL2 提供 sRGB/SDR 回退。
+1. Generate camera rays in the local comoving frame of a circular-orbit observer.
+2. Apply a Lorentz transformation into the local static Schwarzschild frame.
+3. Integrate each null geodesic in the fragment shader and classify capture, escape, and disk-plane crossings.
+4. Accumulate disk emission and transmittance from near to far, then sample the all-sky background in the escaped direction.
+5. On WebGPU, ray trace into an FP16 intermediate target and select extended-range or SDR canvas output from the capabilities the browser preserves. WebGL2 provides an sRGB/SDR fallback.
 
-主要实现：
+Primary implementation files:
 
-- [`src/shaders.js`](./src/shaders.js)：WGSL / GLSL 测地线、薄盘辐射、天空采样与后处理
-- [`src/webgpu-renderer.js`](./src/webgpu-renderer.js)：WebGPU 双阶段渲染与 HDR/P3 配置协商
-- [`src/webgl-renderer.js`](./src/webgl-renderer.js)：WebGL2 硬件回退与半浮点 framebuffer 探测
-- [`src/main.js`](./src/main.js)：相机轨道、物理参数、交互和动态画质
+- [`src/shaders.js`](./src/shaders.js) — WGSL/GLSL geodesics, disk emission, sky sampling, and post-processing
+- [`src/webgpu-renderer.js`](./src/webgpu-renderer.js) — Two-stage WebGPU renderer and HDR/P3 configuration negotiation
+- [`src/webgl-renderer.js`](./src/webgl-renderer.js) — WebGL2 fallback and half-float framebuffer probing
+- [`src/main.js`](./src/main.js) — Camera orbit, physical parameters, interaction, and adaptive quality
 
-## 模型范围与限制
+## Model scope and limitations
 
-| 已实现 | 当前边界 |
+| Implemented | Current boundary |
 | --- | --- |
-| 非旋转 Schwarzschild 时空 | 不支持 Kerr 自旋和 frame dragging |
-| GPU 零测地线数值积分 | 临界曲线最窄区域受有限步数与像素采样限制 |
-| `r = 6M` 至 `18M` 的理想零厚度薄盘 | 不含有限尺度高度和三维体辐射积分 |
-| 引力 / Doppler 频移与实时薄盘发射近似 | 不是完整光谱、偏振或自洽辐射转移 |
-| 受湍流启发的程序化盘面结构 | 不求解磁流体方程，也不声称复现真实 MRI 数据 |
-| WebGPU 主路径、WebGL2 回退 | HDR、P3、FP16 与 16K 纹理由运行时能力决定 |
+| Non-rotating Schwarzschild spacetime | No Kerr spin or frame dragging |
+| Numerical GPU null-geodesic integration | The narrowest critical-curve features remain limited by step count and pixel sampling |
+| Idealized, geometrically zero-thickness disk from `r = 6M` to `18M` | No finite scale height or three-dimensional volume emission |
+| Gravitational/Doppler shifts and real-time disk-emission approximations | Not a complete spectrum, polarization model, or self-consistent radiative-transfer solution |
+| Turbulence-inspired procedural disk structure | Does not solve magnetohydrodynamics or reproduce measured MRI data |
+| WebGPU primary path with WebGL2 fallback | HDR, P3, FP16, and 16K textures depend on runtime capabilities |
 
-几何单位、临界轨道、侧视图像和颜色不对称的详细说明见 [`docs/physics-notes.md`](./docs/physics-notes.md)。
+See [`docs/physics-notes.md`](./docs/physics-notes.md) (currently in Simplified Chinese) for notes on geometric units, critical orbits, edge-on images, and relativistic brightness asymmetry.
 
-## 兼容性与 HDR
+## Compatibility and HDR
 
-渲染器没有 M3、M4 或其他 GPU 型号的专用分支。它依据浏览器返回的 texture limits、canvas 配置、半浮点 framebuffer 完整性以及显示动态范围逐级选择能力，因此同一代码可以在不同 Apple Silicon 上使用相应的 WebGPU/Metal 或 WebGL2/Metal 路径。
+The renderer contains no M3-, M4-, or vendor-specific rendering branch. It negotiates texture limits, canvas formats, half-float framebuffer completeness, and display dynamic range at runtime, allowing the same code to select the appropriate WebGPU/Metal or WebGL2/Metal path across Apple Silicon systems.
 
-- **M3 Pro**：已实测 WebGPU/Metal、WebGL2/Metal、Display-P3 FP16 路径、SDR 降级和 16K 后台升级。
-- **M4**：设计上使用相同的能力协商路径，不依赖 M4 独有功能；当前仓库尚未记录 M4 实机 smoke test。
-- **其他平台**：能否启用 WebGPU、HDR 或大纹理由浏览器、操作系统、驱动、显示器及窗口所在屏幕共同决定。
+- **M3 Pro** — Manually tested with WebGPU/Metal, WebGL2/Metal, the Display-P3 FP16 path, SDR fallback, and background upgrade to the 16K map.
+- **M4** — Uses the same capability-negotiation path and requires no M4-specific feature. The repository does not yet record an M4 hardware smoke test.
+- **Other platforms** — WebGPU, HDR, large textures, and color-space support depend on the browser, operating system, driver, display, and the screen containing the window.
 
-右上角状态栏显示实际后端、GPU、输出模式、FPS 与内部渲染分辨率。动态画质会在用户设置的上限内调整普通光线步数与分辨率；临界冲量参数附近的光线保持更高积分预算。
+The upper-right status bar reports the active backend, available adapter label, output mode, FPS, and internal render resolution. Adaptive quality adjusts ordinary-ray step counts and resolution within the user-selected ceiling, while rays near the critical impact parameter retain a larger integration budget.
 
-## 验证
+## Validation
 
 ```bash
 python3 scripts/verify_physics.py
 ```
 
-数值回归覆盖：
+The numerical regression checks cover:
 
-- 临界冲量参数 `b_c = 3√3 M`
-- 弱场偏折与 `4M/b` 的一致性
-- 有限距离观察者的阴影角直径
-- 零测地线积分守恒量
-- 184 / 288 步实时预算下的捕获与逃逸行为
+- Critical impact parameter `b_c = 3√3 M`
+- Agreement between weak-field deflection and `4M/b`
+- Shadow angular diameter for a finite-distance observer
+- The null-geodesic integration invariant
+- Capture and escape behavior under the 184- and 288-step real-time budgets
 
-该脚本验证的是一组明确的 Schwarzschild 数值性质，不等价于完整画面、辐射模型或所有 GPU 的自动化验证。当前仓库尚未配置 GPU 图像回归 CI。
+These checks validate a selected set of Schwarzschild numerical properties. They are not complete visual, radiative-model, or cross-GPU validation. The repository does not currently include GPU image-regression CI.
 
-## 天空素材与署名
+## Sky assets and attribution
 
-- **ESA/Gaia/DPAC · A. Moitinho**：可选 16000×8000 Gaia EDR3 全天图，CC BY-SA 3.0 IGO。
-- **ESO/S. Brunier**：仓库内置 6000×3000 银河摄影背景，CC BY 4.0。
-- `assets/deep-field.webp`：由仓库脚本生成的备用深空素材，不是默认背景。
+- **ESA/Gaia/DPAC · A. Moitinho** — Optional 16000×8000 Gaia EDR3 data-derived all-sky map, licensed under CC BY-SA 3.0 IGO.
+- **ESO/S. Brunier** — Bundled 6000×3000 photographic Milky Way panorama, licensed under CC BY 4.0.
+- `assets/deep-field.webp` — Script-generated deep-space fallback asset; it is not the default sky.
 
-下载地址、处理方式、哈希和完整许可信息见 [`assets/SOURCES.md`](./assets/SOURCES.md)。第三方素材不会因本项目代码未来采用某种许可证而被重新授权。
+See [`assets/SOURCES.md`](./assets/SOURCES.md) for download locations, transformations, hashes, and complete license information. Third-party assets are not relicensed by any future license selected for this project's code.
 
-## 许可证
+## License
 
-当前仓库尚未声明项目代码许可证。第三方天空素材与 vendored 依赖仍分别遵循其原始许可；在选择项目代码许可证前，请不要假设仓库内容已按 MIT、Apache-2.0 等许可证授权。
+No license has currently been declared for the project code. Third-party sky assets and vendored dependencies remain subject to their original licenses. Until a project license is selected, do not assume that the repository is available under MIT, Apache-2.0, or another software license.
