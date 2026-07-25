@@ -1,10 +1,12 @@
-# Schwarzschild Black Hole Renderer
+# Relativistic Black Hole Renderer
 
 [English](./README.md) | **简体中文**
 
-基于 **WebGPU / WebGL2** 的交互式 Schwarzschild 黑洞实时成像实验。
+基于 **WebGPU / WebGL2** 的交互式相对论黑洞实时成像实验。
 
-程序在 GPU fragment shader 中反向积分过去指向的零测地线，并用同一条光路计算事件视界捕获、理想薄吸积盘交点、相对论频移，以及全天球银河背景的引力透镜成像。项目面向实时可视化与教学演示，不是 Kerr、GRMHD 或高精度辐射转移求解器。
+默认场景在 Schwarzschild 时空中反向积分过去指向的零测地线，并用同一条光路计算事件视界捕获、理想薄吸积盘交点、相对论频移，以及全天球银河背景的引力透镜成像。
+
+项目另有完全隔离、需要显式选择的 `?scene=binary-approx` 等质量无自旋双黑洞预览。该模式把最低阶后牛顿（PN）螺旋靠近时间线、现象学合并/余留体过渡和实时多中心弱场光线偏折组合起来。它明确属于 **PN / NR-informed preview，不是已求解的完整数值相对论时空**。项目面向实时可视化与教学演示，不是 Kerr、完整 NR、GRMHD 或高精度辐射转移求解器。
 
 ![Schwarzschild 黑洞、薄吸积盘与引力透镜化银河背景](./docs/images/blackhole-galaxy-hero.webp)
 
@@ -16,6 +18,8 @@
 - **统一光路合成**：同一条光线负责黑洞捕获、多个盘面交点和天空逃逸方向，银河与恒星自然产生临界环和高阶像。
 - **相对论薄盘显示**：包含 Schwarzschild 圆轨道频移、`g⁴` 总辐射强度变换、近似黑体色度、表面光学深度与肢暗化。
 - **实时程序化盘面**：受盘湍流启发的有限寿命噪声场随局部 Kepler 角速度平流；它是视觉近似，不是 MHD 模拟。
+- **可选双黑洞预览**：`?scene=binary-approx` 按需加载独立 PN 时间线及配套 WGSL / GLSL 弱场透镜 shader。真空场景刻意不加入发光吸积盘，也不声称强场或合并阶段具有定量精度。
+- **不破坏原功能的场景架构**：可选 scene descriptor 与 shader bundle 扩展共享 WebGPU / WebGL2 后端；默认 URL 仍使用原有 Schwarzschild shader、观测者模型、吸积盘和交互。
 - **WebGPU 优先、WebGL2 回退**：根据浏览器实际暴露的 GPU limits、纹理尺寸和 framebuffer 能力选择路径，不按芯片型号硬编码。
 - **渐进式天空资源**：仓库内置 ESO 6K 与 4K 回退；可选加载 ESA/Gaia 16000×8000 全天图。
 - **能力检测与 HDR 降级**：尝试请求 Display-P3、FP16 与扩展范围输出，并检查浏览器是否保留配置；否则依次退回 P3 SDR、sRGB SDR 或 WebGL2。
@@ -31,6 +35,9 @@ python3 -m http.server 4173
 ```
 
 打开 <http://localhost:4173>。WebGPU 需要 `localhost` 或 HTTPS 安全上下文；不支持 WebGPU 时程序会自动尝试 WebGL2。
+
+通过界面中的场景选择器，或直接打开
+<http://localhost:4173/?scene=binary-approx>，可以进入实验性双黑洞预览；回到默认 URL 即恢复 Schwarzschild 场景。
 
 仓库内的 6K 银河背景可以直接运行。若希望使用约 236 MiB 的 Gaia 16K 全天图，可额外执行：
 
@@ -54,10 +61,13 @@ python3 -m http.server 4173
 
 “科学真色 / 哈勃调色”只改变显示映射与轻量 PSF，不改变测地线、盘面遮挡或频移。
 
+在双黑洞预览中，拖动与缩放仍控制相机，空格暂停时间线；由于模型是真空双黑洞，吸积率控件会被禁用。波形条只是最低阶/现象学的紧凑展示，不是数值相对论波形产品。
+
 ## 运行参数
 
 | URL 参数 | 用途 |
 | --- | --- |
+| `?scene=binary-approx` | 显式进入隔离的 PN / NR-informed 双黑洞预览；默认仍为 Schwarzschild |
 | `?renderer=webgl` | 强制使用 WebGL2 回退路径 |
 | `?hdr=0` | 关闭扩展 HDR，使用稳定的 SDR 输出 |
 | `?sky=high` | 固定使用仓库内的 ESO 6K 银河背景 |
@@ -67,10 +77,12 @@ python3 -m http.server 4173
 参数可以组合，例如：
 
 ```text
-http://localhost:4173/?presentation=1&sky=high&hdr=0
+http://localhost:4173/?scene=binary-approx&presentation=1&sky=high&hdr=0
 ```
 
 ## 渲染管线
+
+默认 Schwarzschild 路径：
 
 1. 从圆轨道观测者的局部共动标架生成相机光线。
 2. 做 Lorentz 变换，进入局部 Schwarzschild 静态标架。
@@ -78,25 +90,33 @@ http://localhost:4173/?presentation=1&sky=high&hdr=0
 4. 按从近到远的顺序累积薄盘辐射与透过率，再采样逃逸方向上的全天球背景。
 5. WebGPU 在 FP16 中间目标上完成光追，再根据实际显示能力输出扩展 HDR 或 SDR；WebGL2 提供 sRGB/SDR 回退。
 
+可选双黑洞路径会按需加载并校验版本化场景清单，插值 PN/现象学时间线，再向两个渲染后端提供专用 trace shader。该 shader 在每条光线内冻结当前时间样本，使用 fast-light 的双中心弱场偏折，并逐步混合为单一视觉余留体；天空采样、后处理和 HDR 仍复用共享阶段。相机不会套用单黑洞圆轨道观测者的 Lorentz boost。捕获面与共同余留体过渡都不是计算得到的事件视界。
+
 主要实现：
 
-- [`src/shaders.js`](./src/shaders.js)：WGSL / GLSL 测地线、薄盘辐射、天空采样与后处理
+- [`src/main.js`](./src/main.js)：场景选择、相机轨道、物理参数、交互和动态画质
+- [`src/shaders.js`](./src/shaders.js)：默认 WGSL / GLSL Schwarzschild 测地线、薄盘辐射、天空采样与后处理
+- [`src/scenes/binary-approx-scene.js`](./src/scenes/binary-approx-scene.js)：可选场景生命周期、清单插值、双黑洞 UI 与逐帧参数
+- [`src/binary-shaders.js`](./src/binary-shaders.js)：配套 WebGPU / WebGL2 弱场双黑洞 trace shader 与场景 uniform 适配
+- [`assets/scenes/binary-pn-equal-mass-v1.json`](./assets/scenes/binary-pn-equal-mass-v1.json)：版本化、机器可读的 PN/现象学时间线及精度契约
+- [`scripts/verify_binary_preview.py`](./scripts/verify_binary_preview.py)：清单 schema、对称性、PN 方程、单调性与参数边界检查
+- [`docs/binary-model.md`](./docs/binary-model.md)：科学边界与未来 NR transfer map 设计
 - [`src/webgpu-renderer.js`](./src/webgpu-renderer.js)：WebGPU 双阶段渲染与 HDR/P3 配置协商
 - [`src/webgl-renderer.js`](./src/webgl-renderer.js)：WebGL2 硬件回退与半浮点 framebuffer 探测
-- [`src/main.js`](./src/main.js)：相机轨道、物理参数、交互和动态画质
 
 ## 模型范围与限制
 
-| 已实现 | 当前边界 |
-| --- | --- |
-| 非旋转 Schwarzschild 时空 | 不支持 Kerr 自旋和 frame dragging |
-| GPU 零测地线数值积分 | 临界曲线最窄区域受有限步数与像素采样限制 |
-| `r = 6M` 至 `18M` 的理想零厚度薄盘 | 不含有限尺度高度和三维体辐射积分 |
-| 引力 / Doppler 频移与实时薄盘发射近似 | 不是完整光谱、偏振或自洽辐射转移 |
-| 受湍流启发的程序化盘面结构 | 不求解磁流体方程，也不声称复现真实 MRI 数据 |
-| WebGPU 主路径、WebGL2 回退 | HDR、P3、FP16 与 16K 纹理由运行时能力决定 |
+| 场景 / 组件 | 已实现 | 当前边界 |
+| --- | --- | --- |
+| 默认单黑洞 | 非旋转 Schwarzschild 时空与 GPU 零测地线数值积分 | 不支持 Kerr 自旋和 frame dragging；最窄临界曲线仍受采样限制 |
+| 默认吸积盘 | `r = 6M` 至 `18M` 的理想零厚度表面、频移、近似发射与受湍流启发的结构 | 不含有限尺度高度、GRMHD、完整光谱、偏振或自洽辐射转移 |
+| 双黑洞螺旋 | 等质量、无自旋的最低阶圆轨道 PN 样本 | 只适用于弱场绝热阶段；不含高阶 PN/EOB 演化或已求解的近区度规 |
+| 双黑洞合并/余留体 | 带代表性余留体参数的现象学过渡 | 不是 Einstein 方程解；没有计算共同视界、反冲或物理 ringdown 振幅 |
+| 双黑洞透镜 | 每条光线内冻结两个弱场单极子的 fast-light 偏折，随后过渡为球对称余留体代理 | 不是强场测地线积分；不渲染余留体自旋和 frame dragging，精细光子环、焦散、时延和视界拓扑不具定量可信度 |
+| 双黑洞发射 | 无吸积盘的真空天空透镜 | 若加入发光等离子体，需要物理气体初始条件、GRMHD 与辐射转移 |
+| 共享渲染器 | WebGPU 主路径、WebGL2 回退 | HDR、P3、FP16 与 16K 纹理由运行时能力决定；HDR 不提高模型精度 |
 
-几何单位、临界轨道、侧视图像和颜色不对称的详细说明见 [`docs/physics-notes.md`](./docs/physics-notes.md)。
+Schwarzschild 几何单位、临界轨道、侧视图像和颜色不对称见 [`docs/physics-notes.md`](./docs/physics-notes.md)；双黑洞预览的物理边界、权威参考与离线 NR → transfer map 架构见 [`docs/binary-model.md`](./docs/binary-model.md)。
 
 ## 兼容性与 HDR
 
@@ -112,9 +132,10 @@ http://localhost:4173/?presentation=1&sky=high&hdr=0
 
 ```bash
 python3 scripts/verify_physics.py
+python3 scripts/verify_binary_preview.py
 ```
 
-数值回归覆盖：
+Schwarzschild 数值回归覆盖：
 
 - 临界冲量参数 `b_c = 3√3 M`
 - 弱场偏折与 `4M/b` 的一致性
@@ -122,7 +143,9 @@ python3 scripts/verify_physics.py
 - 零测地线积分守恒量
 - 184 / 288 步实时预算下的捕获与逃逸行为
 
-该脚本验证的是一组明确的 Schwarzschild 数值性质，不等价于完整画面、辐射模型或所有 GPU 的自动化验证。当前仓库尚未配置 GPU 图像回归 CI。
+双黑洞预览检查覆盖 schema 与明确的非 NR 安全标记、等质量对称性、声明的最低阶 PN 方程、轨道间距/相位/过渡权重的单调性、有限参数，以及代表性余留体自旋的 Kerr 上界。一个与 shader 方程一致的 90×45 CPU 光线网格还会验证：代表性的宽轨道、合并过渡与余留体视角在固定 512 步生产预算下均不存在未收敛光线。这些测试只验证内部一致性和明确的实时收敛门槛，不验证双黑洞时空、强场透镜或合并物理。
+
+两套脚本共同覆盖一组明确的数值性质与架构契约，但不等价于完整画面、辐射模型或所有 GPU 的自动化验证。当前仓库尚未配置 GPU 图像回归 CI。
 
 ## 天空素材与署名
 

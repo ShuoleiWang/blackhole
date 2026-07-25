@@ -8,6 +8,20 @@ const HDR_FORMAT = "rgba16float";
 const UNIFORM_FLOATS = 40;
 const ULTRA_SKY_DIMENSION = 16000;
 
+function shaderBundleFrom(options) {
+  return options?.shaderBundle || {};
+}
+
+function uniformFloatCount(bundle) {
+  const requested = Number(bundle.uniforms?.requiredFloatCount ?? UNIFORM_FLOATS);
+  if (!Number.isInteger(requested) || requested < UNIFORM_FLOATS || requested % 4 !== 0) {
+    throw new Error(
+      `Scene shader uniform size must be a multiple of four and at least ${UNIFORM_FLOATS} floats`,
+    );
+  }
+  return requested;
+}
+
 function isApplePlatform() {
   const platform = navigator.userAgentData?.platform || navigator.platform || "";
   return /Mac|iPhone|iPad/i.test(platform);
@@ -193,7 +207,7 @@ async function requestCompatibleDevice(adapter) {
 }
 
 export class WebGPURenderer {
-  static async create(canvas, skyUrl) {
+  static async create(canvas, skyUrl, options = undefined) {
     if (!navigator.gpu) {
       throw new Error("WebGPU is not available");
     }
@@ -213,12 +227,19 @@ export class WebGPURenderer {
       throw new Error("Unable to create a WebGPU canvas context");
     }
 
-    const instance = new WebGPURenderer(canvas, context, adapter, device, negotiation);
+    const instance = new WebGPURenderer(
+      canvas,
+      context,
+      adapter,
+      device,
+      negotiation,
+      options,
+    );
     await instance.init(skyUrl);
     return instance;
   }
 
-  constructor(canvas, context, adapter, device, negotiation) {
+  constructor(canvas, context, adapter, device, negotiation, options = undefined) {
     this.canvas = canvas;
     this.context = context;
     this.adapter = adapter;
@@ -236,7 +257,8 @@ export class WebGPURenderer {
     this.outputDescription = "sRGB 标准动态范围";
     this.skyDetail = "银河背景待载入";
     this.skyRadianceScale = 0.55;
-    this.uniformData = new Float32Array(UNIFORM_FLOATS);
+    this.shaderBundle = shaderBundleFrom(options);
+    this.uniformData = new Float32Array(uniformFloatCount(this.shaderBundle));
     this.width = 1;
     this.height = 1;
     this.traceTexture = null;
@@ -371,7 +393,7 @@ export class WebGPURenderer {
     this.configureOutput();
 
     this.uniformBuffer = device.createBuffer({
-      label: "Schwarzschild frame uniforms",
+      label: this.shaderBundle.labels?.uniforms || "Schwarzschild frame uniforms",
       size: this.uniformData.byteLength,
       usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
     });
@@ -412,8 +434,8 @@ export class WebGPURenderer {
       code: fullscreenVertexWGSL,
     });
     const traceModule = device.createShaderModule({
-      label: "Schwarzschild null-geodesic tracer",
-      code: traceFragmentWGSL,
+      label: this.shaderBundle.labels?.trace || "Schwarzschild null-geodesic tracer",
+      code: this.shaderBundle.wgsl?.trace || traceFragmentWGSL,
     });
     const postModule = device.createShaderModule({
       label: "HDR telescope post-process",
@@ -584,6 +606,10 @@ export class WebGPURenderer {
     data[33] = this.displayP3 ? 1 : 0;
     data[34] = this.hdrPeak;
     data[35] = this.skyRadianceScale;
+    this.shaderBundle.uniforms?.writeWebGPUExtras?.(
+      data.subarray(UNIFORM_FLOATS - 4),
+      frame,
+    );
     this.device.queue.writeBuffer(this.uniformBuffer, 0, data);
   }
 

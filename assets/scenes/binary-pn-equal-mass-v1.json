@@ -1,0 +1,217 @@
+{
+  "schema": "blackhole.binary-scene/v1",
+  "id": "binary-pn-equal-mass-v1",
+  "title": "Equal-mass non-spinning binary preview",
+  "accuracy": {
+    "classification": "PN / NR-informed preview",
+    "fullNumericalRelativity": false,
+    "nearZoneSpacetimeIncluded": false,
+    "description": "The inspiral samples follow leading-order post-Newtonian quadrupole evolution. The merger and remnant samples are a phenomenological visualization transition informed by the qualitative outcome of equal-mass numerical-relativity simulations; they are not samples of a solved 4D numerical-relativity metric.",
+    "prohibitedClaim": "Do not describe this asset or its renderer as a physically exact binary-black-hole merger."
+  },
+  "units": {
+    "system": "geometric",
+    "G": 1.0,
+    "c": 1.0,
+    "totalInitialMassM": 1.0,
+    "time": "M",
+    "distance": "M",
+    "phase": "radian"
+  },
+  "referenceConfiguration": {
+    "catalog": "SXS",
+    "simulation": "SXS:BBH:0001",
+    "url": "https://doi.org/10.5281/zenodo.3273935",
+    "metadataFile": "SXS:BBH:0001/Lev5/metadata.json",
+    "metadataMd5": "099d4c93d9466fe4b7ecad6c94499cf3",
+    "usage": "Reference for the equal-mass, non-spinning, quasi-circular configuration and the rounded remnant mass/spin only.",
+    "sampleProvenance": "The compact timeline in this file is generated from the equations below and is not extracted from SXS waveform, horizon, or spacetime data."
+  },
+  "system": {
+    "massRatioQ": 1.0,
+    "symmetricMassRatioEta": 0.25,
+    "bodies": [
+      {
+        "id": "A",
+        "massFraction": 0.5,
+        "dimensionlessSpin": [0.0, 0.0, 0.0],
+        "orbitPositionScale": -0.5,
+        "orbitalPhaseOffsetRad": 0.0
+      },
+      {
+        "id": "B",
+        "massFraction": 0.5,
+        "dimensionlessSpin": [0.0, 0.0, 0.0],
+        "orbitPositionScale": 0.5,
+        "orbitalPhaseOffsetRad": 0.0
+      }
+    ],
+    "previewRemnant": {
+      "massFraction": 0.951609417715,
+      "dimensionlessSpin": [0.0, 0.0, 0.686461676493],
+      "source": "Rounded from SXS:BBH:0001 Lev5 metadata; used only to parameterize the render transition.",
+      "status": "Metadata-backed remnant parameters do not make the phenomenological transition or lens renderer a numerical-relativity solution.",
+      "rendering": {
+        "spinRendered": false,
+        "frameDraggingRendered": false,
+        "potentialModel": "spherical monopole",
+        "captureBoundaryModel": "spherical r=2M visual proxy; not a computed horizon"
+      }
+    }
+  },
+  "model": {
+    "inspiral": {
+      "name": "leading-order circular quadrupole inspiral",
+      "validity": "Weak-field adiabatic preview; accuracy degrades toward the matching separation.",
+      "startSeparationM": 12.0,
+      "matchingSeparationM": 6.0,
+      "equations": {
+        "separation": "a(t)^4 = a_match^4 - (256/5) eta t",
+        "orbitalFrequency": "M Omega = a^(-3/2)",
+        "phase": "phi(a)-phi(a_start) = (a_start^(5/2)-a^(5/2))/(32 eta)"
+      }
+    },
+    "mergerTransition": {
+      "name": "phenomenological common-remnant blend",
+      "startTimeM": 0.0,
+      "completeTimeM": 48.0,
+      "physicalStatus": "Render-only interpolation; not a solution of the Einstein field equations."
+    },
+    "waveform": {
+      "quantity": "preview strain scaled as r h / M",
+      "inspiralConvention": "face-on leading-order quadrupole, sampled as cos(2 phi)/a and sin(2 phi)/a",
+      "mergerConvention": "phenomenological interpolation for UI visualization only",
+      "postMergerConvention": "fixed-polarization amplitude decay; not a quasinormal-mode ringdown"
+    },
+    "lightPropagation": {
+      "approximation": "weak-field fast-light",
+      "positionsFrozenPerRay": true,
+      "retardedTimeIncluded": false,
+      "velocityDependentGravityIncluded": false,
+      "gravitomagneticTermsIncluded": false
+    }
+  },
+  "rendererDefaults": {
+    "observerRadiusM": 42.0,
+    "initialViewingInclinationDeg": 57.0,
+    "fieldOfViewDeg": 52.0,
+    "raySteps": 512,
+    "cycleDurationSeconds": 24.0,
+    "exposure": 1.08
+  },
+  "timeline": {
+    "interpolation": {
+      "pnInspiral": "analytic from declared equations",
+      "phenomenologicalMerger": "linear between samples",
+      "remnant": "linear between samples"
+    },
+    "timeDirection": "increasing",
+    "separationPolicy": "non-increasing",
+    "samples": [
+      {
+        "tM": -1518.75,
+        "regime": "pn-inspiral",
+        "separationM": 12.0,
+        "orbitalPhaseRad": 0.0,
+        "mergerBlend": 0.0,
+        "waveform": {"hPlusScaled": 0.0833333, "hCrossScaled": 0.0}
+      },
+      {
+        "tM": -1042.578125,
+        "regime": "pn-inspiral",
+        "separationM": 11.0,
+        "orbitalPhaseRad": 12.189879,
+        "mergerBlend": 0.0,
+        "waveform": {"hPlusScaled": 0.066332, "hCrossScaled": -0.0621653}
+      },
+      {
+        "tM": -680.0,
+        "regime": "pn-inspiral",
+        "separationM": 10.0,
+        "orbitalPhaseRad": 22.825358,
+        "mergerBlend": 0.0,
+        "waveform": {"hPlusScaled": -0.0097468, "hCrossScaled": 0.0995239}
+      },
+      {
+        "tM": -411.328125,
+        "regime": "pn-inspiral",
+        "separationM": 9.0,
+        "orbitalPhaseRad": 31.978829,
+        "mergerBlend": 0.0,
+        "waveform": {"hPlusScaled": 0.0478278, "hCrossScaled": 0.1002905}
+      },
+      {
+        "tM": -218.75,
+        "regime": "pn-inspiral",
+        "separationM": 8.0,
+        "orbitalPhaseRad": 39.726412,
+        "mergerBlend": 0.0,
+        "waveform": {"hPlusScaled": -0.076421, "hCrossScaled": -0.0989183}
+      },
+      {
+        "tM": -86.328125,
+        "regime": "pn-inspiral",
+        "separationM": 7.0,
+        "orbitalPhaseRad": 46.148602,
+        "mergerBlend": 0.0,
+        "waveform": {"hPlusScaled": -0.0529593, "hCrossScaled": -0.1326781}
+      },
+      {
+        "tM": 0.0,
+        "regime": "pn-inspiral",
+        "separationM": 6.0,
+        "orbitalPhaseRad": 51.331125,
+        "mergerBlend": 0.0,
+        "waveform": {"hPlusScaled": -0.0886001, "hCrossScaled": 0.1411659}
+      },
+      {
+        "tM": 12.0,
+        "regime": "phenomenological-merger",
+        "separationM": 4.8,
+        "orbitalPhaseRad": 53.55,
+        "mergerBlend": 0.22,
+        "waveform": {"hPlusScaled": 0.172696, "hCrossScaled": 0.0507551}
+      },
+      {
+        "tM": 24.0,
+        "regime": "phenomenological-merger",
+        "separationM": 3.1,
+        "orbitalPhaseRad": 55.35,
+        "mergerBlend": 0.58,
+        "waveform": {"hPlusScaled": -0.1471183, "hCrossScaled": -0.1354851}
+      },
+      {
+        "tM": 36.0,
+        "regime": "phenomenological-merger",
+        "separationM": 1.5,
+        "orbitalPhaseRad": 56.7,
+        "mergerBlend": 0.88,
+        "waveform": {"hPlusScaled": 0.1336364, "hCrossScaled": 0.041729}
+      },
+      {
+        "tM": 48.0,
+        "regime": "remnant",
+        "separationM": 0.0,
+        "orbitalPhaseRad": 57.35,
+        "mergerBlend": 1.0,
+        "waveform": {"hPlusScaled": -0.0023897, "hCrossScaled": 0.0749619}
+      },
+      {
+        "tM": 72.0,
+        "regime": "remnant",
+        "separationM": 0.0,
+        "orbitalPhaseRad": 57.35,
+        "mergerBlend": 1.0,
+        "waveform": {"hPlusScaled": -0.0007966, "hCrossScaled": 0.0249873}
+      },
+      {
+        "tM": 96.0,
+        "regime": "remnant",
+        "separationM": 0.0,
+        "orbitalPhaseRad": 57.35,
+        "mergerBlend": 1.0,
+        "waveform": {"hPlusScaled": -0.0002549, "hCrossScaled": 0.0079959}
+      }
+    ]
+  }
+}

@@ -43,7 +43,7 @@
         <header class="panel-header">
           <span class="sheet-handle" aria-hidden="true"></span>
           <div class="panel-heading">
-            <p class="eyebrow">GPU 零测地线实时成像</p>
+            <p id="sceneEyebrow" class="eyebrow">GPU 零测地线实时成像</p>
             <h1 id="panelTitle">Schwarzschild 黑洞</h1>
           </div>
           <div class="panel-actions" aria-label="视角操作">
@@ -80,6 +80,17 @@
         </header>
 
         <div id="panelContent" class="panel-content">
+          <nav class="scene-switch" aria-label="时空场景">
+            <a id="sceneSchwarzschild" class="scene-link is-active" href="./" aria-current="page">
+              单黑洞
+            </a>
+            <a id="sceneBinary" class="scene-link" href="./?scene=binary-approx">
+              双黑洞预览
+            </a>
+          </nav>
+
+          <p id="sceneStatus" class="scene-status" role="status" hidden></p>
+
           <div class="mode-switch" role="group" aria-label="成像色彩模式">
             <button
               id="modeScience"
@@ -101,18 +112,35 @@
 
           <dl class="physical-readout" aria-label="物理观测读数">
             <div class="readout-primary">
-              <dt>观测位置</dt>
+              <dt id="observerLabel">观测位置</dt>
               <dd id="observerValue">50.0 r<sub>g</sub> · 18.9°</dd>
             </div>
             <div>
-              <dt>史瓦西半径</dt>
+              <dt id="radiusLabel">史瓦西半径</dt>
               <dd id="rsValue">2.00 r<sub>g</sub></dd>
             </div>
             <div>
-              <dt>阴影角直径</dt>
+              <dt id="shadowLabel">阴影角直径</dt>
               <dd id="shadowValue">11.69°</dd>
             </div>
           </dl>
+
+          <section id="binaryTimeline" class="binary-timeline" aria-label="双黑洞时间线" hidden>
+            <div class="binary-timeline-heading">
+              <span>应变预览 · r h<sub>+</sub> / M</span>
+              <output id="binaryRegime">PN inspiral</output>
+            </div>
+            <svg
+              class="binary-waveform"
+              viewBox="0 0 280 46"
+              role="img"
+              aria-label="基于清单采样的双黑洞应变预览"
+              preserveAspectRatio="none"
+            >
+              <path id="binaryWaveformPath" d="" />
+              <line id="binaryTimeCursor" x1="0" x2="0" y1="1" y2="45" />
+            </svg>
+          </section>
 
           <section class="parameter-section" aria-labelledby="parameterTitle">
             <div class="section-heading">
@@ -122,12 +150,12 @@
 
             <div class="control-list">
               <label class="control" for="mass">
-                <span class="control-name">黑洞质量</span>
+                <span id="massLabel" class="control-name">黑洞质量</span>
                 <output id="massValue" for="mass">6.50 × 10⁹ M☉</output>
                 <input id="mass" type="range" min="6" max="10" step="0.01" value="9.81" />
               </label>
 
-              <label class="control" for="accretion">
+              <label id="accretionControl" class="control" for="accretion">
                 <span class="control-name">吸积率</span>
                 <output id="accretionValue" for="accretion">0.006% Edd</output>
                 <input
@@ -181,7 +209,7 @@
             </div>
           </section>
 
-          <p class="physics-note">
+          <p id="physicsNote" class="physics-note">
             采用非旋转 Schwarzschild 度规。成像模式只改变谱段映射与望远镜响应；测地线、遮挡和频移保持一致。默认盘峰值约 4500 K，颜色由黑体谱与相对论频移计算，并非金色滤镜。
             全天球数据：<a href="https://sci.esa.int/web/gaia/-/the-colour-of-the-sky-from-gaia-s-early-data-release-3-equirectangular-projection" target="_blank" rel="noreferrer">ESA/Gaia/DPAC · A. Moitinho</a>；6K 摄影回退：<a href="https://www.eso.org/public/images/eso0932a/" target="_blank" rel="noreferrer">ESO/S. Brunier</a>。
           </p>
@@ -190,7 +218,7 @@
 
       <div id="interactionHint" class="interaction-hint" role="status" aria-live="polite">
         <span class="pointer-mark" aria-hidden="true"></span>
-        <span class="desktop-hint">拖动环绕 · 滚轮缩放 · 0 键侧视</span>
+        <span id="desktopHint" class="desktop-hint">拖动环绕 · 滚轮缩放 · 0 键侧视</span>
         <span class="touch-hint">单指环绕 · 双指缩放</span>
       </div>
     </main>

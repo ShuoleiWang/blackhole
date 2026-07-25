@@ -7,6 +7,18 @@ import {
 
 const ULTRA_SKY_DIMENSION = 16000;
 
+function shaderBundleFrom(options) {
+  return options?.shaderBundle || {};
+}
+
+function sceneUniforms(bundle) {
+  const uniforms = bundle.uniforms?.createWebGLExtras?.(THREE) || {};
+  if (!uniforms || typeof uniforms !== "object" || Array.isArray(uniforms)) {
+    throw new Error("Scene WebGL uniforms must be returned as an object");
+  }
+  return uniforms;
+}
+
 function isApplePlatform() {
   const platform = navigator.userAgentData?.platform || navigator.platform || "";
   return /Mac|iPhone|iPad/i.test(platform);
@@ -139,7 +151,7 @@ function configureSkyTexture(texture) {
 }
 
 export class WebGLRenderer {
-  static async create(canvas, skyUrl) {
+  static async create(canvas, skyUrl, options = undefined) {
     const context = canvas.getContext("webgl2", {
       alpha: false,
       antialias: false,
@@ -155,12 +167,12 @@ export class WebGLRenderer {
     if (!capabilities.fragmentHighpBits) {
       throw new Error("WebGL2 fragment high precision is unavailable");
     }
-    const instance = new WebGLRenderer(canvas, context, capabilities);
+    const instance = new WebGLRenderer(canvas, context, capabilities, options);
     await instance.init(skyUrl);
     return instance;
   }
 
-  constructor(canvas, context, capabilities) {
+  constructor(canvas, context, capabilities, options = undefined) {
     this.canvas = canvas;
     this.context = context;
     this.backend = isApplePlatform()
@@ -175,6 +187,7 @@ export class WebGLRenderer {
     this.outputDescription = "WebGL2 回退路径使用 sRGB 标准动态范围";
     this.skyDetail = "银河背景待载入";
     this.skyRadianceScale = 0.55;
+    this.shaderBundle = shaderBundleFrom(options);
     this.width = 1;
     this.height = 1;
     this.resizeWasClamped = false;
@@ -260,6 +273,16 @@ export class WebGLRenderer {
       uObserverBeta: { value: 0 },
       uSkyRadianceScale: { value: this.skyRadianceScale },
     };
+    const extras = sceneUniforms(this.shaderBundle);
+    for (const name of Object.keys(extras)) {
+      if (name in this.traceUniforms) {
+        throw new Error(`Scene WebGL uniform ${name} conflicts with the shared renderer ABI`);
+      }
+      if (!name.startsWith("uScene")) {
+        throw new Error(`Scene WebGL uniform ${name} must use the uScene prefix`);
+      }
+    }
+    Object.assign(this.traceUniforms, extras);
 
     this.postUniforms = {
       tScene: { value: null },
@@ -276,9 +299,9 @@ export class WebGLRenderer {
     this.postScene = new THREE.Scene();
 
     this.traceMaterial = new THREE.ShaderMaterial({
-      name: "Schwarzschild null-geodesic tracer",
+      name: this.shaderBundle.labels?.trace || "Schwarzschild null-geodesic tracer",
       vertexShader: fullscreenVertexGLSL,
-      fragmentShader: traceFragmentGLSL,
+      fragmentShader: this.shaderBundle.glsl?.trace || traceFragmentGLSL,
       uniforms: this.traceUniforms,
       depthTest: false,
       depthWrite: false,
@@ -442,6 +465,7 @@ export class WebGLRenderer {
     uniforms.uFrame.value = frame.frame;
     uniforms.uObserverVelocity.value.fromArray(frame.observerVelocity);
     uniforms.uObserverBeta.value = frame.observerBeta;
+    this.shaderBundle.uniforms?.writeWebGLExtras?.(uniforms, frame);
   }
 
   render(frame) {

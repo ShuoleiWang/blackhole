@@ -6,6 +6,8 @@ if (query.get("presentation") === "1") {
   document.documentElement.classList.add("is-presentation");
 }
 
+let activeScene = null;
+
 const SKY_URLS = {
   ultra: "./assets/gaia-edr3-16k.png",
   high: "./assets/milky-way-360-6k.jpg",
@@ -13,6 +15,7 @@ const SKY_URLS = {
 };
 const RG_SECONDS_PER_SOLAR_MASS = 4.925490947e-6;
 const SCHWARZSCHILD_KM_PER_SOLAR_MASS = 2.953339382;
+const GRAVITATIONAL_KM_PER_SOLAR_MASS = SCHWARZSCHILD_KM_PER_SOLAR_MASS / 2;
 const AU_KM = 149_597_870.7;
 const DEG = 180 / Math.PI;
 
@@ -115,6 +118,65 @@ const state = {
 let renderer;
 let rendererFallbackReason = "";
 
+function sceneHref(sceneId) {
+  const parameters = new URLSearchParams(query);
+  if (sceneId === "schwarzschild") {
+    parameters.delete("scene");
+  } else {
+    parameters.set("scene", sceneId);
+  }
+  const encoded = parameters.toString();
+  return `./${encoded ? `?${encoded}` : ""}`;
+}
+
+function configureSceneLinks(sceneId) {
+  const schwarzschildLink = document.querySelector("#sceneSchwarzschild");
+  const binaryLink = document.querySelector("#sceneBinary");
+  schwarzschildLink.href = sceneHref("schwarzschild");
+  binaryLink.href = sceneHref("binary-approx");
+  const binaryActive = sceneId === "binary-approx";
+  schwarzschildLink.classList.toggle("is-active", !binaryActive);
+  binaryLink.classList.toggle("is-active", binaryActive);
+  if (binaryActive) {
+    schwarzschildLink.removeAttribute("aria-current");
+    binaryLink.setAttribute("aria-current", "page");
+  } else {
+    schwarzschildLink.setAttribute("aria-current", "page");
+    binaryLink.removeAttribute("aria-current");
+  }
+}
+
+async function loadRequestedScene() {
+  if (query.get("scene") !== "binary-approx") {
+    return null;
+  }
+  const { createBinaryApproxScene } = await import("./scenes/binary-approx-scene.js");
+  const scene = await createBinaryApproxScene({
+    document,
+    ui,
+    state,
+    formatMass,
+    formatGravitationalRadius,
+  });
+  const bundle = scene.rendererOptions?.shaderBundle;
+  if (!bundle?.id || !bundle.wgsl?.trace || !bundle.glsl?.trace) {
+    throw new Error(
+      "A custom scene must provide both WGSL and GLSL trace shaders so GPU fallback stays consistent",
+    );
+  }
+  if (
+    bundle.wgsl.vertex
+    || bundle.wgsl.post
+    || bundle.glsl.vertex
+    || bundle.glsl.post
+  ) {
+    throw new Error(
+      "Version 1 scene bundles may replace only the trace shader; vertex and HDR post stages stay shared",
+    );
+  }
+  return scene;
+}
+
 function replaceCanvasForFallback() {
   const replacement = canvas.cloneNode(false);
   canvas.replaceWith(replacement);
@@ -123,11 +185,12 @@ function replaceCanvasForFallback() {
 
 async function createRenderer() {
   const requestedBackend = query.get("renderer");
+  const rendererOptions = activeScene?.rendererOptions;
   if (requestedBackend === "webgl") {
-    return WebGLRenderer.create(canvas, SKY_URLS);
+    return WebGLRenderer.create(canvas, SKY_URLS, rendererOptions);
   }
   try {
-    const webgpu = await WebGPURenderer.create(canvas, SKY_URLS);
+    const webgpu = await WebGPURenderer.create(canvas, SKY_URLS, rendererOptions);
     webgpu.onLost = (info) => {
       showFatalError(`GPU 设备连接已丢失：${info.message || info.reason || "unknown"}`);
     };
@@ -136,7 +199,7 @@ async function createRenderer() {
     rendererFallbackReason = error instanceof Error ? error.message : String(error);
     console.info("WebGPU unavailable; using WebGL2 hardware fallback.", error);
     replaceCanvasForFallback();
-    return WebGLRenderer.create(canvas, SKY_URLS);
+    return WebGLRenderer.create(canvas, SKY_URLS, rendererOptions);
   }
 }
 
@@ -149,8 +212,7 @@ function formatMass(mass) {
   return `${mantissa.toFixed(2)} × 10${superscripts} M☉`;
 }
 
-function formatRadius(massSolar) {
-  const km = SCHWARZSCHILD_KM_PER_SOLAR_MASS * massSolar;
+function formatLength(km) {
   const au = km / AU_KM;
   if (au >= 0.1) {
     return `${au.toLocaleString("zh-CN", { maximumFractionDigits: au < 10 ? 2 : 1 })} AU`;
@@ -161,12 +223,25 @@ function formatRadius(massSolar) {
   return `${Math.round(km).toLocaleString("zh-CN")} km`;
 }
 
+function formatRadius(massSolar) {
+  return formatLength(SCHWARZSCHILD_KM_PER_SOLAR_MASS * massSolar);
+}
+
+function formatGravitationalRadius(massSolar) {
+  return formatLength(GRAVITATIONAL_KM_PER_SOLAR_MASS * massSolar);
+}
+
 function updateReadouts() {
   state.massSolar = valueOrPower(ui.mass);
   state.accretion = valueOrPower(ui.accretion);
   state.exposure = Number(ui.exposure.value);
   state.timeScale = Number(ui.timeScale.value);
   state.quality = Number(ui.quality.value);
+
+  if (activeScene?.updateReadouts?.()) {
+    state.needsRender = true;
+    return;
+  }
 
   const lapse = Math.sqrt(1 - 2 / state.distance);
   const shadowHalfAngle = Math.asin(clamp((3 * Math.sqrt(3) * lapse) / state.distance, 0, 1));
@@ -209,9 +284,13 @@ function setMotion(running) {
 }
 
 function resetView() {
-  state.phase = 0.55;
-  state.orbitTilt = 0.42;
-  state.distance = 50;
+  if (activeScene?.resetState) {
+    activeScene.resetState();
+  } else {
+    state.phase = 0.55;
+    state.orbitTilt = 0.42;
+    state.distance = 50;
+  }
   state.dynamicScale = 1;
   state.userHoldUntil = performance.now() + 1200;
   state.resizePending = true;
@@ -348,7 +427,7 @@ function cameraFrame() {
   const right = tangent;
   const up = normalize(cross(forward, right));
 
-  return {
+  const baseCamera = {
     cameraPos,
     forward,
     right,
@@ -356,6 +435,7 @@ function cameraFrame() {
     observerVelocity: tangent,
     observerBeta: 1 / Math.sqrt(state.distance - 2),
   };
+  return activeScene?.cameraFrame?.(baseCamera, state) ?? baseCamera;
 }
 
 function effectiveRenderScale() {
@@ -430,7 +510,7 @@ function stepBudget() {
 function frameParameters() {
   const camera = cameraFrame();
   const portraitFov = window.innerWidth / window.innerHeight < 0.8 ? 68 : 44;
-  return {
+  const baseFrame = {
     time: state.time,
     massSolar: state.massSolar,
     accretion: state.accretion,
@@ -454,6 +534,7 @@ function frameParameters() {
     observerVelocity: camera.observerVelocity,
     observerBeta: camera.observerBeta,
   };
+  return activeScene?.extendFrame?.(baseFrame, state) ?? baseFrame;
 }
 
 function updateFps(dt) {
@@ -514,12 +595,18 @@ function animate(now) {
   lastFrameTime = now;
 
   if (!document.hidden) {
-    if (state.running && !state.dragging && now >= state.userHoldUntil) {
-      const omega = 1 / state.distance ** 1.5;
-      state.phase += omega * dt * state.timeScale;
-    }
-    if (state.running) {
-      state.time += dt * state.timeScale;
+    if (activeScene?.advance) {
+      if (state.running) {
+        activeScene.advance(dt, now);
+      }
+    } else {
+      if (state.running && !state.dragging && now >= state.userHoldUntil) {
+        const omega = 1 / state.distance ** 1.5;
+        state.phase += omega * dt * state.timeScale;
+      }
+      if (state.running) {
+        state.time += dt * state.timeScale;
+      }
     }
 
     if (state.resizePending) {
@@ -538,12 +625,15 @@ function animate(now) {
 }
 
 async function start() {
-  bindUi();
-  updateReadouts();
-  setMode(state.mode);
-  setMotion(true);
-
   try {
+    activeScene = await loadRequestedScene();
+    configureSceneLinks(activeScene?.id || "schwarzschild");
+    activeScene?.initialize?.();
+    bindUi();
+    updateReadouts();
+    setMode(state.mode);
+    setMotion(true);
+
     renderer = await createRenderer();
     ui.backendStatus.textContent = renderer.backend;
     ui.gpuStatus.textContent = renderer.gpu;
