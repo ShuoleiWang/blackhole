@@ -15,10 +15,13 @@ of Einstein's field equations.
 | Light propagation | Real-time, multi-centre weak-field bending | Useful for an interactive preview; invalid as precision strong-field ray tracing |
 | Emission | Lensed all-sky background in vacuum | No accretion disks, plasma, GRMHD, or radiative transfer |
 | Display | WebGPU with WebGL2 fallback and the existing HDR pipeline | Display fidelity does not increase physical accuracy |
+| NR transfer-map interface | Versioned manifest schema, deterministic synthetic fixture, fail-closed validator, and regression tests | Implemented ingestion contract only; no NR-derived transfer map or NR playback scene |
 
-The scene must therefore be described as a **PN / NR-informed preview**, never
-as an exact simulation of a merger. The machine-readable source for the v1
-timeline is
+The runnable scene must therefore be described as a
+**PN/phenomenological weak-field preview**, never as an NR-backed or exact
+simulation of a merger. Only rounded remnant reference values come from
+`SXS:BBH:0001`; no SXS waveform, horizon, spacetime, or ray-transfer data are
+used. The machine-readable source for the v1 timeline is
 [`assets/scenes/binary-pn-equal-mass-v1.json`](../assets/scenes/binary-pn-equal-mass-v1.json).
 Its metadata repeats this limitation so that downstream code cannot
 accidentally lose the distinction.
@@ -27,6 +30,12 @@ The rounded remnant mass and spin in that manifest come from the official
 `SXS:BBH:0001` Lev5 metadata. The inspiral/merger timeline and all rendered ray
 paths remain project-generated approximations; using two catalog metadata
 values does not turn them into NR data.
+
+The separately implemented `blackhole.nr-transfer-map/v1` contract does not
+upgrade this scene. It defines how a future offline product must identify,
+frame, chunk, and validate its data; there is currently no runtime consumer for
+that format. The default Schwarzschild path and the opt-in `binary-approx` path
+are unchanged.
 
 ## Version 1 dynamics
 
@@ -178,7 +187,7 @@ The two validation suites also have different meanings:
   shader equations. It does **not** certify the merger as a
   numerical-relativity result.
 
-## Target architecture for an NR-backed scene
+## Target architecture and current phase
 
 The browser should remain a deterministic playback and presentation layer.
 Expensive spacetime evolution and geodesic integration belong in an offline
@@ -203,37 +212,99 @@ time it reaches each integration point. Freezing one numerical-relativity slice
 for an entire ray can be useful diagnostically, but it does not represent a
 rapidly changing merger.
 
-### Proposed transfer-map contract
+The project status is deliberately reported by layer:
 
-A future data-backed scene should consume versioned, immutable transfer maps
-rather than embedding a particular NR solver into the web application. Each
-dataset should contain:
+| Layer | Status | Permitted claim |
+| --- | --- | --- |
+| Transfer-map schema, fixture, validator, and tests | Implemented | `contract-conformant` ingestion boundary |
+| NR/EOB-calibrated orbital dynamics | Not implemented | The current PN/phenomenological motion is not `NR-driven` |
+| Slow-light rays through a time-dependent NR spacetime | Not implemented | No `NR-backed` image or playback mode |
+| GRMHD plasma and GR radiative transfer | Not implemented | No physically modelled luminous merger |
 
-1. **Provenance** — simulation identifier and version, code/release, DOI,
-   extraction process, license, source hashes, generation command, and transfer
-   map hashes.
-2. **Physical metadata** — mass ratio, initial spins and eccentricity, total
-   mass normalization, reference time/phase, remnant properties, and the
-   waveform convention used for synchronization.
-3. **Coordinate contract** — NR gauge and coordinates, time slicing, world-to-
-   camera transform, observer worldline and orthonormal tetrad, image-plane
-   projection, units, handedness, and sky-map orientation.
-4. **Sampling contract** — time samples, camera samples, image dimensions,
-   interpolation rules, chunking, precision, compression, and validity masks.
-5. **Per-ray observables** — escape direction, capture/body identifier,
-   frequency-shift factor `g = ν_obs/ν_emit`, coordinate or arrival-time delay,
-   and optional magnification/Jacobian information.
-6. **Optional radiation fields** — accumulated optical depth and Stokes
-   parameters, but only when generated from a documented GRMHD and
-   general-relativistic radiative-transfer model.
-7. **Error metadata** — NR resolution, constraint norms, geodesic null residual,
-   interpolation residual, unresolved/terminated ray flags, and comparisons
-   against stationary Schwarzschild/Kerr limits.
+The status words are not interchangeable:
+
+- **Contract-conformant** means only that a dataset satisfies the versioned
+  structural, integrity, coordinate-frame, and record-consistency rules.
+- **NR-ready** applies only to the ingestion boundary: it can reject or accept
+  a future offline product without changing the protocol. It does not mean that
+  such a product is bundled or that the browser solves Einstein's equations.
+- **NR-backed** may be used only when the actual rendered payload was derived
+  from a pinned numerical-relativity spacetime and documented slow-light
+  geodesic integration.
+- **Physically validated** additionally requires the convergence and
+  comparison gates below. Passing a schema validator is not a physics result.
+
+### Implemented transfer-map protocol boundary
+
+Future data-backed scenes should consume versioned, immutable transfer maps
+rather than embedding a particular NR solver into the web application. The
+implemented v1 contract uses the discriminator
+`blackhole.nr-transfer-map/v1`; its normative semantics and safety rules are in
+[`nr-transfer-map-v1.md`](./nr-transfer-map-v1.md), and its machine-readable
+shape is in
+[`schemas/nr-transfer-map-v1.schema.json`](../schemas/nr-transfer-map-v1.schema.json).
+Every v1 top-level field is required and unknown fields are rejected:
+
+| Field | Required meaning |
+| --- | --- |
+| `schema`, `id`, `datasetKind`, `renderable` | Exact protocol discriminator, stable identity, dataset class, and explicit playback gate |
+| `scientificStatus` | Whether the source is NR and whether the payload was derived from near-zone spacetime with slow-light geodesics, plus prohibited claims |
+| `physicalSystem` | System/vacuum class, component IDs, parameter epoch, mass ratio, component spins, eccentricity, reference phase, remnant, and non-applicability reason |
+| `provenance` | Source simulation/catalog/version/DOI, evolution-code release and commit/reason, generator revision/command, license, artifact storage/base, hashes, and sizes |
+| `units` | Geometric units and an explicitly defined mass normalization, including the source-time reference epoch when applicable |
+| `timeReference` | The source-to-protocol time origin, future direction, zero event, and any waveform-time mapping |
+| `coordinates` | NR gauge/chart/time slicing, spatial NR↔world affine maps, and proper world↔ICRS rotations and sky axes |
+| `observer` | Source events, protocol/proper times, covariant/inverse metrics, four-velocity, and orthonormal tetrad samples |
+| `camera` | A fixed spatial affine visualization frame and its inverse; it is not a four-dimensional coordinate transform |
+| `projection` | Pixel-centre, image-origin, field-of-view, screen-coordinate, and past-directed local-ray conventions |
+| `sampling` | Protocol observation times, dimension/pixel/tile order, and validity-strict interpolation |
+| `rayIntegration` | Time-dependent/stationary/synthetic spacetime mode, interpolants, integrator, tolerances, precision, normalization, and terminal-state semantics |
+| `escapeBoundary` | Outer surface, reference observer, past-directed frequency-shift convention, and continuation into the ICRS escape direction |
+| `recordLayout` | Exact 32-byte ABI, observable definitions, outcomes, validity bits, and invalid-float policy |
+| `captureTargets` | Capture-surface IDs/codes, surface semantics, protocol-time validity intervals, priority, and source artifact role |
+| `accuracy` | NR/constraint/geodesic/interpolation status, unresolved and decoded outcome fractions, and fixture assertions |
+| `integrity`, `chunks` | Manifest sidecar plus ordered tiled payload paths, sizes, counts, and hashes |
+
+The v1 payload is a vacuum transfer map. It does not define GRMHD radiation,
+optical-depth, Stokes, or magnification/Jacobian channels; those require a
+future, separately versioned radiative-transfer contract.
 
 The v1 `blackhole.binary-scene/v1` JSON is a lightweight scene timeline, not
-this transfer-map format. Keeping the two concepts separate allows the current
-preview to be replaced by NR-derived data without pretending that its compact
-orbital samples contain a spacetime.
+the `blackhole.nr-transfer-map/v1` format. Keeping the two concepts separate
+allows the current preview to be replaced by NR-derived data without pretending
+that its compact orbital samples contain a spacetime.
+
+The repository's
+[`contract-fixture-v1`](../assets/transfer-maps/contract-fixture-v1/manifest.json)
+is deliberately marked `datasetKind = synthetic-contract-fixture` and
+`renderable = false`. It is small, deterministic, project-generated test data;
+it contains no SXS/NR metric, waveform, horizon, or ray payload. The fixture
+proves that the protocol tooling agrees with itself, not that the project has
+completed an NR simulation.
+
+The fail-closed validator rejects unknown schema versions and fields, missing
+fields, duplicate JSON keys, non-finite values, booleans used as numbers,
+unsafe or symbolic-link paths, sidecar hash/size mismatches, chunk
+overlap/gaps/order errors, non-monotonic source/protocol sampling, invalid
+spatial affine maps or ICRS rotations, invalid observer tetrads, inconsistent
+integration/boundary/capture declarations, mismatched outcome fractions, and
+illegal per-ray outcome/target/validity combinations. The stored
+`coordinateLookbackTimeM` is a non-negative, gauge-dependent protocol-coordinate
+difference, not a physical relative arrival-time delay. Invalid or unresolved
+rays remain explicit data states; they must never be silently converted into
+ordinary escaped sky samples.
+
+Run the contract validation independently of the existing rendering checks:
+
+```bash
+PYTHONDONTWRITEBYTECODE=1 python3 scripts/verify_nr_contract.py
+PYTHONDONTWRITEBYTECODE=1 python3 -m unittest tests/test_nr_contract.py
+```
+
+The first command validates
+`assets/transfer-maps/contract-fixture-v1/manifest.json` by default and accepts
+an explicit manifest path for offline datasets. Neither command validates an NR
+spacetime or geodesic physics.
 
 ## Validation gates for a future scientific mode
 

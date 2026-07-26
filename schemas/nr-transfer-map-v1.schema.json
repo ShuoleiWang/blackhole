@@ -1,0 +1,1974 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/ShuoleiWang/blackhole/schemas/nr-transfer-map-v1.schema.json",
+  "title": "Blackhole NR transfer-map manifest v1",
+  "description": "Versioned contract for immutable, camera-specific vacuum transfer maps. The contract fixture is deliberately non-renderable and is not numerical-relativity data.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "id",
+    "datasetKind",
+    "renderable",
+    "scientificStatus",
+    "physicalSystem",
+    "provenance",
+    "units",
+    "timeReference",
+    "coordinates",
+    "observer",
+    "camera",
+    "projection",
+    "sampling",
+    "rayIntegration",
+    "escapeBoundary",
+    "recordLayout",
+    "captureTargets",
+    "accuracy",
+    "integrity",
+    "chunks"
+  ],
+  "properties": {
+    "schema": {
+      "const": "blackhole.nr-transfer-map/v1"
+    },
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9._-]{2,127}$"
+    },
+    "datasetKind": {
+      "enum": [
+        "synthetic-contract-fixture",
+        "nr-slow-light-transfer-map",
+        "stationary-reference-transfer-map"
+      ]
+    },
+    "renderable": {
+      "type": "boolean"
+    },
+    "scientificStatus": {
+      "$ref": "#/$defs/scientificStatus"
+    },
+    "physicalSystem": {
+      "$ref": "#/$defs/physicalSystem"
+    },
+    "provenance": {
+      "$ref": "#/$defs/provenance"
+    },
+    "units": {
+      "$ref": "#/$defs/units"
+    },
+    "timeReference": {
+      "$ref": "#/$defs/timeReference"
+    },
+    "coordinates": {
+      "$ref": "#/$defs/coordinates"
+    },
+    "observer": {
+      "$ref": "#/$defs/observer"
+    },
+    "camera": {
+      "$ref": "#/$defs/camera"
+    },
+    "projection": {
+      "$ref": "#/$defs/projection"
+    },
+    "sampling": {
+      "$ref": "#/$defs/sampling"
+    },
+    "rayIntegration": {
+      "$ref": "#/$defs/rayIntegration"
+    },
+    "escapeBoundary": {
+      "$ref": "#/$defs/escapeBoundary"
+    },
+    "recordLayout": {
+      "$ref": "#/$defs/recordLayout"
+    },
+    "captureTargets": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/captureTarget"
+      },
+      "uniqueItems": true
+    },
+    "accuracy": {
+      "$ref": "#/$defs/accuracy"
+    },
+    "integrity": {
+      "$ref": "#/$defs/integrity"
+    },
+    "chunks": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/$defs/chunk"
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "datasetKind": {
+            "const": "synthetic-contract-fixture"
+          }
+        },
+        "required": [
+          "datasetKind"
+        ]
+      },
+      "then": {
+        "properties": {
+          "renderable": {
+            "const": false
+          },
+          "scientificStatus": {
+            "properties": {
+              "sourceIsNumericalRelativity": {
+                "const": false
+              },
+              "derivedFromNearZoneSpacetime": {
+                "const": false
+              },
+              "derivedWithSlowLightGeodesics": {
+                "const": false
+              }
+            }
+          },
+          "physicalSystem": {
+            "properties": {
+              "kind": {
+                "const": "synthetic-contract-fixture"
+              }
+            }
+          },
+          "rayIntegration": {
+            "properties": {
+              "spacetimeMode": {
+                "const": "synthetic"
+              }
+            }
+          },
+          "accuracy": {
+            "properties": {
+              "status": {
+                "const": "not-measured"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "datasetKind": {
+            "const": "nr-slow-light-transfer-map"
+          }
+        },
+        "required": [
+          "datasetKind"
+        ]
+      },
+      "then": {
+        "properties": {
+          "provenance": {
+            "properties": {
+              "sourceSimulation": {
+                "properties": {
+                  "kind": {
+                    "const": "catalog-simulation"
+                  },
+                  "doi": {
+                    "type": "string",
+                    "pattern": "^10\\.[0-9]{4,9}/\\S+$"
+                  },
+                  "evolutionCode": {
+                    "$ref": "#/$defs/evolutionCode"
+                  }
+                }
+              }
+            }
+          },
+          "scientificStatus": {
+            "properties": {
+              "sourceIsNumericalRelativity": {
+                "const": true
+              },
+              "derivedFromNearZoneSpacetime": {
+                "const": true
+              },
+              "derivedWithSlowLightGeodesics": {
+                "const": true
+              }
+            }
+          },
+          "physicalSystem": {
+            "properties": {
+              "kind": {
+                "const": "binary-black-hole"
+              },
+              "parameterEpochProtocolM": {
+                "type": "number"
+              },
+              "massRatioQ": {
+                "type": "number",
+                "minimum": 1
+              },
+              "dimensionlessSpins": {
+                "minItems": 1
+              },
+              "eccentricity": {
+                "type": "number",
+                "minimum": 0
+              },
+              "referenceOrbitalPhaseRad": {
+                "type": "number"
+              },
+              "remnant": {
+                "$ref": "#/$defs/remnant"
+              },
+              "notApplicableReason": {
+                "type": "null"
+              }
+            }
+          },
+          "rayIntegration": {
+            "properties": {
+              "spacetimeMode": {
+                "const": "time-dependent"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "renderable": {
+            "const": true
+          }
+        },
+        "required": [
+          "renderable"
+        ]
+      },
+      "then": {
+        "properties": {
+          "accuracy": {
+            "properties": {
+              "status": {
+                "const": "measured"
+              },
+              "unresolvedFraction": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 1
+              },
+              "outcomeFractions": {
+                "properties": {
+                  "escaped": {
+                    "type": "number"
+                  },
+                  "captured": {
+                    "type": "number"
+                  },
+                  "unresolved": {
+                    "type": "number"
+                  },
+                  "outside-domain": {
+                    "type": "number"
+                  },
+                  "integrator-failure": {
+                    "type": "number"
+                  },
+                  "missing": {
+                    "type": "number"
+                  },
+                  "unusable": {
+                    "type": "number"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "finiteNumber": {
+      "type": "number"
+    },
+    "nonNegativeNumber": {
+      "type": "number",
+      "minimum": 0
+    },
+    "positiveNumber": {
+      "type": "number",
+      "exclusiveMinimum": 0
+    },
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "vector3": {
+      "type": "array",
+      "prefixItems": [
+        {
+          "$ref": "#/$defs/finiteNumber"
+        },
+        {
+          "$ref": "#/$defs/finiteNumber"
+        },
+        {
+          "$ref": "#/$defs/finiteNumber"
+        }
+      ],
+      "minItems": 3,
+      "maxItems": 3
+    },
+    "vector4": {
+      "type": "array",
+      "prefixItems": [
+        {
+          "$ref": "#/$defs/finiteNumber"
+        },
+        {
+          "$ref": "#/$defs/finiteNumber"
+        },
+        {
+          "$ref": "#/$defs/finiteNumber"
+        },
+        {
+          "$ref": "#/$defs/finiteNumber"
+        }
+      ],
+      "minItems": 4,
+      "maxItems": 4
+    },
+    "matrix4": {
+      "type": "array",
+      "minItems": 16,
+      "maxItems": 16,
+      "items": {
+        "$ref": "#/$defs/finiteNumber"
+      }
+    },
+    "matrix3": {
+      "type": "array",
+      "minItems": 9,
+      "maxItems": 9,
+      "items": {
+        "$ref": "#/$defs/finiteNumber"
+      }
+    },
+    "tetrad4": {
+      "type": "array",
+      "prefixItems": [
+        {
+          "$ref": "#/$defs/vector4"
+        },
+        {
+          "$ref": "#/$defs/vector4"
+        },
+        {
+          "$ref": "#/$defs/vector4"
+        },
+        {
+          "$ref": "#/$defs/vector4"
+        }
+      ],
+      "minItems": 4,
+      "maxItems": 4
+    },
+    "scientificStatus": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "classification",
+        "sourceIsNumericalRelativity",
+        "derivedFromNearZoneSpacetime",
+        "derivedWithSlowLightGeodesics",
+        "description",
+        "prohibitedClaim"
+      ],
+      "properties": {
+        "classification": {
+          "type": "string",
+          "minLength": 1
+        },
+        "sourceIsNumericalRelativity": {
+          "type": "boolean"
+        },
+        "derivedFromNearZoneSpacetime": {
+          "type": "boolean"
+        },
+        "derivedWithSlowLightGeodesics": {
+          "type": "boolean"
+        },
+        "description": {
+          "type": "string",
+          "minLength": 1
+        },
+        "prohibitedClaim": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "physicalSystem": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "vacuum",
+        "componentIds",
+        "parameterEpochProtocolM",
+        "massRatioQ",
+        "dimensionlessSpins",
+        "eccentricity",
+        "referenceOrbitalPhaseRad",
+        "remnant",
+        "notApplicableReason",
+        "description"
+      ],
+      "properties": {
+        "kind": {
+          "enum": [
+            "synthetic-contract-fixture",
+            "binary-black-hole",
+            "stationary-black-hole"
+          ]
+        },
+        "vacuum": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "componentIds": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "uniqueItems": true
+        },
+        "parameterEpochProtocolM": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "massRatioQ": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 1
+        },
+        "dimensionlessSpins": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/componentSpin"
+          }
+        },
+        "eccentricity": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "referenceOrbitalPhaseRad": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "remnant": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/remnant"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "notApplicableReason": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "description": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "componentSpin": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "componentId",
+        "vector"
+      ],
+      "properties": {
+        "componentId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "vector": {
+          "$ref": "#/$defs/spinVector3"
+        }
+      }
+    },
+    "spinVector3": {
+      "type": "array",
+      "prefixItems": [
+        {
+          "type": "number",
+          "minimum": -1,
+          "maximum": 1
+        },
+        {
+          "type": "number",
+          "minimum": -1,
+          "maximum": 1
+        },
+        {
+          "type": "number",
+          "minimum": -1,
+          "maximum": 1
+        }
+      ],
+      "minItems": 3,
+      "maxItems": 3
+    },
+    "remnant": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "massFraction",
+        "dimensionlessSpin"
+      ],
+      "properties": {
+        "massFraction": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "dimensionlessSpin": {
+          "$ref": "#/$defs/spinVector3"
+        }
+      }
+    },
+    "sourceSimulation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "catalog",
+        "identifier",
+        "version",
+        "doi",
+        "evolutionCode",
+        "notApplicableReason"
+      ],
+      "properties": {
+        "kind": {
+          "enum": [
+            "none",
+            "catalog-simulation",
+            "stationary-reference"
+          ]
+        },
+        "catalog": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "identifier": {
+          "type": "string",
+          "minLength": 1
+        },
+        "version": {
+          "type": "string",
+          "minLength": 1
+        },
+        "doi": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "evolutionCode": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/evolutionCode"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "notApplicableReason": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "evolutionCode": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "release",
+        "commit",
+        "commitNotAvailableReason"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "release": {
+          "type": "string",
+          "minLength": 1
+        },
+        "commit": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "commitNotAvailableReason": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "sourceArtifact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "role",
+        "storage",
+        "uri",
+        "byteLength",
+        "sha256"
+      ],
+      "properties": {
+        "role": {
+          "type": "string",
+          "minLength": 1
+        },
+        "storage": {
+          "enum": [
+            "bundled",
+            "external-reference"
+          ]
+        },
+        "uri": {
+          "type": "string",
+          "minLength": 1
+        },
+        "byteLength": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "sha256": {
+          "$ref": "#/$defs/sha256"
+        }
+      }
+    },
+    "generator": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "version",
+        "uri",
+        "command",
+        "codeRevision",
+        "deterministic"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "version": {
+          "type": "string",
+          "minLength": 1
+        },
+        "uri": {
+          "type": "string",
+          "minLength": 1
+        },
+        "command": {
+          "type": "string",
+          "minLength": 1
+        },
+        "codeRevision": {
+          "type": "string",
+          "minLength": 1
+        },
+        "deterministic": {
+          "const": true
+        }
+      }
+    },
+    "provenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "origin",
+        "project",
+        "datasetVersion",
+        "license",
+        "artifactUriBase",
+        "sourceSimulation",
+        "generator",
+        "sourceArtifacts"
+      ],
+      "properties": {
+        "origin": {
+          "enum": [
+            "project-generated",
+            "external-derived"
+          ]
+        },
+        "project": {
+          "type": "string",
+          "minLength": 1
+        },
+        "datasetVersion": {
+          "type": "string",
+          "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"
+        },
+        "license": {
+          "type": "string",
+          "minLength": 1
+        },
+        "artifactUriBase": {
+          "enum": [
+            "repository-root",
+            "manifest-directory"
+          ]
+        },
+        "sourceSimulation": {
+          "$ref": "#/$defs/sourceSimulation"
+        },
+        "generator": {
+          "$ref": "#/$defs/generator"
+        },
+        "sourceArtifacts": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/sourceArtifact"
+          }
+        }
+      }
+    },
+    "massNormalization": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "quantity",
+        "symbol",
+        "value",
+        "definition",
+        "referenceEpochSourceM"
+      ],
+      "properties": {
+        "quantity": {
+          "enum": [
+            "synthetic unit mass",
+            "initial ADM total mass",
+            "reference-epoch total Christodoulou mass",
+            "stationary black-hole mass"
+          ]
+        },
+        "symbol": {
+          "const": "M"
+        },
+        "value": {
+          "const": 1
+        },
+        "definition": {
+          "type": "string",
+          "minLength": 1
+        },
+        "referenceEpochSourceM": {
+          "type": [
+            "number",
+            "null"
+          ]
+        }
+      }
+    },
+    "units": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "system",
+        "G",
+        "c",
+        "massNormalization",
+        "coordinateTime",
+        "length",
+        "angle",
+        "frequencyShift"
+      ],
+      "properties": {
+        "system": {
+          "const": "geometric"
+        },
+        "G": {
+          "const": 1
+        },
+        "c": {
+          "const": 1
+        },
+        "massNormalization": {
+          "$ref": "#/$defs/massNormalization"
+        },
+        "coordinateTime": {
+          "const": "M"
+        },
+        "length": {
+          "const": "M"
+        },
+        "angle": {
+          "const": "radian"
+        },
+        "frequencyShift": {
+          "const": "dimensionless"
+        }
+      }
+    },
+    "timeReference": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "sourceTimeAtProtocolZeroM",
+        "sourceTimeDirection",
+        "protocolTimeDefinition",
+        "zeroEvent",
+        "waveformTimeMapping"
+      ],
+      "properties": {
+        "sourceTimeAtProtocolZeroM": {
+          "$ref": "#/$defs/finiteNumber"
+        },
+        "sourceTimeDirection": {
+          "const": "future-increasing"
+        },
+        "protocolTimeDefinition": {
+          "const": "t_protocol=t_source-sourceTimeAtProtocolZeroM"
+        },
+        "zeroEvent": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "name",
+            "source",
+            "description"
+          ],
+          "properties": {
+            "name": {
+              "type": "string",
+              "minLength": 1
+            },
+            "source": {
+              "type": "string",
+              "minLength": 1
+            },
+            "description": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        },
+        "waveformTimeMapping": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "status",
+            "sourceQuantity",
+            "mapping",
+            "notApplicableReason"
+          ],
+          "properties": {
+            "status": {
+              "enum": [
+                "declared",
+                "not-applicable"
+              ]
+            },
+            "sourceQuantity": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "mapping": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "notApplicableReason": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        }
+      }
+    },
+    "nrChart": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status",
+        "gauge",
+        "coordinates",
+        "timeSlicing"
+      ],
+      "properties": {
+        "status": {
+          "enum": [
+            "synthetic",
+            "declared"
+          ]
+        },
+        "gauge": {
+          "type": "string",
+          "minLength": 1
+        },
+        "coordinates": {
+          "type": "string",
+          "minLength": 1
+        },
+        "timeSlicing": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "worldFrame": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "handedness",
+        "axisOrder",
+        "origin",
+        "matrixConvention",
+        "nrToWorld",
+        "worldToNr"
+      ],
+      "properties": {
+        "handedness": {
+          "const": "right"
+        },
+        "axisOrder": {
+          "const": [
+            "x",
+            "y",
+            "z"
+          ]
+        },
+        "origin": {
+          "type": "string",
+          "minLength": 1
+        },
+        "matrixConvention": {
+          "const": "row-major spatial affine 4x4 matrices multiplying [x,y,z,1] column vectors; not spacetime coordinate transforms"
+        },
+        "nrToWorld": {
+          "$ref": "#/$defs/matrix4"
+        },
+        "worldToNr": {
+          "$ref": "#/$defs/matrix4"
+        }
+      }
+    },
+    "skyCoordinates": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "referenceFrame",
+        "icrsAxes",
+        "rotationConvention",
+        "worldToIcrs",
+        "icrsToWorld",
+        "projection",
+        "longitudeMapping",
+        "latitudeMapping",
+        "escapeDirectionFrame"
+      ],
+      "properties": {
+        "referenceFrame": {
+          "const": "ICRS"
+        },
+        "icrsAxes": {
+          "const": {
+            "x": "ICRS right ascension 0 degrees, declination 0 degrees",
+            "y": "ICRS right ascension 90 degrees, declination 0 degrees",
+            "z": "ICRS north celestial pole"
+          }
+        },
+        "rotationConvention": {
+          "const": "proper right-handed row-major 3x3 rotations multiplying spatial column vectors"
+        },
+        "worldToIcrs": {
+          "$ref": "#/$defs/matrix3"
+        },
+        "icrsToWorld": {
+          "$ref": "#/$defs/matrix3"
+        },
+        "projection": {
+          "const": "equirectangular"
+        },
+        "longitudeMapping": {
+          "const": "u=fract(longitude/(2*pi)+0.5)"
+        },
+        "latitudeMapping": {
+          "const": "v=0.5-latitude/pi"
+        },
+        "escapeDirectionFrame": {
+          "const": "ICRS"
+        }
+      }
+    },
+    "coordinates": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "metricSignature",
+        "nrChart",
+        "worldFrame",
+        "sky"
+      ],
+      "properties": {
+        "metricSignature": {
+          "const": "-+++"
+        },
+        "nrChart": {
+          "$ref": "#/$defs/nrChart"
+        },
+        "worldFrame": {
+          "$ref": "#/$defs/worldFrame"
+        },
+        "sky": {
+          "$ref": "#/$defs/skyCoordinates"
+        }
+      }
+    },
+    "observer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "tetradBasisOrder",
+        "tetradIndexConvention",
+        "samples"
+      ],
+      "properties": {
+        "tetradBasisOrder": {
+          "const": [
+            "time",
+            "right",
+            "up",
+            "forward"
+          ]
+        },
+        "tetradIndexConvention": {
+          "const": "e_(a)^mu; rows are local basis vectors in the NR coordinate basis"
+        },
+        "samples": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/observerSample"
+          }
+        }
+      }
+    },
+    "observerSample": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "sampleIndex",
+        "protocolTimeM",
+        "eventNr",
+        "metricCovariantNr",
+        "metricContravariantNr",
+        "fourVelocityContravariantNr",
+        "properTimeM",
+        "tetradContravariantNr"
+      ],
+      "properties": {
+        "sampleIndex": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "protocolTimeM": {
+          "$ref": "#/$defs/finiteNumber"
+        },
+        "eventNr": {
+          "$ref": "#/$defs/vector4"
+        },
+        "metricCovariantNr": {
+          "$ref": "#/$defs/matrix4"
+        },
+        "metricContravariantNr": {
+          "$ref": "#/$defs/matrix4"
+        },
+        "fourVelocityContravariantNr": {
+          "$ref": "#/$defs/vector4"
+        },
+        "properTimeM": {
+          "$ref": "#/$defs/finiteNumber"
+        },
+        "tetradContravariantNr": {
+          "$ref": "#/$defs/tetrad4"
+        }
+      }
+    },
+    "camera": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "frameType",
+        "motion",
+        "matrixConvention",
+        "basisOrder",
+        "cameraToWorld",
+        "worldToCamera",
+        "physicalRelation"
+      ],
+      "properties": {
+        "frameType": {
+          "const": "affine-visualization-frame"
+        },
+        "motion": {
+          "const": "fixed"
+        },
+        "matrixConvention": {
+          "const": "row-major spatial affine 4x4 matrices multiplying [x,y,z,1] column vectors; not spacetime coordinate transforms"
+        },
+        "basisOrder": {
+          "const": [
+            "right",
+            "up",
+            "forward"
+          ]
+        },
+        "cameraToWorld": {
+          "$ref": "#/$defs/matrix4"
+        },
+        "worldToCamera": {
+          "$ref": "#/$defs/matrix4"
+        },
+        "physicalRelation": {
+          "const": "The affine frame is for deterministic playback coordinates; physical ray initialization uses the observer tetrad."
+        }
+      }
+    },
+    "projection": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "model",
+        "widthPixels",
+        "heightPixels",
+        "verticalFieldOfViewRad",
+        "imageOrigin",
+        "pixelSampleLocation",
+        "aspectConvention",
+        "screenXFormula",
+        "screenYFormula",
+        "rayTimeOrientation",
+        "localRayConvention"
+      ],
+      "properties": {
+        "model": {
+          "const": "rectilinear-pinhole"
+        },
+        "widthPixels": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "heightPixels": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "verticalFieldOfViewRad": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "exclusiveMaximum": 3.141592653589793
+        },
+        "imageOrigin": {
+          "const": "top-left"
+        },
+        "pixelSampleLocation": {
+          "const": "center"
+        },
+        "aspectConvention": {
+          "const": "aspect=widthPixels/heightPixels"
+        },
+        "screenXFormula": {
+          "const": "screenX=((x+0.5)/widthPixels*2-1)*aspect*tan(verticalFieldOfViewRad/2)"
+        },
+        "screenYFormula": {
+          "const": "screenY=(1-(y+0.5)/heightPixels*2)*tan(verticalFieldOfViewRad/2)"
+        },
+        "rayTimeOrientation": {
+          "const": "past-directed"
+        },
+        "localRayConvention": {
+          "const": "k^(a)=(-1,normalize(screenX,screenY,1)) in the time/right/up/forward tetrad"
+        }
+      }
+    },
+    "interpolation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "time",
+        "continuous",
+        "escapeDirection",
+        "categorical",
+        "invalidRecords"
+      ],
+      "properties": {
+        "time": {
+          "enum": [
+            "none",
+            "validity-strict-linear"
+          ]
+        },
+        "continuous": {
+          "const": "validity-strict-linear"
+        },
+        "escapeDirection": {
+          "const": "validity-strict-linear-then-normalize"
+        },
+        "categorical": {
+          "const": "nearest-no-blend"
+        },
+        "invalidRecords": {
+          "const": "never-sample-sky"
+        }
+      }
+    },
+    "sampling": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "observationTimesM",
+        "timeCoordinate",
+        "dimensionOrder",
+        "pixelOrder",
+        "tileOrder",
+        "interpolation"
+      ],
+      "properties": {
+        "observationTimesM": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/finiteNumber"
+          }
+        },
+        "timeCoordinate": {
+          "const": "protocol"
+        },
+        "dimensionOrder": {
+          "const": [
+            "time",
+            "y",
+            "x"
+          ]
+        },
+        "pixelOrder": {
+          "const": "row-major"
+        },
+        "tileOrder": {
+          "const": "manifest-order"
+        },
+        "interpolation": {
+          "$ref": "#/$defs/interpolation"
+        }
+      }
+    },
+    "rayIntegration": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "spacetimeMode",
+        "spatialInterpolation",
+        "temporalInterpolation",
+        "integrator",
+        "tolerances",
+        "initialNormalization",
+        "timeOrientation",
+        "termination",
+        "integrationPrecision",
+        "outputPrecision"
+      ],
+      "properties": {
+        "spacetimeMode": {
+          "enum": [
+            "time-dependent",
+            "stationary",
+            "synthetic"
+          ]
+        },
+        "spatialInterpolation": {
+          "type": "string",
+          "minLength": 1
+        },
+        "temporalInterpolation": {
+          "type": "string",
+          "minLength": 1
+        },
+        "integrator": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "name",
+            "method"
+          ],
+          "properties": {
+            "name": {
+              "type": "string",
+              "minLength": 1
+            },
+            "method": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        },
+        "tolerances": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "absolute",
+            "relative",
+            "nullConstraint"
+          ],
+          "properties": {
+            "absolute": {
+              "type": [
+                "number",
+                "null"
+              ],
+              "exclusiveMinimum": 0
+            },
+            "relative": {
+              "type": [
+                "number",
+                "null"
+              ],
+              "exclusiveMinimum": 0
+            },
+            "nullConstraint": {
+              "type": [
+                "number",
+                "null"
+              ],
+              "exclusiveMinimum": 0
+            }
+          }
+        },
+        "initialNormalization": {
+          "const": "u_observer·k_observer=1"
+        },
+        "timeOrientation": {
+          "const": "past-directed"
+        },
+        "termination": {
+          "const": {
+            "escaped": "intersect escapeBoundary",
+            "captured": "intersect a captureTargets surface",
+            "unresolved": "step or affine-parameter budget exhausted",
+            "outside-domain": "left the declared spacetime domain away from escapeBoundary",
+            "integrator-failure": "non-finite state or tolerance failure",
+            "missing": "record was not generated"
+          }
+        },
+        "integrationPrecision": {
+          "enum": [
+            "float64",
+            "float80-or-higher"
+          ]
+        },
+        "outputPrecision": {
+          "const": "float32"
+        }
+      }
+    },
+    "escapeBoundary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "surface",
+        "referenceObserver",
+        "frequencyShiftConvention",
+        "storedEscapeDirection"
+      ],
+      "properties": {
+        "surface": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "centreWorldM",
+            "radiusM"
+          ],
+          "properties": {
+            "kind": {
+              "enum": [
+                "coordinate-sphere",
+                "areal-radius-worldtube",
+                "synthetic-coordinate-sphere"
+              ]
+            },
+            "centreWorldM": {
+              "$ref": "#/$defs/vector3"
+            },
+            "radiusM": {
+              "$ref": "#/$defs/positiveNumber"
+            }
+          }
+        },
+        "referenceObserver": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "definition",
+            "sourceArtifactRole"
+          ],
+          "properties": {
+            "kind": {
+              "enum": [
+                "eulerian-normal",
+                "asymptotic-inertial",
+                "synthetic-inertial"
+              ]
+            },
+            "definition": {
+              "type": "string",
+              "minLength": 1
+            },
+            "sourceArtifactRole": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        },
+        "frequencyShiftConvention": {
+          "const": "g=(u_observer·k_observer)/(u_boundary·k_boundary)"
+        },
+        "storedEscapeDirection": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "frame",
+            "normalization",
+            "continuationBeyondBoundary"
+          ],
+          "properties": {
+            "frame": {
+              "const": "ICRS"
+            },
+            "normalization": {
+              "const": "unit Euclidean spatial vector"
+            },
+            "continuationBeyondBoundary": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        }
+      }
+    },
+    "recordLayout": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "storage",
+        "byteOrder",
+        "structFormat",
+        "recordBytes",
+        "fields",
+        "observableConventions",
+        "rayOutcomes",
+        "captureTargetNone",
+        "validityBits",
+        "invalidFloatPolicy"
+      ],
+      "properties": {
+        "storage": {
+          "const": "raw-struct-array"
+        },
+        "byteOrder": {
+          "const": "little-endian"
+        },
+        "structFormat": {
+          "const": "<7fBBH"
+        },
+        "recordBytes": {
+          "const": 32
+        },
+        "fields": {
+          "const": [
+            {
+              "name": "escapeDirection",
+              "offsetBytes": 0,
+              "componentType": "float32",
+              "components": 3
+            },
+            {
+              "name": "frequencyShiftG",
+              "offsetBytes": 12,
+              "componentType": "float32",
+              "components": 1
+            },
+            {
+              "name": "coordinateLookbackTimeM",
+              "offsetBytes": 16,
+              "componentType": "float32",
+              "components": 1
+            },
+            {
+              "name": "nullResidual",
+              "offsetBytes": 20,
+              "componentType": "float32",
+              "components": 1
+            },
+            {
+              "name": "projectionErrorPx",
+              "offsetBytes": 24,
+              "componentType": "float32",
+              "components": 1
+            },
+            {
+              "name": "rayOutcome",
+              "offsetBytes": 28,
+              "componentType": "uint8",
+              "components": 1
+            },
+            {
+              "name": "captureTarget",
+              "offsetBytes": 29,
+              "componentType": "uint8",
+              "components": 1
+            },
+            {
+              "name": "validityMask",
+              "offsetBytes": 30,
+              "componentType": "uint16",
+              "components": 1
+            }
+          ]
+        },
+        "observableConventions": {
+          "const": {
+            "escapeDirection": "outgoing ICRS unit direction after the declared continuation beyond escapeBoundary",
+            "frequencyShiftG": "g=(u_observer·k_observer)/(u_boundary·k_boundary)",
+            "coordinateLookbackTimeM": "t_observer_protocol-t_terminal_protocol >= 0; a gauge-dependent coordinate quantity, not a physical relative arrival-time delay",
+            "nullResidual": "maximum absolute g_mu_nu*k^mu*k^nu along the ray after normalizing u_observer·k_observer to one",
+            "projectionErrorPx": "estimated image-plane displacement under the declared geodesic or interpolation refinement",
+            "validity": "validityMask is authoritative; fields whose bits are clear must never affect rendering or interpolation"
+          }
+        },
+        "rayOutcomes": {
+          "const": {
+            "escaped": 0,
+            "captured": 1,
+            "unresolved": 2,
+            "outside-domain": 3,
+            "integrator-failure": 4,
+            "missing": 255
+          }
+        },
+        "captureTargetNone": {
+          "const": 255
+        },
+        "validityBits": {
+          "const": {
+            "escapeDirection": 0,
+            "frequencyShiftG": 1,
+            "coordinateLookbackTimeM": 2,
+            "nullResidual": 3,
+            "projectionErrorPx": 4
+          }
+        },
+        "invalidFloatPolicy": {
+          "const": "write-positive-zero-and-use-validity-mask-as-authority"
+        }
+      }
+    },
+    "captureTarget": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "code",
+        "id",
+        "description",
+        "surfaceKind",
+        "validityIntervalProtocolM",
+        "classificationPriority",
+        "sourceArtifactRole"
+      ],
+      "properties": {
+        "code": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 254
+        },
+        "id": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9._-]+$"
+        },
+        "description": {
+          "type": "string",
+          "minLength": 1
+        },
+        "surfaceKind": {
+          "type": "string",
+          "minLength": 1
+        },
+        "validityIntervalProtocolM": {
+          "type": "array",
+          "prefixItems": [
+            {
+              "$ref": "#/$defs/finiteNumber"
+            },
+            {
+              "$ref": "#/$defs/finiteNumber"
+            }
+          ],
+          "minItems": 2,
+          "maxItems": 2
+        },
+        "classificationPriority": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "sourceArtifactRole": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "accuracySection": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "quantity",
+        "status",
+        "method",
+        "value"
+      ],
+      "properties": {
+        "quantity": {
+          "type": "string",
+          "minLength": 1
+        },
+        "status": {
+          "enum": [
+            "measured",
+            "not-measured",
+            "not-applicable"
+          ]
+        },
+        "method": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "value": {
+          "type": [
+            "number",
+            "null"
+          ]
+        }
+      }
+    },
+    "fixtureAssertions": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "worldCameraRoundTripTolerance",
+        "expectedOutcomeCounts"
+      ],
+      "properties": {
+        "worldCameraRoundTripTolerance": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "maximum": 1e-10
+        },
+        "expectedOutcomeCounts": {
+          "const": {
+            "escaped": 2,
+            "captured": 2,
+            "unresolved": 1,
+            "outside-domain": 1,
+            "integrator-failure": 1,
+            "missing": 1
+          }
+        }
+      }
+    },
+    "accuracy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status",
+        "notMeasuredReason",
+        "nrConvergence",
+        "constraintNorms",
+        "geodesicNullResidual",
+        "interpolationError",
+        "unresolvedFraction",
+        "outcomeFractions",
+        "fixtureAssertions"
+      ],
+      "properties": {
+        "status": {
+          "enum": [
+            "measured",
+            "not-measured"
+          ]
+        },
+        "notMeasuredReason": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "nrConvergence": {
+          "$ref": "#/$defs/accuracySection"
+        },
+        "constraintNorms": {
+          "$ref": "#/$defs/accuracySection"
+        },
+        "geodesicNullResidual": {
+          "$ref": "#/$defs/accuracySection"
+        },
+        "interpolationError": {
+          "$ref": "#/$defs/accuracySection"
+        },
+        "unresolvedFraction": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0,
+          "maximum": 1
+        },
+        "outcomeFractions": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "escaped",
+            "captured",
+            "unresolved",
+            "outside-domain",
+            "integrator-failure",
+            "missing",
+            "unusable"
+          ],
+          "properties": {
+            "escaped": {
+              "type": [
+                "number",
+                "null"
+              ],
+              "minimum": 0,
+              "maximum": 1
+            },
+            "captured": {
+              "type": [
+                "number",
+                "null"
+              ],
+              "minimum": 0,
+              "maximum": 1
+            },
+            "unresolved": {
+              "type": [
+                "number",
+                "null"
+              ],
+              "minimum": 0,
+              "maximum": 1
+            },
+            "outside-domain": {
+              "type": [
+                "number",
+                "null"
+              ],
+              "minimum": 0,
+              "maximum": 1
+            },
+            "integrator-failure": {
+              "type": [
+                "number",
+                "null"
+              ],
+              "minimum": 0,
+              "maximum": 1
+            },
+            "missing": {
+              "type": [
+                "number",
+                "null"
+              ],
+              "minimum": 0,
+              "maximum": 1
+            },
+            "unusable": {
+              "type": [
+                "number",
+                "null"
+              ],
+              "minimum": 0,
+              "maximum": 1
+            }
+          }
+        },
+        "fixtureAssertions": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/fixtureAssertions"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "integrity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "algorithm",
+        "manifestSidecar",
+        "sidecarFormat",
+        "chunkUriBase",
+        "chunkHashes"
+      ],
+      "properties": {
+        "algorithm": {
+          "const": "sha256"
+        },
+        "manifestSidecar": {
+          "const": "manifest.sha256"
+        },
+        "sidecarFormat": {
+          "const": "<lowercase-hex><two-spaces>manifest.json<newline>"
+        },
+        "chunkUriBase": {
+          "const": "manifest-directory"
+        },
+        "chunkHashes": {
+          "const": "embedded-in-manifest"
+        }
+      }
+    },
+    "tile": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "x",
+        "y",
+        "width",
+        "height"
+      ],
+      "properties": {
+        "x": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "y": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "width": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "height": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    },
+    "chunk": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "sampleIndex",
+        "tile",
+        "uri",
+        "recordCount",
+        "recordBytes",
+        "byteLength",
+        "sha256"
+      ],
+      "properties": {
+        "sampleIndex": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "tile": {
+          "$ref": "#/$defs/tile"
+        },
+        "uri": {
+          "type": "string",
+          "pattern": "^chunks/[A-Za-z0-9._-]+\\.bin$"
+        },
+        "recordCount": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "recordBytes": {
+          "const": 32
+        },
+        "byteLength": {
+          "type": "integer",
+          "minimum": 32,
+          "multipleOf": 32
+        },
+        "sha256": {
+          "$ref": "#/$defs/sha256"
+        }
+      }
+    }
+  }
+}

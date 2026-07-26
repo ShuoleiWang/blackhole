@@ -269,7 +269,7 @@ export async function createBinaryApproxScene({
       elements.shadowLabel.textContent = "模型区段";
       elements.massLabel.textContent = "系统总质量";
       elements.sceneStatus.hidden = false;
-      elements.sceneStatus.textContent = "实验场景 · PN / NR-informed preview · 不是完整数值相对论光追";
+      elements.sceneStatus.textContent = "实验场景 · PN / 现象学弱场预览 · 不是完整数值相对论光追";
       elements.binaryTimeline.hidden = false;
       elements.waveformPath.setAttribute(
         "d",

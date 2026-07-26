@@ -3,7 +3,7 @@
   "id": "binary-pn-equal-mass-v1",
   "title": "Equal-mass non-spinning binary preview",
   "accuracy": {
-    "classification": "PN / NR-informed preview",
+    "classification": "PN / phenomenological weak-field preview",
     "fullNumericalRelativity": false,
     "nearZoneSpacetimeIncluded": false,
     "description": "The inspiral samples follow leading-order post-Newtonian quadrupole evolution. The merger and remnant samples are a phenomenological visualization transition informed by the qualitative outcome of equal-mass numerical-relativity simulations; they are not samples of a solved 4D numerical-relativity metric.",

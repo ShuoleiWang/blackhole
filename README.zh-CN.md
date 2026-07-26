@@ -6,7 +6,12 @@
 
 默认场景在 Schwarzschild 时空中反向积分过去指向的零测地线，并用同一条光路计算事件视界捕获、理想薄吸积盘交点、相对论频移，以及全天球银河背景的引力透镜成像。
 
-项目另有完全隔离、需要显式选择的 `?scene=binary-approx` 等质量无自旋双黑洞预览。该模式把最低阶后牛顿（PN）螺旋靠近时间线、现象学合并/余留体过渡和实时多中心弱场光线偏折组合起来。它明确属于 **PN / NR-informed preview，不是已求解的完整数值相对论时空**。项目面向实时可视化与教学演示，不是 Kerr、完整 NR、GRMHD 或高精度辐射转移求解器。
+项目另有完全隔离、需要显式选择的 `?scene=binary-approx`
+等质量无自旋双黑洞预览。该模式把最低阶后牛顿（PN）螺旋靠近时间线、
+现象学合并/余留体过渡和实时多中心弱场光线偏折组合起来。它是
+**PN／现象学弱场预览**：只有取整后的余留体参考值来自
+`SXS:BBH:0001`，不使用 SXS 波形、视界、时空或光线传输数据。项目面向
+实时可视化与教学演示，不是 Kerr、完整 NR、GRMHD 或高精度辐射转移求解器。
 
 ![Schwarzschild 黑洞、薄吸积盘与引力透镜化银河背景](./docs/images/blackhole-galaxy-hero.webp)
 
@@ -19,6 +24,10 @@
 - **相对论薄盘显示**：包含 Schwarzschild 圆轨道频移、`g⁴` 总辐射强度变换、近似黑体色度、表面光学深度与肢暗化。
 - **实时程序化盘面**：受盘湍流启发的有限寿命噪声场随局部 Kepler 角速度平流；它是视觉近似，不是 MHD 模拟。
 - **可选双黑洞预览**：`?scene=binary-approx` 按需加载独立 PN 时间线及配套 WGSL / GLSL 弱场透镜 shader。真空场景刻意不加入发光吸积盘，也不声称强场或合并阶段具有定量精度。
+- **版本化 NR transfer map 边界**：失败即拒绝的 schema、确定性一致性
+  fixture、生成器、验证器和测试定义了未来相机特定 slow-light
+  数据进入项目的方式。它目前只是数据契约，不包含 NR 派生 transfer map
+  或 NR 回放场景。
 - **不破坏原功能的场景架构**：可选 scene descriptor 与 shader bundle 扩展共享 WebGPU / WebGL2 后端；默认 URL 仍使用原有 Schwarzschild shader、观测者模型、吸积盘和交互。
 - **WebGPU 优先、WebGL2 回退**：根据浏览器实际暴露的 GPU limits、纹理尺寸和 framebuffer 能力选择路径，不按芯片型号硬编码。
 - **渐进式天空资源**：仓库内置 ESO 6K 与 4K 回退；可选加载 ESA/Gaia 16000×8000 全天图。
@@ -38,6 +47,8 @@ python3 -m http.server 4173
 
 通过界面中的场景选择器，或直接打开
 <http://localhost:4173/?scene=binary-approx>，可以进入实验性双黑洞预览；回到默认 URL 即恢复 Schwarzschild 场景。
+transfer map 契约不会增加新的可运行场景；默认 Schwarzschild 路径和显式
+选择的 `binary-approx` 路径均未改变。
 
 仓库内的 6K 银河背景可以直接运行。若希望使用约 236 MiB 的 Gaia 16K 全天图，可额外执行：
 
@@ -67,7 +78,7 @@ python3 -m http.server 4173
 
 | URL 参数 | 用途 |
 | --- | --- |
-| `?scene=binary-approx` | 显式进入隔离的 PN / NR-informed 双黑洞预览；默认仍为 Schwarzschild |
+| `?scene=binary-approx` | 显式进入隔离的 PN／现象学弱场双黑洞预览；默认仍为 Schwarzschild |
 | `?renderer=webgl` | 强制使用 WebGL2 回退路径 |
 | `?hdr=0` | 关闭扩展 HDR，使用稳定的 SDR 输出 |
 | `?sky=high` | 固定使用仓库内的 ESO 6K 银河背景 |
@@ -92,6 +103,11 @@ http://localhost:4173/?scene=binary-approx&presentation=1&sky=high&hdr=0
 
 可选双黑洞路径会按需加载并校验版本化场景清单，插值 PN/现象学时间线，再向两个渲染后端提供专用 trace shader。该 shader 在每条光线内冻结当前时间样本，使用 fast-light 的双中心弱场偏折，并逐步混合为单一视觉余留体；天空采样、后处理和 HDR 仍复用共享阶段。相机不会套用单黑洞圆轨道观测者的 Lorentz boost。捕获面与共同余留体过渡都不是计算得到的事件视界。
 
+与运行路径分离的是一套版本化 NR transfer map **接入契约**，用于未来离线
+生成的数据。当前没有运行时 consumer，也不改变两个 renderer。manifest
+通过契约验证只表示 protocol-conformant，不能据此判断 NR 时空、零测地线解
+或最终画面在物理上正确。
+
 主要实现：
 
 - [`src/main.js`](./src/main.js)：场景选择、相机轨道、物理参数、交互和动态画质
@@ -100,7 +116,14 @@ http://localhost:4173/?scene=binary-approx&presentation=1&sky=high&hdr=0
 - [`src/binary-shaders.js`](./src/binary-shaders.js)：配套 WebGPU / WebGL2 弱场双黑洞 trace shader 与场景 uniform 适配
 - [`assets/scenes/binary-pn-equal-mass-v1.json`](./assets/scenes/binary-pn-equal-mass-v1.json)：版本化、机器可读的 PN/现象学时间线及精度契约
 - [`scripts/verify_binary_preview.py`](./scripts/verify_binary_preview.py)：清单 schema、对称性、PN 方程、单调性与参数边界检查
-- [`docs/binary-model.md`](./docs/binary-model.md)：科学边界与未来 NR transfer map 设计
+- [`docs/binary-model.md`](./docs/binary-model.md)：双黑洞科学边界、协议状态与离线 NR transfer map 架构
+- [`docs/nr-transfer-map-v1.md`](./docs/nr-transfer-map-v1.md)：transfer map
+  v1 协议的规范术语、字段语义、安全规则与阶段状态
+- [`schemas/nr-transfer-map-v1.schema.json`](./schemas/nr-transfer-map-v1.schema.json)：机器可读的 transfer map manifest schema
+- [`assets/transfer-maps/contract-fixture-v1/manifest.json`](./assets/transfer-maps/contract-fixture-v1/manifest.json)：项目生成的小型一致性 fixture；不含 NR 派生 payload
+- [`scripts/generate_nr_contract_fixture.py`](./scripts/generate_nr_contract_fixture.py)：确定性重建一致性 fixture
+- [`scripts/verify_nr_contract.py`](./scripts/verify_nr_contract.py)：失败即拒绝的 manifest、sidecar、坐标标架和逐光线记录验证器
+- [`tests/test_nr_contract.py`](./tests/test_nr_contract.py)：协议正向与对抗性回归测试
 - [`src/webgpu-renderer.js`](./src/webgpu-renderer.js)：WebGPU 双阶段渲染与 HDR/P3 配置协商
 - [`src/webgl-renderer.js`](./src/webgl-renderer.js)：WebGL2 硬件回退与半浮点 framebuffer 探测
 
@@ -114,9 +137,10 @@ http://localhost:4173/?scene=binary-approx&presentation=1&sky=high&hdr=0
 | 双黑洞合并/余留体 | 带代表性余留体参数的现象学过渡 | 不是 Einstein 方程解；没有计算共同视界、反冲或物理 ringdown 振幅 |
 | 双黑洞透镜 | 每条光线内冻结两个弱场单极子的 fast-light 偏折，随后过渡为球对称余留体代理 | 不是强场测地线积分；不渲染余留体自旋和 frame dragging，精细光子环、焦散、时延和视界拓扑不具定量可信度 |
 | 双黑洞发射 | 无吸积盘的真空天空透镜 | 若加入发光等离子体，需要物理气体初始条件、GRMHD 与辐射转移 |
+| NR transfer map 协议 | 版本化 schema、确定性合成 fixture、失败即拒绝的验证器与回归测试 | 接口达到 contract-conformant，可接入未来 NR 派生数据；尚无 NR 度规、transfer map 或回放场景 |
 | 共享渲染器 | WebGPU 主路径、WebGL2 回退 | HDR、P3、FP16 与 16K 纹理由运行时能力决定；HDR 不提高模型精度 |
 
-Schwarzschild 几何单位、临界轨道、侧视图像和颜色不对称见 [`docs/physics-notes.md`](./docs/physics-notes.md)；双黑洞预览的物理边界、权威参考与离线 NR → transfer map 架构见 [`docs/binary-model.md`](./docs/binary-model.md)。
+Schwarzschild 几何单位、临界轨道、侧视图像和颜色不对称见 [`docs/physics-notes.md`](./docs/physics-notes.md)；双黑洞预览的物理边界、权威参考、已实现数据契约与离线 NR → transfer map 架构见 [`docs/binary-model.md`](./docs/binary-model.md)。
 
 ## 兼容性与 HDR
 
@@ -133,6 +157,8 @@ Schwarzschild 几何单位、临界轨道、侧视图像和颜色不对称见 [`
 ```bash
 python3 scripts/verify_physics.py
 python3 scripts/verify_binary_preview.py
+PYTHONDONTWRITEBYTECODE=1 python3 scripts/verify_nr_contract.py
+PYTHONDONTWRITEBYTECODE=1 python3 -m unittest tests/test_nr_contract.py
 ```
 
 Schwarzschild 数值回归覆盖：
@@ -144,6 +170,14 @@ Schwarzschild 数值回归覆盖：
 - 184 / 288 步实时预算下的捕获与逃逸行为
 
 双黑洞预览检查覆盖 schema 与明确的非 NR 安全标记、等质量对称性、声明的最低阶 PN 方程、轨道间距/相位/过渡权重的单调性、有限参数，以及代表性余留体自旋的 Kerr 上界。一个与 shader 方程一致的 90×45 CPU 光线网格还会验证：代表性的宽轨道、合并过渡与余留体视角在固定 512 步生产预算下均不存在未收敛光线。这些测试只验证内部一致性和明确的实时收敛门槛，不验证双黑洞时空、强场透镜或合并物理。
+
+NR 契约检查严格 JSON/schema、一致的 sidecar 哈希与大小、可移植 artifact
+定位规则、连续有序 chunk、物理系统与 source/protocol 时间声明、互逆的空间
+仿射标架、正确的 ICRS 旋转、观测者 tetrad 正交归一性、光线积分与边界语义，
+以及合法且有限的逐光线结果。数据声明可渲染前，还会把 outcome fractions
+与解码记录交叉核对。未知或缺失字段、重复键、非有限数、路径越界和含混的
+无效光线状态会被拒绝。验证通过表示 **protocol-conformant**，不表示
+**NR-backed** 或 **physically validated**。
 
 两套脚本共同覆盖一组明确的数值性质与架构契约，但不等价于完整画面、辐射模型或所有 GPU 的自动化验证。当前仓库尚未配置 GPU 图像回归 CI。
 

@@ -1,0 +1,589 @@
+{
+  "accuracy": {
+    "constraintNorms": {
+      "method": null,
+      "quantity": "maximum dimensionless constraint norm",
+      "status": "not-applicable",
+      "value": null
+    },
+    "fixtureAssertions": {
+      "expectedOutcomeCounts": {
+        "captured": 2,
+        "escaped": 2,
+        "integrator-failure": 1,
+        "missing": 1,
+        "outside-domain": 1,
+        "unresolved": 1
+      },
+      "worldCameraRoundTripTolerance": 1e-12
+    },
+    "geodesicNullResidual": {
+      "method": "synthetic sentinel values exercise the binary layout",
+      "quantity": "p99 normalized null residual",
+      "status": "not-measured",
+      "value": null
+    },
+    "interpolationError": {
+      "method": "synthetic sentinel values exercise the binary layout",
+      "quantity": "p95 projection interpolation error in pixels",
+      "status": "not-measured",
+      "value": null
+    },
+    "notMeasuredReason": "The fixture contains hand-authored synthetic records and no numerical-relativity or geodesic solution.",
+    "nrConvergence": {
+      "method": null,
+      "quantity": "NR grid-convergence order",
+      "status": "not-applicable",
+      "value": null
+    },
+    "outcomeFractions": {
+      "captured": null,
+      "escaped": null,
+      "integrator-failure": null,
+      "missing": null,
+      "outside-domain": null,
+      "unresolved": null,
+      "unusable": null
+    },
+    "status": "not-measured",
+    "unresolvedFraction": null
+  },
+  "camera": {
+    "basisOrder": [
+      "right",
+      "up",
+      "forward"
+    ],
+    "cameraToWorld": [
+      1.0,
+      0.0,
+      0.0,
+      4.0,
+      0.0,
+      1.0,
+      0.0,
+      3.0,
+      0.0,
+      0.0,
+      1.0,
+      12.0,
+      0.0,
+      0.0,
+      0.0,
+      1.0
+    ],
+    "frameType": "affine-visualization-frame",
+    "matrixConvention": "row-major spatial affine 4x4 matrices multiplying [x,y,z,1] column vectors; not spacetime coordinate transforms",
+    "motion": "fixed",
+    "physicalRelation": "The affine frame is for deterministic playback coordinates; physical ray initialization uses the observer tetrad.",
+    "worldToCamera": [
+      1.0,
+      0.0,
+      0.0,
+      -4.0,
+      0.0,
+      1.0,
+      0.0,
+      -3.0,
+      0.0,
+      0.0,
+      1.0,
+      -12.0,
+      0.0,
+      0.0,
+      0.0,
+      1.0
+    ]
+  },
+  "captureTargets": [
+    {
+      "classificationPriority": 0,
+      "code": 0,
+      "description": "Synthetic capture target A",
+      "id": "A",
+      "sourceArtifactRole": null,
+      "surfaceKind": "synthetic-coordinate-sphere",
+      "validityIntervalProtocolM": [
+        0.0,
+        0.0
+      ]
+    },
+    {
+      "classificationPriority": 1,
+      "code": 1,
+      "description": "Synthetic capture target B",
+      "id": "B",
+      "sourceArtifactRole": null,
+      "surfaceKind": "synthetic-coordinate-sphere",
+      "validityIntervalProtocolM": [
+        0.0,
+        0.0
+      ]
+    }
+  ],
+  "chunks": [
+    {
+      "byteLength": 256,
+      "recordBytes": 32,
+      "recordCount": 8,
+      "sampleIndex": 0,
+      "sha256": "d96a31f2c4bf3c753116d8729555b424c5a56f7fd541bf30dcb2c07af615ada6",
+      "tile": {
+        "height": 2,
+        "width": 4,
+        "x": 0,
+        "y": 0
+      },
+      "uri": "chunks/t0000-y0000-x0000.bin"
+    }
+  ],
+  "coordinates": {
+    "metricSignature": "-+++",
+    "nrChart": {
+      "coordinates": "Cartesian (t,x,y,z)",
+      "gauge": "not applicable; synthetic Minkowski contract fixture",
+      "status": "synthetic",
+      "timeSlicing": "constant synthetic coordinate-time slices"
+    },
+    "sky": {
+      "escapeDirectionFrame": "ICRS",
+      "icrsAxes": {
+        "x": "ICRS right ascension 0 degrees, declination 0 degrees",
+        "y": "ICRS right ascension 90 degrees, declination 0 degrees",
+        "z": "ICRS north celestial pole"
+      },
+      "icrsToWorld": [
+        1.0,
+        0.0,
+        0.0,
+        0.0,
+        1.0,
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "latitudeMapping": "v=0.5-latitude/pi",
+      "longitudeMapping": "u=fract(longitude/(2*pi)+0.5)",
+      "projection": "equirectangular",
+      "referenceFrame": "ICRS",
+      "rotationConvention": "proper right-handed row-major 3x3 rotations multiplying spatial column vectors",
+      "worldToIcrs": [
+        1.0,
+        0.0,
+        0.0,
+        0.0,
+        1.0,
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ]
+    },
+    "worldFrame": {
+      "axisOrder": [
+        "x",
+        "y",
+        "z"
+      ],
+      "handedness": "right",
+      "matrixConvention": "row-major spatial affine 4x4 matrices multiplying [x,y,z,1] column vectors; not spacetime coordinate transforms",
+      "nrToWorld": [
+        1.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        1.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        1.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "origin": "synthetic NR chart origin",
+      "worldToNr": [
+        1.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        1.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        1.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ]
+    }
+  },
+  "datasetKind": "synthetic-contract-fixture",
+  "escapeBoundary": {
+    "frequencyShiftConvention": "g=(u_observer·k_observer)/(u_boundary·k_boundary)",
+    "referenceObserver": {
+      "definition": "Future-directed unit inertial observer u=(1,0,0,0) in the synthetic Cartesian NR chart.",
+      "kind": "synthetic-inertial",
+      "sourceArtifactRole": null
+    },
+    "storedEscapeDirection": {
+      "continuationBeyondBoundary": "Synthetic straight continuation in the declared ICRS asymptotic frame with no additional lensing.",
+      "frame": "ICRS",
+      "normalization": "unit Euclidean spatial vector"
+    },
+    "surface": {
+      "centreWorldM": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "kind": "synthetic-coordinate-sphere",
+      "radiusM": 100.0
+    }
+  },
+  "id": "nr-contract-fixture-v1",
+  "integrity": {
+    "algorithm": "sha256",
+    "chunkHashes": "embedded-in-manifest",
+    "chunkUriBase": "manifest-directory",
+    "manifestSidecar": "manifest.sha256",
+    "sidecarFormat": "<lowercase-hex><two-spaces>manifest.json<newline>"
+  },
+  "observer": {
+    "samples": [
+      {
+        "eventNr": [
+          0.0,
+          4.0,
+          3.0,
+          12.0
+        ],
+        "fourVelocityContravariantNr": [
+          1.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "metricContravariantNr": [
+          -1.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          1.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          1.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ],
+        "metricCovariantNr": [
+          -1.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          1.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          1.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ],
+        "properTimeM": 0.0,
+        "protocolTimeM": 0.0,
+        "sampleIndex": 0,
+        "tetradContravariantNr": [
+          [
+            1.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          [
+            0.0,
+            1.0,
+            0.0,
+            0.0
+          ],
+          [
+            0.0,
+            0.0,
+            1.0,
+            0.0
+          ],
+          [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ]
+        ]
+      }
+    ],
+    "tetradBasisOrder": [
+      "time",
+      "right",
+      "up",
+      "forward"
+    ],
+    "tetradIndexConvention": "e_(a)^mu; rows are local basis vectors in the NR coordinate basis"
+  },
+  "physicalSystem": {
+    "componentIds": [
+      "A",
+      "B"
+    ],
+    "description": "Two synthetic identifiers exercise capture classification; they are not physical black holes.",
+    "dimensionlessSpins": [],
+    "eccentricity": null,
+    "kind": "synthetic-contract-fixture",
+    "massRatioQ": null,
+    "notApplicableReason": "The protocol fixture has capture identifiers but no physical binary parameters or remnant.",
+    "parameterEpochProtocolM": null,
+    "referenceOrbitalPhaseRad": null,
+    "remnant": null,
+    "vacuum": null
+  },
+  "projection": {
+    "aspectConvention": "aspect=widthPixels/heightPixels",
+    "heightPixels": 2,
+    "imageOrigin": "top-left",
+    "localRayConvention": "k^(a)=(-1,normalize(screenX,screenY,1)) in the time/right/up/forward tetrad",
+    "model": "rectilinear-pinhole",
+    "pixelSampleLocation": "center",
+    "rayTimeOrientation": "past-directed",
+    "screenXFormula": "screenX=((x+0.5)/widthPixels*2-1)*aspect*tan(verticalFieldOfViewRad/2)",
+    "screenYFormula": "screenY=(1-(y+0.5)/heightPixels*2)*tan(verticalFieldOfViewRad/2)",
+    "verticalFieldOfViewRad": 0.8,
+    "widthPixels": 4
+  },
+  "provenance": {
+    "artifactUriBase": "repository-root",
+    "datasetVersion": "1.0.0",
+    "generator": {
+      "codeRevision": "sha256:84603d450fdc8c61702f6bc77957af3925b53329c60dd4592d361b0989ae015f",
+      "command": "python3 scripts/generate_nr_contract_fixture.py",
+      "deterministic": true,
+      "name": "generate_nr_contract_fixture.py",
+      "uri": "scripts/generate_nr_contract_fixture.py",
+      "version": "1.0.0"
+    },
+    "license": "NOASSERTION",
+    "origin": "project-generated",
+    "project": "ShuoleiWang/blackhole",
+    "sourceArtifacts": [
+      {
+        "byteLength": 26053,
+        "role": "generator-source",
+        "sha256": "84603d450fdc8c61702f6bc77957af3925b53329c60dd4592d361b0989ae015f",
+        "storage": "bundled",
+        "uri": "scripts/generate_nr_contract_fixture.py"
+      },
+      {
+        "byteLength": 46189,
+        "role": "schema",
+        "sha256": "e23713c87e39bdf5aaf4e794db9bcd760423bdb54d4ec4b4d7aa7e78379075c5",
+        "storage": "bundled",
+        "uri": "schemas/nr-transfer-map-v1.schema.json"
+      }
+    ],
+    "sourceSimulation": {
+      "catalog": null,
+      "doi": null,
+      "evolutionCode": null,
+      "identifier": "project-generated-nr-contract-fixture",
+      "kind": "none",
+      "notApplicableReason": "The fixture is synthetic protocol test data and has no source numerical-relativity simulation.",
+      "version": "1"
+    }
+  },
+  "rayIntegration": {
+    "initialNormalization": "u_observer·k_observer=1",
+    "integrationPrecision": "float64",
+    "integrator": {
+      "method": "hand-authored protocol sentinel records",
+      "name": "none"
+    },
+    "outputPrecision": "float32",
+    "spacetimeMode": "synthetic",
+    "spatialInterpolation": "not applicable; no spacetime samples",
+    "temporalInterpolation": "not applicable; one synthetic sample",
+    "termination": {
+      "captured": "intersect a captureTargets surface",
+      "escaped": "intersect escapeBoundary",
+      "integrator-failure": "non-finite state or tolerance failure",
+      "missing": "record was not generated",
+      "outside-domain": "left the declared spacetime domain away from escapeBoundary",
+      "unresolved": "step or affine-parameter budget exhausted"
+    },
+    "timeOrientation": "past-directed",
+    "tolerances": {
+      "absolute": null,
+      "nullConstraint": null,
+      "relative": null
+    }
+  },
+  "recordLayout": {
+    "byteOrder": "little-endian",
+    "captureTargetNone": 255,
+    "fields": [
+      {
+        "componentType": "float32",
+        "components": 3,
+        "name": "escapeDirection",
+        "offsetBytes": 0
+      },
+      {
+        "componentType": "float32",
+        "components": 1,
+        "name": "frequencyShiftG",
+        "offsetBytes": 12
+      },
+      {
+        "componentType": "float32",
+        "components": 1,
+        "name": "coordinateLookbackTimeM",
+        "offsetBytes": 16
+      },
+      {
+        "componentType": "float32",
+        "components": 1,
+        "name": "nullResidual",
+        "offsetBytes": 20
+      },
+      {
+        "componentType": "float32",
+        "components": 1,
+        "name": "projectionErrorPx",
+        "offsetBytes": 24
+      },
+      {
+        "componentType": "uint8",
+        "components": 1,
+        "name": "rayOutcome",
+        "offsetBytes": 28
+      },
+      {
+        "componentType": "uint8",
+        "components": 1,
+        "name": "captureTarget",
+        "offsetBytes": 29
+      },
+      {
+        "componentType": "uint16",
+        "components": 1,
+        "name": "validityMask",
+        "offsetBytes": 30
+      }
+    ],
+    "invalidFloatPolicy": "write-positive-zero-and-use-validity-mask-as-authority",
+    "observableConventions": {
+      "coordinateLookbackTimeM": "t_observer_protocol-t_terminal_protocol >= 0; a gauge-dependent coordinate quantity, not a physical relative arrival-time delay",
+      "escapeDirection": "outgoing ICRS unit direction after the declared continuation beyond escapeBoundary",
+      "frequencyShiftG": "g=(u_observer·k_observer)/(u_boundary·k_boundary)",
+      "nullResidual": "maximum absolute g_mu_nu*k^mu*k^nu along the ray after normalizing u_observer·k_observer to one",
+      "projectionErrorPx": "estimated image-plane displacement under the declared geodesic or interpolation refinement",
+      "validity": "validityMask is authoritative; fields whose bits are clear must never affect rendering or interpolation"
+    },
+    "rayOutcomes": {
+      "captured": 1,
+      "escaped": 0,
+      "integrator-failure": 4,
+      "missing": 255,
+      "outside-domain": 3,
+      "unresolved": 2
+    },
+    "recordBytes": 32,
+    "storage": "raw-struct-array",
+    "structFormat": "<7fBBH",
+    "validityBits": {
+      "coordinateLookbackTimeM": 2,
+      "escapeDirection": 0,
+      "frequencyShiftG": 1,
+      "nullResidual": 3,
+      "projectionErrorPx": 4
+    }
+  },
+  "renderable": false,
+  "sampling": {
+    "dimensionOrder": [
+      "time",
+      "y",
+      "x"
+    ],
+    "interpolation": {
+      "categorical": "nearest-no-blend",
+      "continuous": "validity-strict-linear",
+      "escapeDirection": "validity-strict-linear-then-normalize",
+      "invalidRecords": "never-sample-sky",
+      "time": "none"
+    },
+    "observationTimesM": [
+      0.0
+    ],
+    "pixelOrder": "row-major",
+    "tileOrder": "manifest-order",
+    "timeCoordinate": "protocol"
+  },
+  "schema": "blackhole.nr-transfer-map/v1",
+  "scientificStatus": {
+    "classification": "project-generated protocol fixture; not NR",
+    "derivedFromNearZoneSpacetime": false,
+    "derivedWithSlowLightGeodesics": false,
+    "description": "A deterministic 2x4 record-layout fixture for validating data contracts, hashes, coordinate transforms, and invalid-ray handling.",
+    "prohibitedClaim": "Do not render this fixture or describe it as a physical binary-black-hole simulation.",
+    "sourceIsNumericalRelativity": false
+  },
+  "timeReference": {
+    "protocolTimeDefinition": "t_protocol=t_source-sourceTimeAtProtocolZeroM",
+    "sourceTimeAtProtocolZeroM": 0.0,
+    "sourceTimeDirection": "future-increasing",
+    "waveformTimeMapping": {
+      "mapping": null,
+      "notApplicableReason": "The synthetic fixture contains no waveform.",
+      "sourceQuantity": null,
+      "status": "not-applicable"
+    },
+    "zeroEvent": {
+      "description": "The only observer sample is assigned protocol time zero.",
+      "name": "synthetic fixture origin",
+      "source": "project-generated"
+    }
+  },
+  "units": {
+    "G": 1.0,
+    "angle": "radian",
+    "c": 1.0,
+    "coordinateTime": "M",
+    "frequencyShift": "dimensionless",
+    "length": "M",
+    "massNormalization": {
+      "definition": "A dimensionless unit chosen only to exercise protocol fields.",
+      "quantity": "synthetic unit mass",
+      "referenceEpochSourceM": null,
+      "symbol": "M",
+      "value": 1.0
+    },
+    "system": "geometric"
+  }
+}

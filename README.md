@@ -6,7 +6,15 @@ An interactive, real-time black-hole renderer built with **WebGPU and WebGL2**.
 
 The default scene numerically integrates past-directed null geodesics in a Schwarzschild spacetime. The same ray path determines capture by the event horizon, intersections with an idealized accretion disk, relativistic frequency shifts, and gravitational lensing of an all-sky Milky Way background.
 
-An isolated, opt-in `?scene=binary-approx` experiment adds an equal-mass, non-spinning binary-black-hole preview. It combines a leading-order post-Newtonian (PN) inspiral timeline with a phenomenological merger/remnant transition and real-time multi-centre weak-field ray bending. It is explicitly a **PN / NR-informed preview, not a solved numerical-relativity spacetime**. The project is intended for real-time visualization and education; it is not a Kerr, full-NR, GRMHD, or high-precision radiative-transfer solver.
+An isolated, opt-in `?scene=binary-approx` experiment adds an equal-mass,
+non-spinning binary-black-hole preview. It combines a leading-order
+post-Newtonian (PN) inspiral timeline with a phenomenological merger/remnant
+transition and real-time multi-centre weak-field ray bending. It is a
+**PN/phenomenological weak-field preview**: only rounded remnant reference
+values come from `SXS:BBH:0001`; no SXS waveform, horizon, spacetime, or
+ray-transfer data are used. The project is intended for real-time
+visualization and education; it is not a Kerr, full-NR, GRMHD, or
+high-precision radiative-transfer solver.
 
 ![A Schwarzschild black hole, accretion disk, and gravitationally lensed Milky Way](./docs/images/blackhole-galaxy-hero.webp)
 
@@ -19,6 +27,10 @@ An isolated, opt-in `?scene=binary-approx` experiment adds an equal-mass, non-sp
 - **Relativistic disk appearance** — Includes frequency shifts from Schwarzschild circular motion, the bolometric intensity transfer factor `g⁴`, approximate blackbody chromaticity, surface optical depth, and limb darkening.
 - **Real-time procedural disk structure** — Turbulence-inspired, finite-lifetime noise is advected at the local Keplerian angular velocity. This is a visual approximation, not an MHD simulation.
 - **Opt-in binary preview** — `?scene=binary-approx` lazy-loads a separate PN timeline and matching WGSL/GLSL weak-field lens shader. The vacuum scene intentionally has no luminous accretion disk and does not claim strong-field or merger accuracy.
+- **Versioned NR transfer-map boundary** — A fail-closed schema, deterministic
+  conformance fixture, generator, validator, and tests define how future
+  camera-specific slow-light products can enter the repository. This is a data
+  contract only: no NR-derived transfer map or NR playback scene is bundled.
 - **Non-breaking scene architecture** — Optional scene descriptors and shader bundles extend the shared WebGPU/WebGL2 backends, while the default URL retains the original Schwarzschild shader, observer model, disk, and controls.
 - **WebGPU first, WebGL2 fallback** — Chooses the rendering path from the GPU limits, texture dimensions, and framebuffer capabilities exposed at runtime, without chip-model-specific branches.
 - **Progressive sky assets** — Ships with ESO 6K and 4K fallbacks and can optionally load the 16000×8000 ESA/Gaia all-sky map.
@@ -41,6 +53,8 @@ The current application interface is in Simplified Chinese; this does not affect
 Use the in-app scene selector, or open
 <http://localhost:4173/?scene=binary-approx>, to enter the experimental binary
 preview. Returning to the default URL restores the Schwarzschild scene.
+The transfer-map contract does not add another runnable scene: the default
+Schwarzschild and opt-in `binary-approx` paths are unchanged.
 
 The bundled 6K Milky Way background works immediately. To install the optional, approximately 236 MiB Gaia 16K map:
 
@@ -73,7 +87,7 @@ preview, not an NR waveform product.
 
 | Parameter | Purpose |
 | --- | --- |
-| `?scene=binary-approx` | Opt into the isolated PN / NR-informed binary preview; the default remains Schwarzschild |
+| `?scene=binary-approx` | Opt into the isolated PN/phenomenological weak-field binary preview; the default remains Schwarzschild |
 | `?renderer=webgl` | Force the WebGL2 fallback path |
 | `?hdr=0` | Disable extended HDR and use stable SDR output |
 | `?sky=high` | Force the bundled ESO 6K Milky Way background |
@@ -105,6 +119,12 @@ The camera does not reuse the single-hole circular-observer Lorentz boost.
 Neither the capture surfaces nor the common-remnant transition are computed
 horizons.
 
+Separately, the repository contains a versioned NR transfer-map **ingestion
+contract** for future offline products. It currently has no runtime consumer and
+does not change either renderer path. A manifest that passes the contract
+validator is protocol-conformant; that result alone says nothing about the
+physical correctness of an NR spacetime, a null-geodesic solution, or an image.
+
 Primary implementation files:
 
 - [`src/main.js`](./src/main.js) — Scene selection, camera orbit, physical parameters, interaction, and adaptive quality
@@ -113,7 +133,15 @@ Primary implementation files:
 - [`src/binary-shaders.js`](./src/binary-shaders.js) — Matching WebGPU/WebGL2 weak-field binary trace shaders and scene-uniform adapter
 - [`assets/scenes/binary-pn-equal-mass-v1.json`](./assets/scenes/binary-pn-equal-mass-v1.json) — Versioned, machine-readable PN/phenomenological timeline and accuracy contract
 - [`scripts/verify_binary_preview.py`](./scripts/verify_binary_preview.py) — Manifest schema, symmetry, PN-equation, monotonicity, and parameter-bound checks
-- [`docs/binary-model.md`](./docs/binary-model.md) — Scientific boundary and future NR transfer-map design
+- [`docs/binary-model.md`](./docs/binary-model.md) — Binary scientific boundary, protocol status, and offline NR transfer-map architecture
+- [`docs/nr-transfer-map-v1.md`](./docs/nr-transfer-map-v1.md) — Normative
+  terminology, field semantics, safety rules, and status of the transfer-map v1
+  protocol
+- [`schemas/nr-transfer-map-v1.schema.json`](./schemas/nr-transfer-map-v1.schema.json) — Machine-readable transfer-map manifest schema
+- [`assets/transfer-maps/contract-fixture-v1/manifest.json`](./assets/transfer-maps/contract-fixture-v1/manifest.json) — Small project-generated conformance fixture; it contains no NR-derived payload
+- [`scripts/generate_nr_contract_fixture.py`](./scripts/generate_nr_contract_fixture.py) — Deterministically regenerate the conformance fixture
+- [`scripts/verify_nr_contract.py`](./scripts/verify_nr_contract.py) — Fail-closed manifest, sidecar, coordinate-frame, and per-ray record validator
+- [`tests/test_nr_contract.py`](./tests/test_nr_contract.py) — Positive and adversarial protocol regression tests
 - [`src/webgpu-renderer.js`](./src/webgpu-renderer.js) — Two-stage WebGPU renderer and HDR/P3 configuration negotiation
 - [`src/webgl-renderer.js`](./src/webgl-renderer.js) — WebGL2 fallback and half-float framebuffer probing
 
@@ -127,9 +155,10 @@ Primary implementation files:
 | Binary merger/remnant | Phenomenological transition with representative remnant parameters | Not a solution of Einstein's equations; no computed common horizon, recoil, or physical ringdown amplitudes |
 | Binary lensing | Fast-light bending from two frame-frozen weak-field monopoles, followed by one spherical remnant proxy | Not strong-field geodesic integration; remnant spin/frame dragging are not rendered, and fine photon rings, caustics, delays, and horizon topology are not quantitatively reliable |
 | Binary emission | Vacuum sky lensing with no accretion disk | Adding luminous plasma would require physical gas initial data, GRMHD, and radiative transfer |
+| NR transfer-map protocol | Versioned schema, deterministic synthetic fixture, fail-closed validator, and regression tests | Interface is contract-conformant and prepared for future NR-derived data; no NR metric, transfer map, or playback scene is included |
 | Shared renderer | WebGPU primary path with WebGL2 fallback | HDR, P3, FP16, and 16K textures depend on runtime capabilities; HDR does not improve model accuracy |
 
-See [`docs/physics-notes.md`](./docs/physics-notes.md) (currently in Simplified Chinese) for the Schwarzschild model, and [`docs/binary-model.md`](./docs/binary-model.md) for the binary preview boundary, authoritative references, and the proposed offline NR-to-transfer-map architecture.
+See [`docs/physics-notes.md`](./docs/physics-notes.md) (currently in Simplified Chinese) for the Schwarzschild model, and [`docs/binary-model.md`](./docs/binary-model.md) for the binary preview boundary, authoritative references, implemented data contract, and offline NR-to-transfer-map architecture.
 
 ## Compatibility and HDR
 
@@ -146,6 +175,8 @@ The upper-right status bar reports the active backend, available adapter label, 
 ```bash
 python3 scripts/verify_physics.py
 python3 scripts/verify_binary_preview.py
+PYTHONDONTWRITEBYTECODE=1 python3 scripts/verify_nr_contract.py
+PYTHONDONTWRITEBYTECODE=1 python3 -m unittest tests/test_nr_contract.py
 ```
 
 The Schwarzschild numerical regression checks cover:
@@ -165,6 +196,17 @@ no unresolved rays in representative wide-binary, transition, and remnant
 views. These tests verify internal consistency and declared real-time
 convergence gates; they do not validate a binary spacetime, strong-field
 lensing, or merger physics.
+
+The NR contract checks strict JSON/schema conformance, immutable sidecar
+hashes and sizes, portable artifact-location rules, contiguous ordered chunks,
+physical-system and source/protocol-time declarations, mutually inverse
+spatial affine frames, proper ICRS rotations, observer-tetrad orthonormality,
+ray-integration and boundary semantics, and legal finite per-ray outcomes. It
+also cross-checks decoded outcome fractions before a dataset can be marked
+renderable. Unknown or missing fields, duplicate keys, non-finite numbers,
+path escapes, and ambiguous invalid-ray states are rejected. Passing these
+checks means **protocol-conformant**, not **NR-backed** or
+**physically validated**.
 
 Together, these scripts validate selected numerical properties and architecture
 contracts. They are not complete visual, radiative-model, or cross-GPU

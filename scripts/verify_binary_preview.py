@@ -475,9 +475,10 @@ def verify_schema(data: dict[str, Any]) -> None:
 
     accuracy = data["accuracy"]
     classification = accuracy.get("classification", "")
-    require("PN" in classification, "accuracy classification must mention PN")
-    require("NR" in classification, "accuracy classification must mention NR")
-    require("preview" in classification.lower(), "asset must be labelled as a preview")
+    require(
+        classification == "PN / phenomenological weak-field preview",
+        "accuracy classification must identify the PN/phenomenological weak-field boundary",
+    )
     require(
         accuracy.get("fullNumericalRelativity") is False,
         "fullNumericalRelativity must be explicitly false",
@@ -489,6 +490,10 @@ def verify_schema(data: dict[str, Any]) -> None:
     require(
         "not" in accuracy.get("description", "").lower(),
         "accuracy description must state what is not included",
+    )
+    require(
+        "exact" in accuracy.get("prohibitedClaim", "").lower(),
+        "accuracy metadata must explicitly prohibit an exact-simulation claim",
     )
 
     provenance = data["referenceConfiguration"].get("sampleProvenance", "").lower()
@@ -724,7 +729,7 @@ def main() -> None:
         "  separation = "
         f"{samples[0]['separationM']:.1f}M -> {samples[-1]['separationM']:.1f}M"
     )
-    print("  classification = PN / NR-informed preview (not full NR)")
+    print("  classification = PN / phenomenological weak-field preview (not full NR)")
     for label, counts in ray_counts:
         for budget in ray_budgets:
             print(
