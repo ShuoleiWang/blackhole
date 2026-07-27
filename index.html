@@ -127,7 +127,7 @@
 
           <section id="binaryTimeline" class="binary-timeline" aria-label="双黑洞时间线" hidden>
             <div class="binary-timeline-heading">
-              <span>应变预览 · r h<sub>+</sub> / M</span>
+              <span id="binaryWaveformLabel">应变预览 · r h<sub>+</sub> / M</span>
               <output id="binaryRegime">PN inspiral</output>
             </div>
             <svg
@@ -140,6 +140,45 @@
               <path id="binaryWaveformPath" d="" />
               <line id="binaryTimeCursor" x1="0" x2="0" y1="1" y2="45" />
             </svg>
+            <div
+              class="binary-transport"
+              role="group"
+              aria-label="双黑洞时间控制"
+            >
+              <button
+                id="binaryPlayPause"
+                class="binary-transport-button"
+                type="button"
+                aria-label="暂停双黑洞时间线"
+                aria-pressed="false"
+                title="暂停双黑洞时间线"
+              >
+                <span aria-hidden="true">Ⅱ</span>
+              </button>
+              <label class="binary-scrubber" for="binaryTimeScrubber">
+                <span class="visually-hidden">模拟时间</span>
+                <input
+                  id="binaryTimeScrubber"
+                  type="range"
+                  min="0"
+                  max="1"
+                  step="0.25"
+                  value="0"
+                />
+              </label>
+              <output id="binaryTimeValue" for="binaryTimeScrubber">t = 0 M</output>
+            </div>
+            <div class="binary-playback-meta">
+              <button
+                id="binarySlowMotion"
+                type="button"
+                aria-pressed="true"
+                title="只改变播放速度，不改变物理数据"
+              >
+                合并慢放
+              </button>
+              <output id="binaryPlaybackRate">实际 0 M/s</output>
+            </div>
           </section>
 
           <section class="parameter-section" aria-labelledby="parameterTitle">

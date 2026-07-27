@@ -7,79 +7,161 @@ of Einstein's field equations.
 
 ## Status at a glance
 
-| Component | Version 1 | Scientific status |
+| Component | Phase 2 implementation | Scientific status |
 | --- | --- | --- |
-| Binary configuration | Equal mass, non-spinning, quasi-circular | A standard reference configuration |
-| Inspiral motion | Leading-order post-Newtonian (PN) quadrupole evolution | Controlled only in the weak-field, adiabatic regime |
-| Merger and post-merger display | Smooth phenomenological transition and non-oscillatory amplitude decay | Render-only interpolation, not an Einstein-equation or quasinormal-mode solution |
-| Light propagation | Real-time, multi-centre weak-field bending | Useful for an interactive preview; invalid as precision strong-field ray tracing |
+| Binary configuration | `SXS:BBH:0001` Lev5, equal mass, effectively non-spinning, quasi-circular | Pinned numerical-relativity source |
+| Orbital dynamics | Separation and phase from the actual A/B apparent-horizon inertial-coordinate centroids | NR-derived diagnostics, but coordinate- and gauge-dependent |
+| Waveform | CoM-corrected, extrapolated N=2 complex `(l,m) = (2,2)` strain mode | Real SXS far-zone waveform; not a near-zone metric |
+| Merger events and remnant | Published common-horizon time plus exact metadata remnant mass and spin | Source-backed events/metadata; the visual topology blend remains a presentation proxy |
+| Playback | Scrubbing, shared pause/resume, end hold/loop, and optional merger slow motion | Deterministic presentation mapping; slow motion is not gravitational time dilation |
+| Light propagation | Existing real-time, frame-frozen multi-centre weak-field bending | **Not NR ray tracing** and invalid as precision strong-field imaging |
 | Emission | Lensed all-sky background in vacuum | No accretion disks, plasma, GRMHD, or radiative transfer |
 | Display | WebGPU with WebGL2 fallback and the existing HDR pipeline | Display fidelity does not increase physical accuracy |
-| NR transfer-map interface | Versioned manifest schema, deterministic synthetic fixture, fail-closed validator, and regression tests | Implemented ingestion contract only; no NR-derived transfer map or NR playback scene |
+| Phase 1 NR transfer-map interface | Versioned manifest schema, deterministic synthetic fixture, fail-closed validator, and regression tests | Implemented ingestion contract only; no NR-derived transfer map or slow-light runtime consumer |
 
-The runnable scene must therefore be described as a
-**PN/phenomenological weak-field preview**, never as an NR-backed or exact
-simulation of a merger. Only rounded remnant reference values come from
-`SXS:BBH:0001`; no SXS waveform, horizon, spacetime, or ray-transfer data are
-used. The machine-readable source for the v1 timeline is
-[`assets/scenes/binary-pn-equal-mass-v1.json`](../assets/scenes/binary-pn-equal-mass-v1.json).
-Its metadata repeats this limitation so that downstream code cannot
-accidentally lose the distinction.
+The precise classification is **NR-driven dynamics with weak-field fast-light
+rendering**. “NR-driven” applies to the orbital track, waveform, source events,
+and remnant metadata. It does not apply to light propagation. The scene does
+not consume an SXS near-zone metric, a four-dimensional numerical spacetime, or
+an NR-derived ray-transfer payload. The rendered image must not be described as
+NR ray tracing, a solved binary-spacetime image, or a quantitatively accurate
+merger shadow.
 
-The rounded remnant mass and spin in that manifest come from the official
-`SXS:BBH:0001` Lev5 metadata. The inspiral/merger timeline and all rendered ray
-paths remain project-generated approximations; using two catalog metadata
-values does not turn them into NR data.
+The runtime manifest is
+[`binary-sxs-bbh-0001-v2.json`](../assets/scenes/binary-sxs-bbh-0001-v2.json);
+its compact sidecar is
+[`binary-sxs-bbh-0001-v2.samples.json`](../assets/scenes/binary-sxs-bbh-0001-v2.samples.json).
+Both repeat the scientific boundary so a consumer cannot silently promote
+NR-derived motion into an NR-derived image claim.
 
-The separately implemented `blackhole.nr-transfer-map/v1` contract does not
-upgrade this scene. It defines how a future offline product must identify,
-frame, chunk, and validate its data; there is currently no runtime consumer for
-that format. The default Schwarzschild path and the opt-in `binary-approx` path
-are unchanged.
+## Phase 2 SXS-driven dynamics
 
-## Version 1 dynamics
+### Pinned source and quantities
 
-The preview uses geometric units,
+The deterministic offline generator consumes exactly three official files from
+the pinned [`SXS:BBH:0001` Zenodo record](https://doi.org/10.5281/zenodo.3273935):
+
+- `Lev5/metadata.json`;
+- `Lev5/Horizons.h5`; and
+- `Lev5/rhOverM_Asymptotic_GeometricUnits_CoM.h5`.
+
+Their official URLs, byte sizes, MD5 values, and SHA-256 values are recorded in
+[`assets/SOURCES.md`](../assets/SOURCES.md). The pinned Zenodo record does not
+declare a license, so this project records `spdx = null` and does not invent or
+infer a license.
+
+The current SXS catalog marks `SXS:BBH:0001` as deprecated and superseded by
+the longer `SXS:BBH:1132` simulation. Phase 2 intentionally pins the archived
+`0001/Lev5` bytes for a deterministic first integration; it never asks a client
+library to auto-supersede the source behind the manifest. Migrating the fixture
+to a pinned `SXS:BBH:1132` version and resolution is a data-source upgrade, not
+evidence that the current weak-field renderer has become NR ray tracing.
+
+The track uses geometric units,
 
 ```text
 G = c = M = 1,
 ```
 
-where `M = m1 + m2` is the initial total mass. The bundled configuration has
-`m1 = m2 = M/2`, symmetric mass ratio `η = m1 m2 / M² = 1/4`, and zero
-individual spins.
-
-During the inspiral, the orbital separation `a` and angular frequency `Ω`
-follow the leading-order circular quadrupole model:
+where `M` is the sum of the two Christodoulou masses at the metadata relaxation
+time. For each common A/B horizon sample, the generator forms
 
 ```text
-da/dt = -(64/5) η / a³
-M Ω   = a^(-3/2)
+Δx(t) = x_B(t) - x_A(t)
+a_coord(t) = |Δx(t)| / M
+φ_coord(t) = unwrap(atan2(Δx_y, Δx_x)).
 ```
 
-Equivalently, relative to the matching sample,
+The first retained phase is shifted to zero. These values come from
+`AhA.dir/CoordCenterInertial.dat` and
+`AhB.dir/CoordCenterInertial.dat`; they are actual SXS apparent-horizon
+coordinate-centroid diagnostics, not a PN fit. They are nevertheless
+**gauge-dependent coordinates**, not invariant proper separation or invariant
+orbital phase.
+
+The complex waveform channels come from
+`Extrapolated_N2.dir/Y_l2_m2.dat` in the CoM-corrected asymptotic waveform
+file. The displayed strip is `Re[r h22 / M]`, while the runtime retains both
+real and imaginary channels and computes `|h22|`.
+
+### Time origin, source events, and remnant
+
+Protocol `t = 0` is the maximum amplitude of the CoM-corrected
+`Extrapolated_N2 h(2,2)` mode. The bundled range is
+`-9210.155252 M <= t <= 120 M`. Key anchors are:
+
+| Event | Protocol time |
+| --- | ---: |
+| Metadata relaxation time / first bundled horizon sample | `-9210.155251999806 M` |
+| Last paired A/B centroid sample | `-6.158268002352997 M` |
+| First common apparent horizon from metadata | `-6.072285420526896 M` |
+| Maximum `|Extrapolated_N2 h22|` | `0 M` |
+| Configured ringdown display endpoint | `120 M` |
+
+The horizon coordinate time and extrapolated-waveform retarded time are
+different source coordinates. The generator retains their published numeric
+origins and subtracts the waveform peak from both. The apparent ordering above
+is useful for deterministic playback, but it is not a gauge-invariant
+light-travel-time measurement or a proof that events in the two source
+coordinates are physically simultaneous.
+
+The exact Lev5 metadata remnant values are:
 
 ```text
-a(t)^4 = a_match^4 - (256/5) η t.
+M_f / M = 0.951609417715
+χ_f = (-7.29520687012e-10,
+        7.40468371215e-10,
+        0.686461676493)
 ```
 
-The orbital phase is the integral of `Ω`. The runtime evaluates `a(t)`, `φ(t)`,
-and the leading-order `h+`/`h×` preview analytically between the manifest's PN
-checkpoints; only the explicitly phenomenological `t > 0` section is linearly
-interpolated. These equations capture the qualitative chirp and secular
-inspiral, but omit higher-order PN terms, spin couplings, eccentricity, tidal
-effects, gauge dynamics, and the nonlinear strong-field interaction. Their
-error grows rapidly near merger.
+The manifest also records the last common-horizon diagnostic and checks that it
+agrees with the metadata mass and spin to better than `0.1%`. The render shader
+uses the mass fraction for its spherical remnant proxy but does not render the
+spin vector, Kerr geometry, frame dragging, recoil, or spin-dependent shadow
+shape.
 
-The v1 timeline switches from PN inspiral to a finite-duration visual blend and
-then to a representative equal-mass remnant. That blend is deliberately
-labelled `phenomenological-merger` in the data. It does not compute a common
-apparent horizon, gravitational recoil, nonlinear wave generation, or
-quasinormal-mode amplitudes from first principles. Likewise, the small waveform
-readout is a presentation aid: its inspiral is leading-order and its merger
-continuation is phenomenological.
+### Compact track and interpolation
 
-## Version 1 light propagation
+The sidecar contains 2,732 adaptively selected, strictly time-ordered samples
+in 202,606 bytes (approximately 198 KiB). It stores:
+
+```text
+t_protocol, a_coord, φ_coord, Re(h22), Im(h22),
+renderTopologyBlend, individualHorizonsValid
+```
+
+Piecewise-linear reconstruction is measured against the dense source track.
+The largest orbital-phase residual is `0.000644202687 rad`
+(`6.442e-4 rad`), below the declared `0.003 rad` bound. The other measured
+maximum residuals and their declared bounds are recorded in the manifest and
+checked by `scripts/verify_binary_dynamics.py`.
+
+The A/B centroids end before the common-horizon metadata event. Once
+`individualHorizonsValid` becomes false, the sidecar holds the last valid
+separation and phase rather than inventing post-horizon A/B trajectories. A
+smoothstep from the common-horizon event to the waveform peak removes the
+two-centre visual proxy. That `renderTopologyBlend` is explicitly a
+**presentation quantity, not a horizon observable**.
+
+## Scrubbing, pause, and merger slow motion
+
+The waveform panel exposes a real protocol-time range input, a local
+play/pause button synchronized with the header button and Space key, and a
+merger slow-motion toggle. Scrubbing clamps to the bundled source interval,
+updates the waveform cursor and physical readouts while paused, and resumes
+only if playback was running before the drag.
+
+By default, `-160 M <= t < 70 M` plays at `0.12×` the selected base rate. The
+clock segments a frame at rate boundaries so crossing the slow zone is
+frame-rate independent. Playback holds the `t = 120 M` endpoint for 2.5 wall
+seconds and then loops.
+
+The slow-motion factor changes only the mapping from wall-clock seconds to
+protocol time. It does not alter sample values, retime the source data, or
+represent gravitational time dilation. The UI displays the actual effective
+rate to keep this distinction visible.
+
+## Light propagation remains weak-field fast-light
 
 The interactive renderer cannot integrate null geodesics through a solved,
 time-dependent binary metric because no such four-dimensional metric is
@@ -111,8 +193,9 @@ objects to one remnant are consequently visualization boundaries, not a
 computed event-horizon world tube.
 
 The metadata-backed remnant spin is retained in the data contract but is not
-rendered. Version 1 uses a spherical monopole and a spherical `r = 2M` capture
-proxy, with no Kerr geometry, frame dragging, or spin-dependent shadow shape.
+rendered. Phase 2 continues to use the original spherical monopole and
+spherical `r = 2M` capture proxy, with no Kerr geometry, frame dragging, or
+spin-dependent shadow shape.
 
 The practical implications are important:
 
@@ -120,7 +203,7 @@ The practical implications are important:
   binary can be interpreted as a physically motivated preview.
 - Fine photon rings, higher-order images, caustic magnifications, arrival-time
   delays, and the shape or topology of a common horizon are not quantitatively
-  reliable in v1.
+  reliable.
 - A frame must not be used to infer masses, spins, orbital parameters, lensing
   cross sections, or gravitational-wave observables.
 - HDR preserves highlight range and colour on supported displays; it does not
@@ -131,6 +214,27 @@ accretion disk around each object. A physically defensible luminous merger
 would additionally require an initial gas configuration, general-relativistic
 magnetohydrodynamics (GRMHD), electron-temperature and emissivity prescriptions,
 and time-dependent polarized radiative transfer.
+
+In short: the motion and waveform are now NR-derived; the rendered rays are
+still weak-field fast-light. A source-backed orbit does not turn the shader
+into NR ray tracing.
+
+## Legacy PN regression asset
+
+[`binary-pn-equal-mass-v1.json`](../assets/scenes/binary-pn-equal-mass-v1.json)
+contains the earlier leading-order PN inspiral and phenomenological
+merger/remnant preview. It is no longer loaded by the runtime scene. It remains
+in the repository so `scripts/verify_binary_preview.py` can independently
+regress the old manifest equations, explicit non-NR safety flags, parameter
+bounds, and the unchanged weak-field shader's 512-step CPU convergence gate.
+
+Keeping the legacy asset separates two questions:
+
+1. Did Phase 2 preserve the established renderer behavior?
+2. Does the new SXS-derived dynamics track satisfy its own source and playback
+   contract?
+
+Neither regression turns the weak-field shader into NR light propagation.
 
 ## Why this is not full numerical relativity
 
@@ -175,17 +279,22 @@ Renderer extensions are optional: without a scene-provided shader and extra
 uniform writer, WebGPU and WebGL2 use their existing sources and uniform layout.
 This preserves the previous final single-black-hole behavior and avoids making
 the experimental model an implicit dependency of the default path. Scene
-switching in v1 uses a page reload rather than mutating GPU pipelines in place.
+switching still uses a page reload rather than mutating GPU pipelines in place;
+the binary lifecycle also restores shared UI state when disposed.
 
-The two validation suites also have different meanings:
+The validation suites have different meanings:
 
 - `python3 scripts/verify_physics.py` checks selected Schwarzschild invariants
   and capture/escape behavior.
-- `python3 scripts/verify_binary_preview.py` checks the binary manifest,
-  equal-mass symmetry, PN sample equations, monotonic inspiral, transition
-  bounds, and a representative CPU ray-grid convergence gate matching the
-  shader equations. It does **not** certify the merger as a
-  numerical-relativity result.
+- `python3 scripts/verify_binary_dynamics.py` checks the pinned SXS source,
+  generated sidecar, events, remnant metadata, interpolation bounds, playback
+  declarations, and the explicit weak-field renderer boundary.
+- `node --test tests/binary-playback.test.mjs` checks source anchors,
+  interpolation, scrub/seek behavior, end hold/looping, slow motion, and
+  frame-rate independence.
+- `python3 scripts/verify_binary_preview.py` retains the legacy PN and
+  weak-field shader convergence regression. It does **not** certify NR light
+  propagation or merger imaging.
 
 ## Target architecture and current phase
 
@@ -216,15 +325,18 @@ The project status is deliberately reported by layer:
 
 | Layer | Status | Permitted claim |
 | --- | --- | --- |
-| Transfer-map schema, fixture, validator, and tests | Implemented | `contract-conformant` ingestion boundary |
-| NR/EOB-calibrated orbital dynamics | Not implemented | The current PN/phenomenological motion is not `NR-driven` |
-| Slow-light rays through a time-dependent NR spacetime | Not implemented | No `NR-backed` image or playback mode |
+| Phase 1 transfer-map schema, fixture, validator, and tests | Implemented | `contract-conformant` ingestion boundary |
+| Phase 2 SXS orbital dynamics, waveform, events, and remnant metadata | Implemented | `NR-driven dynamics` |
+| Slow-light rays through a time-dependent NR spacetime | Not implemented | No `NR-backed` pixel or image path |
 | GRMHD plasma and GR radiative transfer | Not implemented | No physically modelled luminous merger |
 
 The status words are not interchangeable:
 
 - **Contract-conformant** means only that a dataset satisfies the versioned
   structural, integrity, coordinate-frame, and record-consistency rules.
+- **NR-driven dynamics** means the displayed trajectories, waveform, events,
+  and remnant parameters are derived from the pinned SXS simulation. It makes
+  no claim about the pixel-generating light propagation.
 - **NR-ready** applies only to the ingestion boundary: it can reject or accept
   a future offline product without changing the protocol. It does not mean that
   such a product is bundled or that the browser solves Einstein's equations.
@@ -269,10 +381,12 @@ The v1 payload is a vacuum transfer map. It does not define GRMHD radiation,
 optical-depth, Stokes, or magnification/Jacobian channels; those require a
 future, separately versioned radiative-transfer contract.
 
-The v1 `blackhole.binary-scene/v1` JSON is a lightweight scene timeline, not
-the `blackhole.nr-transfer-map/v1` format. Keeping the two concepts separate
-allows the current preview to be replaced by NR-derived data without pretending
-that its compact orbital samples contain a spacetime.
+The legacy `blackhole.binary-scene/v1` timeline and current
+`blackhole.binary-scene/v2` dynamics track are both distinct from the
+`blackhole.nr-transfer-map/v1` format. Version 2 contains real NR-derived
+horizon and waveform diagnostics, but its compact samples still do not contain
+a near-zone spacetime or solved camera rays. Keeping these concepts separate
+prevents “NR-driven dynamics” from being misreported as “NR ray tracing.”
 
 The repository's
 [`contract-fixture-v1`](../assets/transfer-maps/contract-fixture-v1/manifest.json)
@@ -329,10 +443,12 @@ at least the following gates:
 - SXS Collaboration, [SXS Gravitational Waveform
   Database](https://data.black-holes.org/waveforms/catalog.html) and
   [documentation](https://data.black-holes.org/waveforms/documentation.html),
-  plus the [`SXS:BBH:0001` dataset and Lev5
-  metadata](https://doi.org/10.5281/zenodo.3273935). The bundled v1 file uses
-  the catalog configuration and rounded remnant mass/spin; its compact
-  timeline is not extracted from SXS spacetime, waveform, or horizon data.
+  plus the pinned [`SXS:BBH:0001` Lev5
+  record](https://doi.org/10.5281/zenodo.3273935). Phase 2 derives coordinate
+  separation/phase, complex `h22`, events, and remnant metadata from its
+  official files. The record does not declare a license. Exact source URLs,
+  sizes, MD5, and SHA-256 values are recorded in
+  [`assets/SOURCES.md`](../assets/SOURCES.md).
 - M. Boyle et al., [The SXS Collaboration catalog of binary black hole
   simulations](https://doi.org/10.1088/1361-6382/ab34e2), *Classical and
   Quantum Gravity* 36, 195006 (2019).

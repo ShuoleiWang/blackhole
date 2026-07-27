@@ -700,7 +700,7 @@ export const binaryApproxShaderBundle = Object.freeze({
   id: "binary-approx-v1",
   labels: Object.freeze({
     uniforms: "Binary preview frame uniforms",
-    trace: "PN binary weak-field lens preview",
+    trace: "Binary weak-field fast-light lens preview",
   }),
   wgsl: Object.freeze({
     trace: binaryTraceFragmentWGSL,

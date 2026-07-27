@@ -1,0 +1,226 @@
+{
+  "dynamics": {
+    "asset": {
+      "byteLength": 202606,
+      "columns": [
+        "tProtocolM",
+        "separationM",
+        "orbitalPhaseUnwrappedRad",
+        "h22Real",
+        "h22Imag",
+        "renderTopologyBlend",
+        "individualHorizonsValid"
+      ],
+      "encoding": "utf-8 minified JSON",
+      "sampleCount": 2732,
+      "schema": "blackhole.binary-dynamics-samples/v1",
+      "sha256": "3090229218ca12bf944fbf039e9d744cca367c18af1e6c7d67a8843e311c51f5",
+      "uri": "binary-sxs-bbh-0001-v2.samples.json"
+    },
+    "declaredMaxInterpolationError": {
+      "h22Imag": 0.0005,
+      "h22Real": 0.0005,
+      "orbitalPhaseUnwrappedRad": 0.003,
+      "renderTopologyBlend": 0.0005,
+      "separationM": 0.003
+    },
+    "finalTimeM": 120.0,
+    "firstTimeM": -9210.155252,
+    "interpolation": "piecewise linear with validity-strict horizon hold",
+    "measuredMaxInterpolationError": {
+      "h22Imag": 0.000498460216,
+      "h22Real": 0.000499876652,
+      "orbitalPhaseUnwrappedRad": 0.000644202687,
+      "renderTopologyBlend": 0.000499889872,
+      "separationM": 0.000675984712
+    },
+    "postHorizonPolicy": "hold the last valid A/B separation and phase; remove the two-centre renderer only through renderTopologyBlend",
+    "renderTransition": {
+      "completeEvent": "waveformPeak",
+      "kind": "smoothstep",
+      "quantity": "presentation proxy, not a horizon observable",
+      "startEvent": "commonApparentHorizonFirst"
+    },
+    "sourceChannels": {
+      "h22": "complex r h_22 / M from the CoM-corrected N=2 extrapolated waveform",
+      "orbitalPhaseUnwrappedRad": "unwrapped atan2(delta_y, delta_x), shifted to zero at the first bundled sample; gauge-dependent",
+      "separationM": "Euclidean distance between SXS AhA/AhB inertial-frame coordinate centroids; gauge-dependent"
+    }
+  },
+  "events": {
+    "commonApparentHorizonFirst": {
+      "source": "metadata common_horizon_time",
+      "tProtocolM": -6.072285420526896
+    },
+    "individualHorizonsLast": {
+      "source": "last common A/B CoordCenterInertial sample",
+      "tProtocolM": -6.158268002352997
+    },
+    "playbackEnd": {
+      "source": "configured ringdown display endpoint",
+      "tProtocolM": 120.0
+    },
+    "relaxation": {
+      "source": "metadata relaxation_time",
+      "tProtocolM": -9210.155251999806
+    },
+    "waveformPeak": {
+      "source": "maximum abs(Extrapolated_N2 h(2,2))",
+      "tProtocolM": 0.0
+    }
+  },
+  "generation": {
+    "command": "python3 scripts/generate_binary_sxs_dynamics.py --metadata metadata.json --horizons Horizons.h5 --waveform rhOverM_Asymptotic_GeometricUnits_CoM.h5",
+    "deterministic": true,
+    "generator": "scripts/generate_binary_sxs_dynamics.py",
+    "generatorSha256": "b3d6f051d829e142cd53ba731cfcafbbde6070c4dae13d22c41afca8802d8cce"
+  },
+  "id": "binary-sxs-bbh-0001-v2",
+  "physicalSystem": {
+    "bodies": [
+      {
+        "dimensionlessSpin": [
+          7.09752141352e-10,
+          -6.66051760901e-10,
+          1.20930921804e-07
+        ],
+        "id": "A",
+        "massFraction": 0.4999999974860008,
+        "orbitPositionScale": -0.5000000025139992
+      },
+      {
+        "dimensionlessSpin": [
+          5.84453420303e-10,
+          1.30504445113e-09,
+          1.22196915414e-07
+        ],
+        "id": "B",
+        "massFraction": 0.5000000025139992,
+        "orbitPositionScale": 0.4999999974860008
+      }
+    ],
+    "massRatioQ": 0.99999999999679,
+    "referenceEccentricity": 0.0002569,
+    "referenceTimeCodeUnits": 320.0,
+    "remnant": {
+      "dimensionlessSpin": [
+        -7.29520687012e-10,
+        7.40468371215e-10,
+        0.686461676493
+      ],
+      "finalHorizonDiagnostic": {
+        "dimensionlessSpin": [
+          -7.28728494330736e-10,
+          7.403392384810434e-10,
+          0.6864955416832005
+        ],
+        "massFraction": 0.9515868312278275,
+        "sourceTimeCodeUnits": 10322.881732609312
+      },
+      "massFraction": 0.951609417715,
+      "metadataSource": "SXS:BBH:0001 Lev5 metadata.json"
+    }
+  },
+  "playback": {
+    "cycleDurationSecondsAtNominalRate": 36.0,
+    "endHoldSeconds": 2.5,
+    "loop": true,
+    "scrubCoordinate": "linear protocol time",
+    "slowMotion": {
+      "enabledByDefault": true,
+      "endTimeM": 70.0,
+      "rateMultiplier": 0.12,
+      "startTimeM": -160.0,
+      "status": "presentation-only wall-time mapping; not gravitational time dilation"
+    }
+  },
+  "rendererAdapter": {
+    "lightPropagation": "weak-field-fast-light",
+    "massAbi": [
+      "bodyAMassFraction",
+      "bodyBMassFraction",
+      "remnantMassFraction",
+      "reserved"
+    ],
+    "nearZoneMetricConsumed": false,
+    "positionsFrozenPerRay": true,
+    "shaderBundleId": "binary-approx-v1",
+    "stateAbi": [
+      "separationM",
+      "orbitalPhaseUnwrappedRad",
+      "renderTopologyBlend",
+      "reserved"
+    ]
+  },
+  "rendererDefaults": {
+    "exposure": 1.08,
+    "fieldOfViewDeg": 52.0,
+    "initialViewingInclinationDeg": 57.0,
+    "observerRadiusM": 42.0,
+    "raySteps": 512
+  },
+  "schema": "blackhole.binary-scene/v2",
+  "scientificStatus": {
+    "classification": "NR-driven dynamics with weak-field fast-light rendering",
+    "description": "Orbital coordinate separation and phase come from the two SXS apparent-horizon centroids, while the waveform strip uses the CoM-corrected extrapolated N=2 (2,2) strain mode. The existing lens shader remains a weak-field fast-light preview.",
+    "dynamicsSourceIsNumericalRelativity": true,
+    "nearZoneSpacetimeUsedForLightPropagation": false,
+    "prohibitedClaim": "Do not describe the rendered image as NR ray tracing, a solved binary spacetime image, or a quantitatively accurate merger shadow.",
+    "slowLightGeodesicsIncluded": false
+  },
+  "source": {
+    "artifacts": {
+      "horizons": {
+        "byteLength": 3501232,
+        "md5": "484ea88842209e64983793159bcc7d7c",
+        "path": "SXS:BBH:0001/Lev5/Horizons.h5",
+        "sha256": "cf97de4a60a4cd5c6a56f219ea9fa81f1849647f134250e95ae79e40be4dd957",
+        "url": "https://zenodo.org/api/records/3273935/files/SXS:BBH:0001/Lev5/Horizons.h5/content"
+      },
+      "metadata": {
+        "byteLength": 4170,
+        "md5": "099d4c93d9466fe4b7ecad6c94499cf3",
+        "path": "SXS:BBH:0001/Lev5/metadata.json",
+        "sha256": "329d0643f9d33361eafaeae7ef1818dcda3311b33477ecef4f002ead17f42668",
+        "url": "https://zenodo.org/api/records/3273935/files/SXS:BBH:0001/Lev5/metadata.json/content"
+      },
+      "waveform": {
+        "byteLength": 142641207,
+        "md5": "c271e0b905c74f434f00c9b14f67850c",
+        "path": "SXS:BBH:0001/Lev5/rhOverM_Asymptotic_GeometricUnits_CoM.h5",
+        "sha256": "d760add0693e458781f8db9958b4669971e816d7c026cdbe5f09b7d8fd6bd21f",
+        "url": "https://zenodo.org/api/records/3273935/files/SXS:BBH:0001/Lev5/rhOverM_Asymptotic_GeometricUnits_CoM.h5/content"
+      }
+    },
+    "catalog": "SXS",
+    "level": "Lev5",
+    "license": {
+      "attributionRequired": true,
+      "spdx": null,
+      "status": "not-declared-in-pinned-zenodo-record"
+    },
+    "recordDoi": "https://doi.org/10.5281/zenodo.3273935",
+    "recordId": 3273935,
+    "simulation": "SXS:BBH:0001",
+    "waveformDataset": "Extrapolated_N2.dir/Y_l2_m2.dat"
+  },
+  "timeReference": {
+    "alignmentCaveat": "Horizon coordinate time and extrapolated waveform retarded time are distinct source coordinates. Their published numeric time origins are retained; this is not a gauge-invariant light-travel-time measurement.",
+    "horizonMapping": "t_protocol=t_coordinate_code/referenceMassTotal-t_waveform_peak",
+    "protocolZeroEvent": "maximum amplitude of Extrapolated_N2 h(2,2)",
+    "waveformMapping": "t_protocol=t_retarded_normalized-t_waveform_peak",
+    "waveformPeakAmplitude": 0.394022223727516,
+    "waveformPeakSourceTimeM": 9530.15514714096
+  },
+  "title": "SXS:BBH:0001 NR-driven binary dynamics preview",
+  "units": {
+    "G": 1.0,
+    "c": 1.0,
+    "distanceUnit": "M",
+    "massUnit": "M",
+    "referenceMassDefinition": "sum of the two Christodoulou masses at relaxation time",
+    "referenceMassTotalInCodeUnits": 1.000000327684,
+    "system": "geometric",
+    "timeUnit": "M"
+  }
+}

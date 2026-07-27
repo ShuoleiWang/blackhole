@@ -157,6 +157,12 @@ async function loadRequestedScene() {
     state,
     formatMass,
     formatGravitationalRadius,
+    controls: {
+      setRunning: setMotion,
+      requestRender() {
+        state.needsRender = true;
+      },
+    },
   });
   const bundle = scene.rendererOptions?.shaderBundle;
   if (!bundle?.id || !bundle.wgsl?.trace || !bundle.glsl?.trace) {
@@ -272,14 +278,20 @@ function setMode(mode) {
 
 function setMotion(running) {
   state.running = running;
+  const labels = activeScene?.motionLabels ?? {
+    pause: "暂停物理轨道",
+    resume: "继续物理轨道",
+  };
+  const actionLabel = running ? labels.pause : labels.resume;
   ui.toggleMotion.dataset.state = running ? "running" : "paused";
   ui.toggleMotion.setAttribute("aria-pressed", String(!running));
-  ui.toggleMotion.setAttribute("aria-label", running ? "暂停物理轨道" : "继续物理轨道");
-  ui.toggleMotion.setAttribute("title", running ? "暂停物理轨道" : "继续物理轨道");
+  ui.toggleMotion.setAttribute("aria-label", actionLabel);
+  ui.toggleMotion.setAttribute("title", actionLabel);
   const mark = ui.toggleMotion.querySelector("span");
   if (mark) {
     mark.textContent = running ? "Ⅱ" : "▶";
   }
+  activeScene?.onMotionChanged?.(running);
   state.needsRender = true;
 }
 
