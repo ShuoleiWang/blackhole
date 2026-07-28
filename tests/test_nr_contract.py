@@ -119,6 +119,10 @@ class NrContractTests(unittest.TestCase):
         data["provenance"]["sourceSimulation"]["kind"] = "stationary-reference"
         data["provenance"]["sourceSimulation"]["notApplicableReason"] = None
         self.mark_accuracy_measured(data)
+        for name in ("nrConvergence", "constraintNorms"):
+            data["accuracy"][name]["status"] = "not-applicable"
+            data["accuracy"][name]["method"] = None
+            data["accuracy"][name]["value"] = None
         data["accuracy"]["unresolvedFraction"] = 1.0 / 8.0
         data["accuracy"]["outcomeFractions"] = {
             "escaped": 2.0 / 8.0,

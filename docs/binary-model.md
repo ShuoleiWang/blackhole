@@ -17,7 +17,7 @@ of Einstein's field equations.
 | Light propagation | Existing real-time, frame-frozen multi-centre weak-field bending | **Not NR ray tracing** and invalid as precision strong-field imaging |
 | Emission | Lensed all-sky background in vacuum | No accretion disks, plasma, GRMHD, or radiative transfer |
 | Display | WebGPU with WebGL2 fallback and the existing HDR pipeline | Display fidelity does not increase physical accuracy |
-| Phase 1 NR transfer-map interface | Versioned manifest schema, deterministic synthetic fixture, fail-closed validator, and regression tests | Implemented ingestion contract only; no NR-derived transfer map or slow-light runtime consumer |
+| Transfer-map interface | Versioned schema, synthetic fixture, fail-closed validators, plus a fixed-camera stationary Schwarzschild reference consumer | The consumer is proven with analytic data only; no NR-derived transfer map or binary slow-light playback |
 
 The precise classification is **NR-driven dynamics with weak-field fast-light
 rendering**. “NR-driven” applies to the orbital track, waveform, source events,
@@ -275,6 +275,14 @@ requested explicitly, for example:
 http://localhost:4173/?scene=binary-approx
 ```
 
+The separate
+[`?scene=transfer-map-reference`](../README.md#url-parameters) path consumes a
+fixed 1024×576 stationary analytic Schwarzschild vacuum map. It has no
+accretion disk and no relationship to the SXS binary pixel path; its purpose is
+to prove the authenticated transfer-map and GPU-consumer chain. See
+[`nr-transfer-map-v1.md`](./nr-transfer-map-v1.md) for its exact claims,
+nearest-texel sampling rule, and validation metrics.
+
 Renderer extensions are optional: without a scene-provided shader and extra
 uniform writer, WebGPU and WebGL2 use their existing sources and uniform layout.
 This preserves the previous final single-black-hole behavior and avoids making
@@ -327,6 +335,7 @@ The project status is deliberately reported by layer:
 | --- | --- | --- |
 | Phase 1 transfer-map schema, fixture, validator, and tests | Implemented | `contract-conformant` ingestion boundary |
 | Phase 2 SXS orbital dynamics, waveform, events, and remnant metadata | Implemented | `NR-driven dynamics` |
+| Stationary Schwarzschild reference map and runtime consumer | Implemented | Analytic fixed-camera transfer-map playback; not NR |
 | Slow-light rays through a time-dependent NR spacetime | Not implemented | No `NR-backed` pixel or image path |
 | GRMHD plasma and GR radiative transfer | Not implemented | No physically modelled luminous merger |
 
@@ -396,6 +405,12 @@ it contains no SXS/NR metric, waveform, horizon, or ray payload. The fixture
 proves that the protocol tooling agrees with itself, not that the project has
 completed an NR simulation.
 
+The renderable
+[`schwarzschild-reference-v1`](../assets/transfer-maps/schwarzschild-reference-v1/manifest.json)
+is distinct from that fixture: it contains 589,824 analytic stationary rays in
+nine chunks and is consumed at `?scene=transfer-map-reference`. It validates the
+format-to-browser path but supplies no evidence for a time-dependent NR merger.
+
 The fail-closed validator rejects unknown schema versions and fields, missing
 fields, duplicate JSON keys, non-finite values, booleans used as numbers,
 unsafe or symbolic-link paths, sidecar hash/size mismatches, chunk
@@ -413,6 +428,10 @@ Run the contract validation independently of the existing rendering checks:
 ```bash
 PYTHONDONTWRITEBYTECODE=1 python3 scripts/verify_nr_contract.py
 PYTHONDONTWRITEBYTECODE=1 python3 -m unittest tests/test_nr_contract.py
+PYTHONDONTWRITEBYTECODE=1 python3 scripts/verify_nr_contract.py assets/transfer-maps/schwarzschild-reference-v1/manifest.json
+PYTHONDONTWRITEBYTECODE=1 python3 scripts/verify_schwarzschild_transfer_map.py
+PYTHONDONTWRITEBYTECODE=1 python3 -m unittest tests/test_schwarzschild_transfer_map.py
+node --test tests/transfer-map-runtime.test.mjs
 ```
 
 The first command validates

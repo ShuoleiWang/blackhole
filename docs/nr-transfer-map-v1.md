@@ -5,10 +5,12 @@ camera-specific, vacuum, slow-light transfer maps. The schema discriminator is
 `blackhole.nr-transfer-map/v1`.
 
 > **Status:** the schema, deterministic synthetic fixture, fail-closed
-> validator, and regression tests are implemented. No numerical-relativity
-> spacetime, NR-derived transfer map, runtime decoder, or NR playback scene is
-> bundled. The default Schwarzschild renderer and the opt-in
-> `?scene=binary-approx` preview are unchanged.
+> validators, and regression tests are implemented. The repository now also
+> bundles a runtime decoder and `?scene=transfer-map-reference`, backed by a
+> project-generated stationary analytic Schwarzschild map. No
+> numerical-relativity spacetime, NR-derived transfer map, or NR playback scene
+> is bundled. The default Schwarzschild renderer and opt-in
+> `?scene=binary-approx` remain isolated and unchanged.
 
 ## Scientific claim levels
 
@@ -26,10 +28,12 @@ that Einstein's equations were solved or that a ray, merger, or image is
 physically correct. A browser that eventually plays an NR-derived transfer map
 will still be a playback/composition layer, not an NR solver.
 
-The existing `binary-approx` scene is more precisely described as a
-**PN/phenomenological weak-field preview with rounded remnant reference values
-from `SXS:BBH:0001`**. It does not use SXS waveform, horizon, spacetime, or
-ray-transfer data.
+The existing `binary-approx` scene is **SXS-driven dynamics with weak-field
+fast-light rendering**. Phase 2 consumes pinned `SXS:BBH:0001` Lev5
+apparent-horizon centroid diagnostics, the CoM-corrected extrapolated `h22`
+waveform, events, and remnant metadata. It does not consume the SXS near-zone
+spacetime or an NR-derived ray-transfer payload, so its pixels are not NR ray
+tracing.
 
 ## Repository entry points
 
@@ -43,6 +47,16 @@ ray-transfer data.
   strict JSON/schema, integrity, frame, sampling, and record checks.
 - [`tests/test_nr_contract.py`](../tests/test_nr_contract.py) covers accepted
   input and adversarial rejection cases.
+- [`assets/transfer-maps/schwarzschild-reference-v1/manifest.json`](../assets/transfer-maps/schwarzschild-reference-v1/manifest.json)
+  declares the renderable 1024×576 stationary analytic reference and nine
+  hashed chunks.
+- [`scripts/generate_schwarzschild_transfer_map.py`](../scripts/generate_schwarzschild_transfer_map.py)
+  deterministically generates that reference.
+- [`scripts/verify_schwarzschild_transfer_map.py`](../scripts/verify_schwarzschild_transfer_map.py)
+  independently checks its stationary geodesic physics.
+- [`src/transfer-map-loader.js`](../src/transfer-map-loader.js) and
+  [`src/transfer-map-shaders.js`](../src/transfer-map-shaders.js) implement the
+  authenticated runtime consumer and matching WebGPU/WebGL2 playback.
 - [`binary-model.md`](./binary-model.md) explains how the contract fits into the
   longer NR → slow-light geodesic → browser playback architecture.
 
@@ -52,6 +66,16 @@ Generate and validate the project fixture with:
 python3 scripts/generate_nr_contract_fixture.py
 PYTHONDONTWRITEBYTECODE=1 python3 scripts/verify_nr_contract.py
 PYTHONDONTWRITEBYTECODE=1 python3 -m unittest tests/test_nr_contract.py
+```
+
+Generate and validate the stationary reference and runtime path with:
+
+```bash
+python3 scripts/generate_schwarzschild_transfer_map.py
+PYTHONDONTWRITEBYTECODE=1 python3 scripts/verify_nr_contract.py assets/transfer-maps/schwarzschild-reference-v1/manifest.json
+PYTHONDONTWRITEBYTECODE=1 python3 scripts/verify_schwarzschild_transfer_map.py
+PYTHONDONTWRITEBYTECODE=1 python3 -m unittest tests/test_schwarzschild_transfer_map.py
+node --test tests/transfer-map-runtime.test.mjs
 ```
 
 The validator uses
@@ -105,6 +129,31 @@ renderable = false
 Its one 4×2 chunk contains eight sentinel records that cover all six terminal
 outcomes. It has no SXS/NR metric, waveform, horizon, or geodesic payload and
 must never be presented as an image.
+
+The separately shipped `schwarzschild-reference-v1` product is:
+
+```text
+datasetKind = stationary-reference-transfer-map
+renderable = true
+projection = 1024 × 576 at one fixed observation time
+chunks = 9
+records = 589824
+outcomes = escaped:557772, captured:32052, unusable:0
+```
+
+It represents a static observer at `r=40M` with a 40-degree vertical field of
+view in analytic Schwarzschild vacuum. The capture threshold is
+`b_c=3√3M`; an exactly critical ray is classified `unresolved`, rather than
+arbitrarily assigned across the separatrix. No stored pixel centre in this
+particular grid is exactly critical, so the bundled payload has zero unresolved
+rays. It contains no disk emission, plasma, NR source, binary evolution, or
+slow-light time sampling.
+
+The generic contract validator proves conformance and integrity. The independent
+stationary verifier additionally recovers the `14.548010°` finite-distance
+shadow diameter and `g=1.024951860`, with maximum sampled analytic null residual
+`7.678e-14`, maximum independent direction error `1.062e-8 rad`, and maximum
+stored per-ray projection estimate `1.415e-2 px`.
 
 ## Required manifest sections
 
@@ -200,6 +249,11 @@ ICRS axes are fixed as:
 +Z = ICRS north celestial pole
 ```
 
+For the bundled reference, the declared proper world-to-ICRS rotation maps
+`q=(worldX, worldZ, -worldY)`. Equirectangular lookup then uses the standard
+`longitude=atan2(qY,qX)` and `latitude=asin(qZ)` conventions. This explicit
+rotation prevents a visually plausible but mirrored or axis-swapped panorama.
+
 For metric signature `-+++`, each observer sample supplies mutually inverse
 covariant and contravariant metrics, a future-directed unit four-velocity `u`,
 and a contravariant tetrad ordered:
@@ -232,6 +286,11 @@ g = (u_observer·k_observer) / (u_boundary·k_boundary)
 The denominator uses the future-directed unit reference observer declared at
 `escapeBoundary`; it must be positive. `frequencyShiftG` is therefore positive
 and dimensionless.
+
+In the bundled reference that denominator is the static observer at the
+`r=1000M` escape worldtube. The panorama is interpreted in that boundary
+observer's reference frame; `g` is not a disk-emitter redshift and does not
+imply any accretion emission.
 
 `rayIntegration` records whether the spacetime is time-dependent, stationary,
 or synthetic, together with the spatial/temporal metric interpolation,
@@ -309,11 +368,19 @@ recordCount × 32
 ```
 
 Protocol observation times are strictly increasing and align one-to-one with
-observer and chunk sample indices. Continuous interpolation is allowed only
-when the relevant validity bit is present at every contributor. Escape
-directions are then renormalized; categorical fields use nearest/no-blend.
-Invalid, missing, unresolved, failed, or out-of-domain records never fall back
-to the sky.
+observer and chunk sample indices. Interpolation is controlled by the manifest
+and must preserve every contributor's validity. Invalid, missing, unresolved,
+failed, or out-of-domain records never fall back to the sky.
+
+The bundled stationary reference deliberately declares
+`continuous=none-nearest-texel-center` and
+`escapeDirection=nearest-no-blend`. Its runtime consumer selects one detector
+texel and never bilinearly blends ray directions or outcomes. Measured tests
+near the capture/escape separatrix found that direction blending can cross the
+critical branch and create errors of tens to hundreds of pixels even when both
+endpoints look individually valid. Categorical outcomes are likewise
+nearest/no-blend. Future temporal or spatial interpolation requires a separately
+validated policy; it must not be inferred from this reference consumer.
 
 `accuracy.outcomeFractions` reports each decoded outcome fraction plus:
 
@@ -325,6 +392,15 @@ For the non-renderable synthetic fixture all fractions are `null`; its expected
 counts are fixture assertions. A renderable product must provide finite
 fractions that sum consistently and match the decoded payload, as well as a
 matching `unresolvedFraction`.
+
+Measured fields apply only to the source class that can define them. For a
+stationary analytic reference, `geodesicNullResidual` and
+`interpolationError` are measured, while `nrConvergence` and `constraintNorms`
+must be exactly `status=not-applicable`, `method=null`, and `value=null`.
+`not-applicable` means there is no NR grid hierarchy or numerical Einstein
+constraint field to measure; it does **not** mean a measured NR error of zero.
+An `nr-slow-light-transfer-map` must instead provide measured NR convergence and
+constraint information.
 
 ## Provenance, artifact bases, and integrity
 
@@ -344,6 +420,13 @@ The exact manifest bytes are covered by `manifest.sha256`; bundled source
 artifacts and chunks are checked against their declared byte sizes and SHA-256
 hashes. The generator URI must name the `generator-source` artifact and its
 `codeRevision` must bind that artifact's SHA-256.
+
+For `?scene=transfer-map-reference`, the runtime first matches the raw manifest
+bytes against a digest pinned in the scene module, then cross-checks the
+sidecar, validates the parsed manifest, authenticates all nine chunks, strictly
+decodes all 589,824 records, and only then creates GPU resources. A failed
+manifest, chunk, ABI, outcome, or accuracy check stops the scene; partial data
+is never rendered and invalid states never sample the sky.
 
 ## Fail-closed behavior
 
@@ -384,7 +467,9 @@ Before a dataset can be described as NR-backed, its producer must at minimum:
    error, unresolved fraction, and stationary Schwarzschild/Kerr comparisons;
 6. pass the protocol validator and independent scientific convergence gates.
 
-A future runtime decoder must refuse `renderable=false`, preserve validity and
-outcome states through interpolation, and keep image-regression tests separate
-from physics tests. Until real NR data and that consumer exist, the protocol is
-an implemented architecture boundary rather than an NR rendering feature.
+The implemented stationary runtime refuses `renderable=false`, preserves
+validity and outcome states, and keeps runtime tests separate from the
+independent physics verifier. It proves the browser ingestion and GPU-consumer
+chain with analytic Schwarzschild data only. Until a real time-dependent
+NR-derived dataset passes the additional gates above, the protocol remains an
+NR-ready architecture boundary rather than an NR rendering feature.

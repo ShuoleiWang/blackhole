@@ -1262,10 +1262,16 @@
           ]
         },
         "continuous": {
-          "const": "validity-strict-linear"
+          "enum": [
+            "validity-strict-linear",
+            "none-nearest-texel-center"
+          ]
         },
         "escapeDirection": {
-          "const": "validity-strict-linear-then-normalize"
+          "enum": [
+            "validity-strict-linear-then-normalize",
+            "nearest-no-blend"
+          ]
         },
         "categorical": {
           "const": "nearest-no-blend"

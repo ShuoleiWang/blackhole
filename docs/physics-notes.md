@@ -25,6 +25,15 @@ u'' = -u + 3u²
 
 程序使用固定角步长的 Störmer–Verlet 积分，并在光线跨越视界、逃逸到无穷远或穿过盘面时做插值求交。普通光线使用动态实时预算；临界曲线附近最多使用 384 步。
 
+## Stationary transfer-map 参考
+
+`?scene=transfer-map-reference` 不运行上述实时 shader，而是消费离线生成的
+1024×576、9-chunk Schwarzschild 解析真空 transfer map。它采用 `r=40M`
+静止观测者与固定 40° 垂直视场，只按最近 texel 读取预计算逃逸方向和 outcome，
+不在捕获/逃逸 separatrix 两侧混合方向。该场景不含吸积盘，也不是 NR、
+双黑洞或 GRMHD 模拟；完整 ABI、ICRS 轴映射、精度指标与验证命令见
+[`nr-transfer-map-v1.md`](./nr-transfer-map-v1.md)。
+
 ## 运动观察者
 
 相机位于经过黑洞中心的 Schwarzschild 圆轨道平面上。屏幕光线首先从观察者的局部共动标架做 Lorentz 变换，再进入局部 Schwarzschild 静态标架；观察者自身的运动因此会影响像差和频移。

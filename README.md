@@ -21,6 +21,12 @@ quantitatively accurate merger shadow. The project is intended for real-time
 visualization and education; it is not a Kerr, full-NR light-propagation,
 GRMHD, or high-precision radiative-transfer solver.
 
+A second opt-in path, `?scene=transfer-map-reference`, exercises the transfer-map
+pipeline with a project-generated, stationary analytic Schwarzschild reference.
+Its fixed 1024×576 camera contains no accretion disk and is **not numerical
+relativity**; it validates offline ray generation, authenticated playback, GPU
+consumption, and sky composition without changing either existing scene.
+
 ![A Schwarzschild black hole, accretion disk, and gravitationally lensed Milky Way](./docs/images/blackhole-galaxy-hero.webp)
 
 <sub>A 5120×2576 in-app screenshot of the WebGPU/Metal renderer running on Apple Silicon, with the controls and live backend, output, and performance readouts visible. Milky Way source: ESO/S. Brunier; geodesically transformed, composited, and transcoded by this project from an original used under [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/). See [`assets/SOURCES.md`](./assets/SOURCES.md) for full provenance.</sub>
@@ -43,11 +49,10 @@ GRMHD, or high-precision radiative-transfer solver.
 - **Explicit rendering boundary** — The binary scene retains the existing
   WGSL/GLSL weak-field fast-light lens shader. NR-derived trajectories and a
   real NR waveform do not make the pixels NR ray tracing.
-- **Versioned NR transfer-map boundary** — A fail-closed schema, deterministic
-  conformance fixture, generator, validator, and tests define how future
-  camera-specific slow-light products can enter the repository. Phase 1 is
-  still a data-contract boundary only: no NR-derived transfer map or
-  slow-light runtime consumer is bundled.
+- **Transfer-map reference consumer** — `?scene=transfer-map-reference`
+  authenticates a bundled 1024×576 stationary Schwarzschild map and its nine
+  chunks before either backend consumes it. This analytic vacuum reference is
+  neither NR, an accretion-disk model, nor a future binary slow-light product.
 - **Non-breaking scene architecture** — Optional scene descriptors and shader bundles extend the shared WebGPU/WebGL2 backends, while the default URL retains the original Schwarzschild shader, observer model, disk, and controls.
 - **WebGPU first, WebGL2 fallback** — Chooses the rendering path from the GPU limits, texture dimensions, and framebuffer capabilities exposed at runtime, without chip-model-specific branches.
 - **Progressive sky assets** — Ships with ESO 6K and 4K fallbacks and can optionally load the 16000×8000 ESA/Gaia all-sky map.
@@ -69,9 +74,10 @@ The current application interface is in Simplified Chinese; this does not affect
 
 Use the in-app scene selector, or open
 <http://localhost:4173/?scene=binary-approx>, to enter the experimental binary
-preview. Returning to the default URL restores the Schwarzschild scene.
-The Phase 1 transfer-map contract does not add another runnable scene: the
-default Schwarzschild and opt-in `binary-approx` paths remain isolated.
+preview. Open
+<http://localhost:4173/?scene=transfer-map-reference> for the fixed-camera
+stationary transfer-map reference. Returning to the default URL restores the
+interactive Schwarzschild scene; all three paths remain isolated.
 
 The bundled 6K Milky Way background works immediately. To install the optional, approximately 236 MiB Gaia 16K map:
 
@@ -104,11 +110,17 @@ CoM-corrected SXS `Extrapolated_N2` `h22` mode, with peak amplitude at protocol
 binary. None of these controls changes the weak-field fast-light rendering
 model.
 
+The transfer-map reference has a fixed camera and projection, so drag, zoom,
+reset, motion, mass, accretion, and time controls are disabled. Its two display
+modes select sky composition or explicit ray-outcome classification; exposure
+and display quality remain presentation controls.
+
 ## URL parameters
 
 | Parameter | Purpose |
 | --- | --- |
 | `?scene=binary-approx` | Opt into SXS-driven binary dynamics rendered by the isolated weak-field fast-light preview; the default remains Schwarzschild |
+| `?scene=transfer-map-reference` | Open the fixed-camera stationary analytic Schwarzschild transfer-map reference; not NR and no accretion disk |
 | `?renderer=webgl` | Force the WebGL2 fallback path |
 | `?hdr=0` | Disable extended HDR and use stable SDR output |
 | `?sky=high` | Force the bundled ESO 6K Milky Way background |
@@ -118,7 +130,7 @@ model.
 Parameters can be combined:
 
 ```text
-http://localhost:4173/?scene=binary-approx&presentation=1&sky=high&hdr=0
+http://localhost:4173/?scene=transfer-map-reference&presentation=1&sky=high&hdr=0
 ```
 
 ## Rendering pipeline
@@ -145,11 +157,17 @@ spacetime, integrate null geodesics through an NR metric, render remnant spin,
 or compute either capture surface as an apparent/event horizon. The camera
 also does not reuse the single-hole circular-observer Lorentz boost.
 
-Separately, the repository contains a versioned NR transfer-map **ingestion
-contract** for future offline products. It currently has no runtime consumer and
-does not change either renderer path. A manifest that passes the contract
-validator is protocol-conformant; that result alone says nothing about the
-physical correctness of an NR spacetime, a null-geodesic solution, or an image.
+The reference path completes a separate fail-closed chain: deterministically
+generate the analytic map; authenticate the exact manifest bytes, sidecar, and
+nine chunks; validate the v1 schema, 32-byte records, coordinates, outcomes, and
+accuracy; upload 589,824 records through the selected WebGPU or WebGL2 resource
+path; select the nearest stored texel without blending ray directions; and
+sample the panorama only for `escaped` outcomes before the shared HDR/SDR stage.
+
+The map is one observation at `r = 40M`, with a 40-degree vertical field of view
+and a fixed 1024×576 projection. It contains 557,772 escaped and 32,052 captured
+rays with no unusable records. It is an analytic stationary reference, not an NR
+spacetime, binary merger, accretion disk, or GRMHD/radiative-transfer result.
 
 Primary implementation files:
 
@@ -159,6 +177,12 @@ Primary implementation files:
 - [`src/scenes/binary-dynamics-adapter.js`](./src/scenes/binary-dynamics-adapter.js) — Fail-closed browser loader, integrity checks, and deterministic dynamics interpolation
 - [`src/scenes/binary-playback-clock.js`](./src/scenes/binary-playback-clock.js) — Scrubbing, frame-rate-independent playback, end hold, looping, and presentation-only slow motion
 - [`src/binary-shaders.js`](./src/binary-shaders.js) — Matching WebGPU/WebGL2 weak-field binary trace shaders and scene-uniform adapter
+- [`src/scenes/transfer-map-reference-scene.js`](./src/scenes/transfer-map-reference-scene.js) — Fixed-camera reference lifecycle and fail-closed loading UI
+- [`src/transfer-map-loader.js`](./src/transfer-map-loader.js) — Browser-side manifest, sidecar, chunk, ABI, outcome, and accuracy validation
+- [`src/transfer-map-shaders.js`](./src/transfer-map-shaders.js) — Matching nearest-texel WebGPU/WebGL2 consumers
+- [`assets/transfer-maps/schwarzschild-reference-v1/manifest.json`](./assets/transfer-maps/schwarzschild-reference-v1/manifest.json) — Renderable 1024×576 analytic reference and nine hashed chunks
+- [`scripts/generate_schwarzschild_transfer_map.py`](./scripts/generate_schwarzschild_transfer_map.py) — Deterministic offline generator
+- [`scripts/verify_schwarzschild_transfer_map.py`](./scripts/verify_schwarzschild_transfer_map.py) — Independent stationary-physics verifier
 - [`assets/scenes/binary-sxs-bbh-0001-v2.json`](./assets/scenes/binary-sxs-bbh-0001-v2.json) — Phase 2 source, scientific-status, event, integrity, error, renderer-boundary, and playback manifest
 - [`assets/scenes/binary-sxs-bbh-0001-v2.samples.json`](./assets/scenes/binary-sxs-bbh-0001-v2.samples.json) — 2,732-sample compact SXS dynamics and waveform track
 - [`scripts/generate_binary_sxs_dynamics.py`](./scripts/generate_binary_sxs_dynamics.py) — Offline, deterministic generator from three pinned official SXS files
@@ -189,18 +213,19 @@ Primary implementation files:
 | Binary merger/remnant data | Common apparent horizon at `t = -6.072285 M`; exact metadata remnant mass `0.951609417715 M` and spin vector `(-7.29520687012e-10, 7.40468371215e-10, 0.686461676493)` | The topology blend from the common-horizon event to waveform peak is a presentation proxy; the shader does not render horizon geometry, recoil, Kerr spin, or frame dragging |
 | Binary lensing | Fast-light bending from two frame-frozen weak-field monopoles, followed by one spherical remnant proxy | Not strong-field geodesic integration; remnant spin/frame dragging are not rendered, and fine photon rings, caustics, delays, and horizon topology are not quantitatively reliable |
 | Binary emission | Vacuum sky lensing with no accretion disk | Adding luminous plasma would require physical gas initial data, GRMHD, and radiative transfer |
-| Phase 1 NR transfer-map protocol | Versioned schema, deterministic synthetic fixture, fail-closed validator, and regression tests | Interface is contract-conformant and prepared for future NR-derived ray data; no NR metric, transfer map, or slow-light playback consumer is included |
+| Stationary transfer-map reference | Fixed 1024×576 analytic Schwarzschild vacuum map, nine authenticated chunks, nearest-texel WebGPU/WebGL2 playback | Fixed camera; no disk, NR source, time interpolation, or binary slow-light rays |
+| NR transfer-map protocol | Versioned schema, deterministic synthetic fixture, fail-closed validators, reference consumer, and regression tests | The runtime is proven with analytic data only; no NR-derived transfer map is bundled |
 | Shared renderer | WebGPU primary path with WebGL2 fallback | HDR, P3, FP16, and 16K textures depend on runtime capabilities; HDR does not improve model accuracy |
 
 See [`docs/physics-notes.md`](./docs/physics-notes.md) (currently in Simplified Chinese) for the Schwarzschild model, and [`docs/binary-model.md`](./docs/binary-model.md) for the binary preview boundary, authoritative references, implemented data contract, and offline NR-to-transfer-map architecture.
 
-## Compatibility and HDR
+## M3 Pro compatibility and HDR
 
-The renderer contains no M3-, M4-, or vendor-specific rendering branch. It negotiates texture limits, canvas formats, half-float framebuffer completeness, and display dynamic range at runtime, allowing the same code to select the appropriate WebGPU/Metal or WebGL2/Metal path across Apple Silicon systems.
-
-- **M3 Pro** — Manually tested with WebGPU/Metal, WebGL2/Metal, the Display-P3 FP16 path, SDR fallback, and background upgrade to the 16K map.
-- **M4** — Uses the same capability-negotiation path and requires no M4-specific feature. The repository does not yet record an M4 hardware smoke test.
-- **Other platforms** — WebGPU, HDR, large textures, and color-space support depend on the browser, operating system, driver, display, and the screen containing the window.
+The current hardware target is **M3 Pro**. It has been manually exercised with
+WebGPU/Metal, WebGL2/ANGLE-on-Metal fallback, Display-P3 FP16 output, SDR
+fallback, and the 16K background upgrade. Texture limits, canvas formats,
+half-float framebuffer completeness, and display range are negotiated at
+runtime; this document makes no separate M4 compatibility claim.
 
 The upper-right status bar reports the active backend, available adapter label, output mode, FPS, and internal render resolution. Adaptive quality adjusts ordinary-ray step counts and resolution within the user-selected ceiling, while rays near the critical impact parameter retain a larger integration budget.
 
@@ -213,6 +238,16 @@ node --test tests/binary-playback.test.mjs
 python3 scripts/verify_binary_preview.py
 PYTHONDONTWRITEBYTECODE=1 python3 scripts/verify_nr_contract.py
 PYTHONDONTWRITEBYTECODE=1 python3 -m unittest tests/test_nr_contract.py
+PYTHONDONTWRITEBYTECODE=1 python3 scripts/verify_nr_contract.py assets/transfer-maps/schwarzschild-reference-v1/manifest.json
+PYTHONDONTWRITEBYTECODE=1 python3 scripts/verify_schwarzschild_transfer_map.py
+PYTHONDONTWRITEBYTECODE=1 python3 -m unittest tests/test_schwarzschild_transfer_map.py
+node --test tests/transfer-map-runtime.test.mjs
+```
+
+Regenerate the bundled reference deterministically with:
+
+```bash
+python3 scripts/generate_schwarzschild_transfer_map.py
 ```
 
 The Schwarzschild numerical regression checks cover:
@@ -250,6 +285,14 @@ renderable. Unknown or missing fields, duplicate keys, non-finite numbers,
 path escapes, and ambiguous invalid-ray states are rejected. Passing these
 checks means **protocol-conformant**, not **NR-backed** or
 **physically validated**.
+
+The stationary verifier independently recovers a `14.548010°` finite-distance
+shadow diameter and boundary frequency factor `g = 1.024951860`. It reports a
+maximum sampled analytic null residual of `7.678e-14`, maximum independent
+direction error `1.062e-8 rad`, and maximum stored per-ray projection estimate
+`1.415e-2 px`. These are stationary-reference checks: the NR convergence and
+constraint-norm fields are correctly `not-applicable`, not zero-valued NR
+measurements.
 
 Together, these scripts validate selected numerical properties and architecture
 contracts. They are not complete visual, radiative-model, or cross-GPU

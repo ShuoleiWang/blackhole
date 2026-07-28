@@ -19,6 +19,27 @@ function sceneUniforms(bundle) {
   return uniforms;
 }
 
+function createSceneResources(bundle, renderer) {
+  const create = bundle.resources?.createWebGL;
+  if (!create) {
+    return null;
+  }
+  const resources = create(THREE, renderer);
+  if (
+    !resources
+    || !resources.uniforms
+    || typeof resources.uniforms !== "object"
+    || Array.isArray(resources.uniforms)
+    || typeof resources.dispose !== "function"
+  ) {
+    resources?.dispose?.();
+    throw new Error(
+      "Scene WebGL resources must provide uniforms and dispose()",
+    );
+  }
+  return resources;
+}
+
 function isApplePlatform() {
   const platform = navigator.userAgentData?.platform || navigator.platform || "";
   return /Mac|iPhone|iPad/i.test(platform);
@@ -168,8 +189,13 @@ export class WebGLRenderer {
       throw new Error("WebGL2 fragment high precision is unavailable");
     }
     const instance = new WebGLRenderer(canvas, context, capabilities, options);
-    await instance.init(skyUrl);
-    return instance;
+    try {
+      await instance.init(skyUrl);
+      return instance;
+    } catch (error) {
+      instance.dispose();
+      throw error;
+    }
   }
 
   constructor(canvas, context, capabilities, options = undefined) {
@@ -273,7 +299,20 @@ export class WebGLRenderer {
       uObserverBeta: { value: 0 },
       uSkyRadianceScale: { value: this.skyRadianceScale },
     };
+    this.sceneResourceState = createSceneResources(
+      this.shaderBundle,
+      this.renderer,
+    );
     const extras = sceneUniforms(this.shaderBundle);
+    const resourceUniforms = this.sceneResourceState?.uniforms || {};
+    for (const name of Object.keys(resourceUniforms)) {
+      if (name in extras) {
+        throw new Error(
+          `Scene WebGL resource uniform ${name} conflicts with a scene uniform`,
+        );
+      }
+      extras[name] = resourceUniforms[name];
+    }
     for (const name of Object.keys(extras)) {
       if (name in this.traceUniforms) {
         throw new Error(`Scene WebGL uniform ${name} conflicts with the shared renderer ABI`);
@@ -339,6 +378,7 @@ export class WebGLRenderer {
       skyTexture: this.skyDetail.split(" ")[0],
       skyUrl: this.skyUrl,
     });
+    this.validatePipeline();
     console.info("Black-hole renderer capabilities", this.capabilities);
 
     const source = typeof skyUrl === "string" ? {} : skyUrl;
@@ -352,6 +392,48 @@ export class WebGLRenderer {
       scheduleBackgroundTask(() => {
         void this.upgradeSkyTexture(source.ultra);
       });
+    }
+  }
+
+  validatePipeline() {
+    const shaderErrors = [];
+    const previousShaderError = this.renderer.debug.onShaderError;
+    this.renderer.debug.onShaderError = (
+      gl,
+      program,
+      vertexShader,
+      fragmentShader,
+    ) => {
+      shaderErrors.push([
+        gl.getProgramInfoLog(program),
+        gl.getShaderInfoLog(vertexShader),
+        gl.getShaderInfoLog(fragmentShader),
+      ].filter(Boolean).join("\n"));
+    };
+    clearErrors(this.context);
+    try {
+      // Three.js compiles ShaderMaterial programs and uploads DataTextures
+      // lazily. A real 1×1 two-pass render makes init fail closed instead of
+      // reporting a healthy WebGL fallback that presents a black canvas.
+      this.resize(1, 1);
+      this.renderer.setRenderTarget(this.traceTarget);
+      this.renderer.render(this.traceScene, this.camera);
+      this.renderer.setRenderTarget(null);
+      this.renderer.render(this.postScene, this.camera);
+    } finally {
+      this.renderer.setRenderTarget(null);
+      this.renderer.debug.onShaderError = previousShaderError;
+    }
+    if (shaderErrors.length) {
+      throw new Error(
+        `WebGL shader validation failed:\n${shaderErrors.join("\n")}`,
+      );
+    }
+    const error = this.context.getError();
+    if (error !== this.context.NO_ERROR) {
+      throw new Error(
+        `WebGL scene resource validation failed (error 0x${error.toString(16)})`,
+      );
     }
   }
 
@@ -480,6 +562,8 @@ export class WebGLRenderer {
   }
 
   dispose() {
+    this.sceneResourceState?.dispose();
+    this.sceneResourceState = null;
     this.traceTarget?.dispose();
     this.traceMaterial?.dispose();
     this.postMaterial?.dispose();

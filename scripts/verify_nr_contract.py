@@ -656,12 +656,18 @@ def _validate_measured_accuracy(manifest: dict[str, Any], path: str = "$.accurac
         fail(f"{path}.status", "scientific datasets require measured accuracy")
     if accuracy["notMeasuredReason"] is not None:
         fail(f"{path}.notMeasuredReason", "must be null when accuracy is measured")
-    for name in (
-        "nrConvergence",
-        "constraintNorms",
-        "geodesicNullResidual",
-        "interpolationError",
-    ):
+    stationary = manifest["datasetKind"] == "stationary-reference-transfer-map"
+    measured_sections = (
+        ("geodesicNullResidual", "interpolationError")
+        if stationary
+        else (
+            "nrConvergence",
+            "constraintNorms",
+            "geodesicNullResidual",
+            "interpolationError",
+        )
+    )
+    for name in measured_sections:
         section = accuracy[name]
         section_path = f"{path}.{name}"
         if section["status"] != "measured":
@@ -671,6 +677,21 @@ def _validate_measured_accuracy(manifest: dict[str, Any], path: str = "$.accurac
         if not isinstance(section["quantity"], str) or not section["quantity"].strip():
             fail(f"{section_path}.quantity", "measured section needs a quantity")
         _finite_number(section["value"], f"{section_path}.value")
+    if stationary:
+        for name in ("nrConvergence", "constraintNorms"):
+            section = accuracy[name]
+            section_path = f"{path}.{name}"
+            if section["status"] != "not-applicable":
+                fail(
+                    f"{section_path}.status",
+                    "NR-only accuracy section must be not-applicable for a "
+                    "stationary analytic reference",
+                )
+            if section["method"] is not None or section["value"] is not None:
+                fail(
+                    section_path,
+                    "not-applicable accuracy sections require null method and value",
+                )
 
 
 def _validate_dataset_claims(

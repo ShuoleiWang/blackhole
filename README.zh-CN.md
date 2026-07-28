@@ -18,6 +18,11 @@
 成像，也不是合并阴影的定量准确结果。项目面向实时可视化与教学演示，不是
 Kerr、完整 NR 光传播、GRMHD 或高精度辐射转移求解器。
 
+另一个显式选择的 `?scene=transfer-map-reference` 路径使用项目生成的
+stationary analytic Schwarzschild 参考图验证 transfer-map 完整链路。它采用
+固定 1024×576 相机、不含吸积盘，也**不是数值相对论**；它不会改变另外两个
+场景。
+
 ![Schwarzschild 黑洞、薄吸积盘与引力透镜化银河背景](./docs/images/blackhole-galaxy-hero.webp)
 
 <sub>项目在 Apple Silicon 上运行 WebGPU/Metal 的 5120×2576 实际截图，保留控制面板与后端、输出模式、帧率等运行状态。银河素材：ESO/S. Brunier；经本项目测地线追踪变形、合成并转码，原素材按 [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/) 使用；完整来源见 [`assets/SOURCES.md`](./assets/SOURCES.md)。</sub>
@@ -38,10 +43,9 @@ Kerr、完整 NR 光传播、GRMHD 或高精度辐射转移求解器。
 - **明确的渲染边界**：双黑洞仍使用原有 WGSL / GLSL weak-field
   fast-light 透镜 shader；NR 派生轨迹与真实 NR 波形并不会让像素成为 NR
   光线追踪。
-- **版本化 NR transfer map 边界**：失败即拒绝的 schema、确定性一致性
-  fixture、生成器、验证器和测试定义了未来相机特定 slow-light
-  数据进入项目的方式。Phase 1 仍只是数据契约，不包含 NR 派生 transfer
-  map 或 slow-light 运行时 consumer。
+- **Transfer-map 参考 consumer**：`?scene=transfer-map-reference` 会先认证
+  内置 1024×576 stationary Schwarzschild map 及 9 个 chunk，再交给任一
+  后端消费。它是解析真空参考，不是 NR、吸积盘或双黑洞 slow-light 数据。
 - **不破坏原功能的场景架构**：可选 scene descriptor 与 shader bundle 扩展共享 WebGPU / WebGL2 后端；默认 URL 仍使用原有 Schwarzschild shader、观测者模型、吸积盘和交互。
 - **WebGPU 优先、WebGL2 回退**：根据浏览器实际暴露的 GPU limits、纹理尺寸和 framebuffer 能力选择路径，不按芯片型号硬编码。
 - **渐进式天空资源**：仓库内置 ESO 6K 与 4K 回退；可选加载 ESA/Gaia 16000×8000 全天图。
@@ -61,8 +65,8 @@ python3 -m http.server 4173
 
 通过界面中的场景选择器，或直接打开
 <http://localhost:4173/?scene=binary-approx>，可以进入实验性双黑洞预览；回到默认 URL 即恢复 Schwarzschild 场景。
-Phase 1 transfer map 契约不会增加新的可运行场景；默认 Schwarzschild
-路径和显式选择的 `binary-approx` 路径仍保持隔离。
+打开 <http://localhost:4173/?scene=transfer-map-reference> 可进入固定相机
+stationary transfer-map 参考场景；三个路径彼此隔离。
 
 仓库内的 6K 银河背景可以直接运行。若希望使用约 236 MiB 的 Gaia 16K 全天图，可额外执行：
 
@@ -93,11 +97,16 @@ Phase 1 transfer map 契约不会增加新的可运行场景；默认 Schwarzsch
 `t = 0`。由于来源是真空双黑洞，吸积率控件会被禁用。这些交互都不会改变
 weak-field fast-light 渲染模型。
 
+Transfer-map 参考场景的相机与投影固定，因此拖动、缩放、重置、运动、质量、
+吸积率和时间控件均禁用；“天空合成 / 结果分类”只切换显示方式，曝光和画质也
+不改变物理数据。
+
 ## 运行参数
 
 | URL 参数 | 用途 |
 | --- | --- |
 | `?scene=binary-approx` | 显式进入 SXS 驱动动力学、weak-field fast-light 成像的隔离双黑洞预览；默认仍为 Schwarzschild |
+| `?scene=transfer-map-reference` | 打开固定相机 stationary analytic Schwarzschild transfer-map 参考；非 NR、无吸积盘 |
 | `?renderer=webgl` | 强制使用 WebGL2 回退路径 |
 | `?hdr=0` | 关闭扩展 HDR，使用稳定的 SDR 输出 |
 | `?sky=high` | 固定使用仓库内的 ESO 6K 银河背景 |
@@ -107,7 +116,7 @@ weak-field fast-light 渲染模型。
 参数可以组合，例如：
 
 ```text
-http://localhost:4173/?scene=binary-approx&presentation=1&sky=high&hdr=0
+http://localhost:4173/?scene=transfer-map-reference&presentation=1&sky=high&hdr=0
 ```
 
 ## 渲染管线
@@ -130,10 +139,16 @@ CoM 修正外推复数 `h22`，以及单独标注为展示代理的 topology ble
 读取 SXS 近区时空、在 NR 度规中积分零测地线、渲染余留体自旋，或把捕获面
 计算为视在/事件视界。相机也不会套用单黑洞圆轨道观测者的 Lorentz boost。
 
-与运行路径分离的是一套版本化 NR transfer map **接入契约**，用于未来离线
-生成的数据。当前没有运行时 consumer，也不改变两个 renderer。manifest
-通过契约验证只表示 protocol-conformant，不能据此判断 NR 时空、零测地线解
-或最终画面在物理上正确。
+参考场景完成一条独立、失败即拒绝的链路：离线确定性生成解析 Schwarzschild
+map；认证 manifest 原始字节、sidecar 和 9 个 chunk；验证 v1 schema、
+32-byte 记录、坐标、outcome 与精度；将 589,824 条记录上传到 WebGPU 或
+WebGL2；运行时只取最近 texel、绝不混合逃逸方向，并且只有 `escaped` 才采样
+天空；最后复用共享后处理和 HDR/SDR 输出。
+
+该 map 是 `r=40M` 固定观测者、40° 垂直视场、1024×576 单时刻投影，包含
+557,772 条 escaped 和 32,052 条 captured 光线，无 unusable 记录。它是
+stationary analytic reference，不是 NR 时空、双黑洞合并、吸积盘或
+GRMHD / 辐射转移结果。
 
 主要实现：
 
@@ -143,6 +158,12 @@ CoM 修正外推复数 `h22`，以及单独标注为展示代理的 topology ble
 - [`src/scenes/binary-dynamics-adapter.js`](./src/scenes/binary-dynamics-adapter.js)：失败即拒绝的浏览器加载、完整性检查和确定性动力学插值
 - [`src/scenes/binary-playback-clock.js`](./src/scenes/binary-playback-clock.js)：拖动、帧率无关播放、末尾停留、循环与仅展示慢放
 - [`src/binary-shaders.js`](./src/binary-shaders.js)：配套 WebGPU / WebGL2 弱场双黑洞 trace shader 与场景 uniform 适配
+- [`src/scenes/transfer-map-reference-scene.js`](./src/scenes/transfer-map-reference-scene.js)：固定相机参考场景生命周期与失败即拒绝加载 UI
+- [`src/transfer-map-loader.js`](./src/transfer-map-loader.js)：浏览器端 manifest、sidecar、chunk、ABI、outcome 与精度验证
+- [`src/transfer-map-shaders.js`](./src/transfer-map-shaders.js)：WebGPU / WebGL2 最近 texel consumer
+- [`assets/transfer-maps/schwarzschild-reference-v1/manifest.json`](./assets/transfer-maps/schwarzschild-reference-v1/manifest.json)：1024×576 可渲染解析参考及 9 个哈希 chunk
+- [`scripts/generate_schwarzschild_transfer_map.py`](./scripts/generate_schwarzschild_transfer_map.py)：确定性离线生成器
+- [`scripts/verify_schwarzschild_transfer_map.py`](./scripts/verify_schwarzschild_transfer_map.py)：独立 stationary physics 验证器
 - [`assets/scenes/binary-sxs-bbh-0001-v2.json`](./assets/scenes/binary-sxs-bbh-0001-v2.json)：Phase 2 来源、科学状态、事件、完整性、误差、渲染边界与播放 manifest
 - [`assets/scenes/binary-sxs-bbh-0001-v2.samples.json`](./assets/scenes/binary-sxs-bbh-0001-v2.samples.json)：2,732 个样本的紧凑 SXS 动力学与波形轨迹
 - [`scripts/generate_binary_sxs_dynamics.py`](./scripts/generate_binary_sxs_dynamics.py)：从三个固定官方 SXS 文件离线确定性生成轨迹
@@ -172,18 +193,18 @@ CoM 修正外推复数 `h22`，以及单独标注为展示代理的 topology ble
 | 双黑洞合并/余留体数据 | 共同视在视界事件 `t = -6.072285 M`；精确元数据余留质量 `0.951609417715 M`、自旋向量 `(-7.29520687012e-10, 7.40468371215e-10, 0.686461676493)` | 从共同视界事件到波形峰值的 topology blend 只是展示代理；shader 不渲染视界几何、反冲、Kerr 自旋或 frame dragging |
 | 双黑洞透镜 | 每条光线内冻结两个弱场单极子的 fast-light 偏折，随后过渡为球对称余留体代理 | 不是强场测地线积分；不渲染余留体自旋和 frame dragging，精细光子环、焦散、时延和视界拓扑不具定量可信度 |
 | 双黑洞发射 | 无吸积盘的真空天空透镜 | 若加入发光等离子体，需要物理气体初始条件、GRMHD 与辐射转移 |
-| Phase 1 NR transfer map 协议 | 版本化 schema、确定性合成 fixture、失败即拒绝的验证器与回归测试 | 接口达到 contract-conformant，可接入未来 NR 派生光线数据；尚无 NR 度规、transfer map 或 slow-light consumer |
+| Stationary transfer-map 参考 | 固定 1024×576 解析 Schwarzschild 真空 map、9 个认证 chunk、WebGPU/WebGL2 最近 texel playback | 固定相机；无吸积盘、NR 来源、时间插值或双黑洞 slow-light 光线 |
+| NR transfer-map 协议 | 版本化 schema、合成 fixture、失败即拒绝验证器、参考 consumer 与回归测试 | consumer 只由解析数据验证；仓库仍无 NR 派生 transfer map |
 | 共享渲染器 | WebGPU 主路径、WebGL2 回退 | HDR、P3、FP16 与 16K 纹理由运行时能力决定；HDR 不提高模型精度 |
 
 Schwarzschild 几何单位、临界轨道、侧视图像和颜色不对称见 [`docs/physics-notes.md`](./docs/physics-notes.md)；双黑洞预览的物理边界、权威参考、已实现数据契约与离线 NR → transfer map 架构见 [`docs/binary-model.md`](./docs/binary-model.md)。
 
-## 兼容性与 HDR
+## M3 Pro 兼容性与 HDR
 
-渲染器没有 M3、M4 或其他 GPU 型号的专用分支。它依据浏览器返回的 texture limits、canvas 配置、半浮点 framebuffer 完整性以及显示动态范围逐级选择能力，因此同一代码可以在不同 Apple Silicon 上使用相应的 WebGPU/Metal 或 WebGL2/Metal 路径。
-
-- **M3 Pro**：已实测 WebGPU/Metal、WebGL2/Metal、Display-P3 FP16 路径、SDR 降级和 16K 后台升级。
-- **M4**：设计上使用相同的能力协商路径，不依赖 M4 独有功能；当前仓库尚未记录 M4 实机 smoke test。
-- **其他平台**：能否启用 WebGPU、HDR 或大纹理由浏览器、操作系统、驱动、显示器及窗口所在屏幕共同决定。
+当前硬件目标是 **M3 Pro**，已实测 WebGPU/Metal、
+WebGL2/ANGLE-on-Metal 回退、Display-P3 FP16、SDR 降级和 16K 背景升级。
+程序仍会在运行时协商纹理上限、canvas format、半浮点 framebuffer 与显示动态
+范围；本文不再作单独的 M4 兼容承诺。
 
 右上角状态栏显示实际后端、GPU、输出模式、FPS 与内部渲染分辨率。动态画质会在用户设置的上限内调整普通光线步数与分辨率；临界冲量参数附近的光线保持更高积分预算。
 
@@ -196,6 +217,16 @@ node --test tests/binary-playback.test.mjs
 python3 scripts/verify_binary_preview.py
 PYTHONDONTWRITEBYTECODE=1 python3 scripts/verify_nr_contract.py
 PYTHONDONTWRITEBYTECODE=1 python3 -m unittest tests/test_nr_contract.py
+PYTHONDONTWRITEBYTECODE=1 python3 scripts/verify_nr_contract.py assets/transfer-maps/schwarzschild-reference-v1/manifest.json
+PYTHONDONTWRITEBYTECODE=1 python3 scripts/verify_schwarzschild_transfer_map.py
+PYTHONDONTWRITEBYTECODE=1 python3 -m unittest tests/test_schwarzschild_transfer_map.py
+node --test tests/transfer-map-runtime.test.mjs
+```
+
+需要重建内置参考资产时，先运行：
+
+```bash
+python3 scripts/generate_schwarzschild_transfer_map.py
 ```
 
 Schwarzschild 数值回归覆盖：
@@ -226,6 +257,12 @@ NR 契约检查严格 JSON/schema、一致的 sidecar 哈希与大小、可移�
 与解码记录交叉核对。未知或缺失字段、重复键、非有限数、路径越界和含混的
 无效光线状态会被拒绝。验证通过表示 **protocol-conformant**，不表示
 **NR-backed** 或 **physically validated**。
+
+Stationary verifier 会独立恢复有限距离阴影直径 `14.548010°` 与边界频移
+`g = 1.024951860`，并报告最大采样解析 null residual `7.678e-14`、最大独立
+方向误差 `1.062e-8 rad`、最大逐光线投影估计 `1.415e-2 px`。这些是
+stationary reference 检查；NR 收敛阶与约束范数字段为 `not-applicable`，
+不是数值为零的 NR 测量。
 
 这些检查共同覆盖一组明确的数值性质与架构契约，但不等价于完整画面、辐射模型或所有 GPU 的自动化验证。当前仓库尚未配置 GPU 图像回归 CI。
 

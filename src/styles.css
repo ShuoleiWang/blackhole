@@ -307,7 +307,7 @@ h1 {
 
 .scene-switch {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 5px;
   padding: 10px 12px 6px;
 }
@@ -563,6 +563,21 @@ h1 {
 }
 
 .scene-binary-approx #accretionControl {
+  display: none;
+}
+
+.scene-transfer-map-reference #universe {
+  cursor: default;
+  touch-action: manipulation;
+}
+
+.scene-transfer-map-reference .control[for="mass"],
+.scene-transfer-map-reference #accretionControl,
+.scene-transfer-map-reference .control[for="timeScale"] {
+  display: none;
+}
+
+.scene-transfer-map-reference .panel-actions .icon-button[disabled] {
   display: none;
 }
 

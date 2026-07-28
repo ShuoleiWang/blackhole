@@ -2,51 +2,41 @@
   "accuracy": {
     "constraintNorms": {
       "method": null,
-      "quantity": "maximum dimensionless constraint norm",
+      "quantity": "NR Hamiltonian and momentum constraint norms",
       "status": "not-applicable",
       "value": null
     },
-    "fixtureAssertions": {
-      "expectedOutcomeCounts": {
-        "captured": 2,
-        "escaped": 2,
-        "integrator-failure": 1,
-        "missing": 1,
-        "outside-domain": 1,
-        "unresolved": 1
-      },
-      "worldCameraRoundTripTolerance": 1e-12
-    },
+    "fixtureAssertions": null,
     "geodesicNullResidual": {
-      "method": "synthetic sentinel values exercise the binary layout",
-      "quantity": "p99 normalized null residual",
-      "status": "not-measured",
-      "value": null
+      "method": "Reconstructed |g_mu_nu k^mu k^nu| at 257 radial audit states per captured path and 129 regularized states per leg of each escaped path. This audits the analytic first-integral state, not an NR trajectory constraint norm.",
+      "quantity": "maximum sampled analytic first-integral null-consistency residual along each radial path",
+      "status": "measured",
+      "value": 7.678302438307583e-14
     },
     "interpolationError": {
-      "method": "synthetic sentinel values exercise the binary layout",
-      "quantity": "p95 projection interpolation error in pixels",
-      "status": "not-measured",
-      "value": null
+      "method": "Fine/coarse terminal-angle discrepancy plus a conservative 2e-7 rad float32 direction allowance, converted with the declared pinhole focal length at detector texel centres. The renderer selects the nearest texel and performs no ray-direction blending.",
+      "quantity": "p95 stored-texel terminal direction solver and float32 projection error in image pixels; runtime direction interpolation is disabled",
+      "status": "measured",
+      "value": 0.00015837545221108614
     },
-    "notMeasuredReason": "The fixture contains hand-authored synthetic records and no numerical-relativity or geodesic solution.",
+    "notMeasuredReason": null,
     "nrConvergence": {
       "method": null,
-      "quantity": "NR grid-convergence order",
+      "quantity": "NR spacetime grid-convergence order",
       "status": "not-applicable",
       "value": null
     },
     "outcomeFractions": {
-      "captured": null,
-      "escaped": null,
-      "integrator-failure": null,
-      "missing": null,
-      "outside-domain": null,
-      "unresolved": null,
-      "unusable": null
+      "captured": 0.054341634114583336,
+      "escaped": 0.9456583658854166,
+      "integrator-failure": 0.0,
+      "missing": 0.0,
+      "outside-domain": 0.0,
+      "unresolved": 0.0,
+      "unusable": 0.0
     },
-    "status": "not-measured",
-    "unresolvedFraction": null
+    "status": "measured",
+    "unresolvedFraction": 0.0
   },
   "camera": {
     "basisOrder": [
@@ -58,15 +48,15 @@
       1.0,
       0.0,
       0.0,
-      4.0,
-      0.0,
-      1.0,
-      0.0,
-      3.0,
       0.0,
       0.0,
-      1.0,
-      12.0,
+      -1.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      -1.0,
+      40.0,
       0.0,
       0.0,
       0.0,
@@ -80,15 +70,15 @@
       1.0,
       0.0,
       0.0,
-      -4.0,
-      0.0,
-      1.0,
-      0.0,
-      -3.0,
       0.0,
       0.0,
-      1.0,
-      -12.0,
+      -1.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      -1.0,
+      40.0,
       0.0,
       0.0,
       0.0,
@@ -99,22 +89,10 @@
     {
       "classificationPriority": 0,
       "code": 0,
-      "description": "Synthetic capture target A",
-      "id": "A",
+      "description": "A numerical stretched-horizon termination sphere at Schwarzschild areal radius 2.02M; analytic b<3*sqrt(3)M decides capture.",
+      "id": "BH",
       "sourceArtifactRole": null,
-      "surfaceKind": "synthetic-coordinate-sphere",
-      "validityIntervalProtocolM": [
-        0.0,
-        0.0
-      ]
-    },
-    {
-      "classificationPriority": 1,
-      "code": 1,
-      "description": "Synthetic capture target B",
-      "id": "B",
-      "sourceArtifactRole": null,
-      "surfaceKind": "synthetic-coordinate-sphere",
+      "surfaceKind": "Schwarzschild stretched-horizon areal-radius sphere",
       "validityIntervalProtocolM": [
         0.0,
         0.0
@@ -123,27 +101,139 @@
   ],
   "chunks": [
     {
-      "byteLength": 256,
+      "byteLength": 2097152,
       "recordBytes": 32,
-      "recordCount": 8,
+      "recordCount": 65536,
       "sampleIndex": 0,
-      "sha256": "d96a31f2c4bf3c753116d8729555b424c5a56f7fd541bf30dcb2c07af615ada6",
+      "sha256": "9c88f91081291cac9aef88d672e96dee95dfad788a2b7cd894c7d758327c0b14",
       "tile": {
-        "height": 2,
-        "width": 4,
+        "height": 64,
+        "width": 1024,
         "x": 0,
         "y": 0
       },
       "uri": "chunks/t0000-y0000-x0000.bin"
+    },
+    {
+      "byteLength": 2097152,
+      "recordBytes": 32,
+      "recordCount": 65536,
+      "sampleIndex": 0,
+      "sha256": "fdff6768a9c5efe233d76fcb94210edde271feeaa0ef0773f68d716ffb06b7ce",
+      "tile": {
+        "height": 64,
+        "width": 1024,
+        "x": 0,
+        "y": 64
+      },
+      "uri": "chunks/t0000-y0064-x0000.bin"
+    },
+    {
+      "byteLength": 2097152,
+      "recordBytes": 32,
+      "recordCount": 65536,
+      "sampleIndex": 0,
+      "sha256": "46bf8c65fad1faf7375ed5ddb1aea4a2963ad6cf315560cc85015aef8d37489c",
+      "tile": {
+        "height": 64,
+        "width": 1024,
+        "x": 0,
+        "y": 128
+      },
+      "uri": "chunks/t0000-y0128-x0000.bin"
+    },
+    {
+      "byteLength": 2097152,
+      "recordBytes": 32,
+      "recordCount": 65536,
+      "sampleIndex": 0,
+      "sha256": "e0703f4b4f6943268289b9c3043ffd763839141a578ab12695e90fb90e7a8f17",
+      "tile": {
+        "height": 64,
+        "width": 1024,
+        "x": 0,
+        "y": 192
+      },
+      "uri": "chunks/t0000-y0192-x0000.bin"
+    },
+    {
+      "byteLength": 2097152,
+      "recordBytes": 32,
+      "recordCount": 65536,
+      "sampleIndex": 0,
+      "sha256": "5f18fe76b6eda8aa5214690f6883d132d89558135c34c3b7976b6c4ccde9c2c7",
+      "tile": {
+        "height": 64,
+        "width": 1024,
+        "x": 0,
+        "y": 256
+      },
+      "uri": "chunks/t0000-y0256-x0000.bin"
+    },
+    {
+      "byteLength": 2097152,
+      "recordBytes": 32,
+      "recordCount": 65536,
+      "sampleIndex": 0,
+      "sha256": "814930976445e2157e232b4932d297c31b32ea43933f5729f6e698b8905c0115",
+      "tile": {
+        "height": 64,
+        "width": 1024,
+        "x": 0,
+        "y": 320
+      },
+      "uri": "chunks/t0000-y0320-x0000.bin"
+    },
+    {
+      "byteLength": 2097152,
+      "recordBytes": 32,
+      "recordCount": 65536,
+      "sampleIndex": 0,
+      "sha256": "f80783a3da7f344b835060d8bffbdec0cf803ca9b7a86dabbea3437f30d9282d",
+      "tile": {
+        "height": 64,
+        "width": 1024,
+        "x": 0,
+        "y": 384
+      },
+      "uri": "chunks/t0000-y0384-x0000.bin"
+    },
+    {
+      "byteLength": 2097152,
+      "recordBytes": 32,
+      "recordCount": 65536,
+      "sampleIndex": 0,
+      "sha256": "398b0eb18b4e29e5ff49d3f286b06d84a08aecb09beb77cd6e551e876576554d",
+      "tile": {
+        "height": 64,
+        "width": 1024,
+        "x": 0,
+        "y": 448
+      },
+      "uri": "chunks/t0000-y0448-x0000.bin"
+    },
+    {
+      "byteLength": 2097152,
+      "recordBytes": 32,
+      "recordCount": 65536,
+      "sampleIndex": 0,
+      "sha256": "109870a5a22a2e0389254ecf28fe25077ccc7cae8a1da4b945cb19dbf0df6e90",
+      "tile": {
+        "height": 64,
+        "width": 1024,
+        "x": 0,
+        "y": 512
+      },
+      "uri": "chunks/t0000-y0512-x0000.bin"
     }
   ],
   "coordinates": {
     "metricSignature": "-+++",
     "nrChart": {
-      "coordinates": "Cartesian (t,x,y,z)",
-      "gauge": "not applicable; synthetic Minkowski contract fixture",
-      "status": "synthetic",
-      "timeSlicing": "constant synthetic coordinate-time slices"
+      "coordinates": "Schwarzschild t and Cartesian-embedded areal spatial coordinates (x,y,z)",
+      "gauge": "Schwarzschild areal-radius coordinates with a Cartesian spatial embedding x=r sin(theta) cos(phi), y=r sin(theta) sin(phi), z=r cos(theta)",
+      "status": "declared",
+      "timeSlicing": "constant Schwarzschild coordinate-time slices"
     },
     "sky": {
       "escapeDirectionFrame": "ICRS",
@@ -157,11 +247,11 @@
         0.0,
         0.0,
         0.0,
+        0.0,
+        -1.0,
+        0.0,
         1.0,
-        0.0,
-        0.0,
-        0.0,
-        1.0
+        0.0
       ],
       "latitudeMapping": "v=0.5-latitude/pi",
       "longitudeMapping": "u=fract(longitude/(2*pi)+0.5)",
@@ -173,11 +263,11 @@
         0.0,
         0.0,
         0.0,
+        0.0,
         1.0,
         0.0,
-        0.0,
-        0.0,
-        1.0
+        -1.0,
+        0.0
       ]
     },
     "worldFrame": {
@@ -206,7 +296,7 @@
         0.0,
         1.0
       ],
-      "origin": "synthetic NR chart origin",
+      "origin": "Schwarzschild symmetry centre",
       "worldToNr": [
         1.0,
         0.0,
@@ -227,16 +317,16 @@
       ]
     }
   },
-  "datasetKind": "synthetic-contract-fixture",
+  "datasetKind": "stationary-reference-transfer-map",
   "escapeBoundary": {
     "frequencyShiftConvention": "g=(u_observer·k_observer)/(u_boundary·k_boundary)",
     "referenceObserver": {
-      "definition": "Future-directed unit inertial observer u=(1,0,0,0) in the synthetic Cartesian NR chart.",
-      "kind": "synthetic-inertial",
+      "definition": "Future-directed static Schwarzschild observer normal to t=constant at areal radius 1000M.",
+      "kind": "eulerian-normal",
       "sourceArtifactRole": null
     },
     "storedEscapeDirection": {
-      "continuationBeyondBoundary": "Synthetic straight continuation in the declared ICRS asymptotic frame with no additional lensing.",
+      "continuationBeyondBoundary": "The exact stationary Schwarzschild null orbit is continued analytically from the escape worldtube to u=0; the asymptotic radial direction is stored.",
       "frame": "ICRS",
       "normalization": "unit Euclidean spatial vector"
     },
@@ -246,11 +336,11 @@
         0.0,
         0.0
       ],
-      "kind": "synthetic-coordinate-sphere",
-      "radiusM": 100.0
+      "kind": "areal-radius-worldtube",
+      "radiusM": 1000.0
     }
   },
-  "id": "nr-contract-fixture-v1",
+  "id": "schwarzschild-reference-v1",
   "integrity": {
     "algorithm": "sha256",
     "chunkHashes": "embedded-in-manifest",
@@ -263,18 +353,18 @@
       {
         "eventNr": [
           0.0,
-          4.0,
-          3.0,
-          12.0
+          0.0,
+          0.0,
+          40.0
         ],
         "fourVelocityContravariantNr": [
-          1.0,
+          1.0259783520851542,
           0.0,
           0.0,
           0.0
         ],
         "metricContravariantNr": [
-          -1.0,
+          -1.0526315789473684,
           0.0,
           0.0,
           0.0,
@@ -289,10 +379,10 @@
           0.0,
           0.0,
           0.0,
-          1.0
+          0.95
         ],
         "metricCovariantNr": [
-          -1.0,
+          -0.95,
           0.0,
           0.0,
           0.0,
@@ -307,14 +397,14 @@
           0.0,
           0.0,
           0.0,
-          1.0
+          1.0526315789473684
         ],
         "properTimeM": 0.0,
         "protocolTimeM": 0.0,
         "sampleIndex": 0,
         "tetradContravariantNr": [
           [
-            1.0,
+            1.0259783520851542,
             0.0,
             0.0,
             0.0
@@ -328,14 +418,14 @@
           [
             0.0,
             0.0,
-            1.0,
+            -1.0,
             0.0
           ],
           [
             0.0,
             0.0,
             0.0,
-            1.0
+            -0.9746794344808963
           ]
         ]
       }
@@ -350,23 +440,31 @@
   },
   "physicalSystem": {
     "componentIds": [
-      "A",
-      "B"
+      "BH"
     ],
-    "description": "Two synthetic identifiers exercise capture classification; they are not physical black holes.",
-    "dimensionlessSpins": [],
+    "description": "A vacuum Schwarzschild black hole with M=1 and zero spin.",
+    "dimensionlessSpins": [
+      {
+        "componentId": "BH",
+        "vector": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      }
+    ],
     "eccentricity": null,
-    "kind": "synthetic-contract-fixture",
+    "kind": "stationary-black-hole",
     "massRatioQ": null,
-    "notApplicableReason": "The protocol fixture has capture identifiers but no physical binary parameters or remnant.",
-    "parameterEpochProtocolM": null,
+    "notApplicableReason": "Binary orbital and remnant parameters do not apply to the eternal, non-spinning Schwarzschild solution.",
+    "parameterEpochProtocolM": 0.0,
     "referenceOrbitalPhaseRad": null,
     "remnant": null,
-    "vacuum": null
+    "vacuum": true
   },
   "projection": {
     "aspectConvention": "aspect=widthPixels/heightPixels",
-    "heightPixels": 2,
+    "heightPixels": 576,
     "imageOrigin": "top-left",
     "localRayConvention": "k^(a)=(-1,normalize(screenX,screenY,1)) in the time/right/up/forward tetrad",
     "model": "rectilinear-pinhole",
@@ -374,18 +472,18 @@
     "rayTimeOrientation": "past-directed",
     "screenXFormula": "screenX=((x+0.5)/widthPixels*2-1)*aspect*tan(verticalFieldOfViewRad/2)",
     "screenYFormula": "screenY=(1-(y+0.5)/heightPixels*2)*tan(verticalFieldOfViewRad/2)",
-    "verticalFieldOfViewRad": 0.8,
-    "widthPixels": 4
+    "verticalFieldOfViewRad": 0.6981317007977318,
+    "widthPixels": 1024
   },
   "provenance": {
     "artifactUriBase": "repository-root",
     "datasetVersion": "1.0.0",
     "generator": {
-      "codeRevision": "sha256:84603d450fdc8c61702f6bc77957af3925b53329c60dd4592d361b0989ae015f",
-      "command": "python3 scripts/generate_nr_contract_fixture.py",
+      "codeRevision": "sha256:2f6a065204ba46374edbeea4854519b1b261033b957358867ce10722ea85cb38",
+      "command": "python3 scripts/generate_schwarzschild_transfer_map.py",
       "deterministic": true,
-      "name": "generate_nr_contract_fixture.py",
-      "uri": "scripts/generate_nr_contract_fixture.py",
+      "name": "generate_schwarzschild_transfer_map.py",
+      "uri": "scripts/generate_schwarzschild_transfer_map.py",
       "version": "1.0.0"
     },
     "license": "NOASSERTION",
@@ -393,11 +491,11 @@
     "project": "ShuoleiWang/blackhole",
     "sourceArtifacts": [
       {
-        "byteLength": 26053,
+        "byteLength": 45100,
         "role": "generator-source",
-        "sha256": "84603d450fdc8c61702f6bc77957af3925b53329c60dd4592d361b0989ae015f",
+        "sha256": "2f6a065204ba46374edbeea4854519b1b261033b957358867ce10722ea85cb38",
         "storage": "bundled",
-        "uri": "scripts/generate_nr_contract_fixture.py"
+        "uri": "scripts/generate_schwarzschild_transfer_map.py"
       },
       {
         "byteLength": 46312,
@@ -405,15 +503,22 @@
         "sha256": "5819aa4b4790a5ccf79048d0566b707f1f1b67125d5035932ef40082ef78ecf5",
         "storage": "bundled",
         "uri": "schemas/nr-transfer-map-v1.schema.json"
+      },
+      {
+        "byteLength": 26053,
+        "role": "manifest-template-helper",
+        "sha256": "84603d450fdc8c61702f6bc77957af3925b53329c60dd4592d361b0989ae015f",
+        "storage": "bundled",
+        "uri": "scripts/generate_nr_contract_fixture.py"
       }
     ],
     "sourceSimulation": {
       "catalog": null,
       "doi": null,
       "evolutionCode": null,
-      "identifier": "project-generated-nr-contract-fixture",
-      "kind": "none",
-      "notApplicableReason": "The fixture is synthetic protocol test data and has no source numerical-relativity simulation.",
+      "identifier": "analytic-schwarzschild-m1",
+      "kind": "stationary-reference",
+      "notApplicableReason": "The source is the analytic Schwarzschild metric, not a catalog numerical-relativity evolution.",
       "version": "1"
     }
   },
@@ -421,13 +526,13 @@
     "initialNormalization": "u_observer·k_observer=1",
     "integrationPrecision": "float64",
     "integrator": {
-      "method": "hand-authored protocol sentinel records",
-      "name": "none"
+      "method": "adaptive Simpson quadrature of the exact first integral (du/dpsi)^2+u^2-2u^3=1/b^2, equivalent to d2u/dpsi2=-u+3u^2; the square-root turning singularity is removed by u=u_turn-s^2",
+      "name": "adaptive-simpson-schwarzschild-orbit"
     },
     "outputPrecision": "float32",
-    "spacetimeMode": "synthetic",
-    "spatialInterpolation": "not applicable; no spacetime samples",
-    "temporalInterpolation": "not applicable; one synthetic sample",
+    "spacetimeMode": "stationary",
+    "spatialInterpolation": "none; metric and null-orbit first integral are analytic",
+    "temporalInterpolation": "none; Schwarzschild is stationary and the map has one sample",
     "termination": {
       "captured": "intersect a captureTargets surface",
       "escaped": "intersect escapeBoundary",
@@ -438,9 +543,9 @@
     },
     "timeOrientation": "past-directed",
     "tolerances": {
-      "absolute": null,
-      "nullConstraint": null,
-      "relative": null
+      "absolute": 2e-11,
+      "nullConstraint": 5e-12,
+      "relative": 2e-11
     }
   },
   "recordLayout": {
@@ -524,7 +629,7 @@
       "projectionErrorPx": 4
     }
   },
-  "renderable": false,
+  "renderable": true,
   "sampling": {
     "dimensionOrder": [
       "time",
@@ -533,8 +638,8 @@
     ],
     "interpolation": {
       "categorical": "nearest-no-blend",
-      "continuous": "validity-strict-linear",
-      "escapeDirection": "validity-strict-linear-then-normalize",
+      "continuous": "none-nearest-texel-center",
+      "escapeDirection": "nearest-no-blend",
       "invalidRecords": "never-sample-sky",
       "time": "none"
     },
@@ -547,11 +652,11 @@
   },
   "schema": "blackhole.nr-transfer-map/v1",
   "scientificStatus": {
-    "classification": "project-generated protocol fixture; not NR",
+    "classification": "project-generated analytic Schwarzschild reference; not NR",
     "derivedFromNearZoneSpacetime": false,
     "derivedWithSlowLightGeodesics": false,
-    "description": "A deterministic 2x4 record-layout fixture for validating data contracts, hashes, coordinate transforms, and invalid-ray handling.",
-    "prohibitedClaim": "Do not render this fixture or describe it as a physical binary-black-hole simulation.",
+    "description": "A fixed-camera vacuum transfer map obtained from the exact stationary Schwarzschild null-orbit equation. It is a single-black-hole reference and contains no accretion emission.",
+    "prohibitedClaim": "Do not describe this stationary analytic reference as numerical relativity, a binary merger, slow-light NR output, or a GRMHD accretion simulation.",
     "sourceIsNumericalRelativity": false
   },
   "timeReference": {
@@ -560,13 +665,13 @@
     "sourceTimeDirection": "future-increasing",
     "waveformTimeMapping": {
       "mapping": null,
-      "notApplicableReason": "The synthetic fixture contains no waveform.",
+      "notApplicableReason": "A stationary Schwarzschild black hole has no merger waveform.",
       "sourceQuantity": null,
       "status": "not-applicable"
     },
     "zeroEvent": {
-      "description": "The only observer sample is assigned protocol time zero.",
-      "name": "synthetic fixture origin",
+      "description": "An arbitrary t=0 slice of the time-translation-invariant Schwarzschild spacetime.",
+      "name": "stationary reference epoch",
       "source": "project-generated"
     }
   },
@@ -578,8 +683,8 @@
     "frequencyShift": "dimensionless",
     "length": "M",
     "massNormalization": {
-      "definition": "A dimensionless unit chosen only to exercise protocol fields.",
-      "quantity": "synthetic unit mass",
+      "definition": "The Schwarzschild mass parameter; all radii and times are expressed in this M.",
+      "quantity": "stationary black-hole mass",
       "referenceEpochSourceM": null,
       "symbol": "M",
       "value": 1.0

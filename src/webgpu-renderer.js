@@ -22,6 +22,40 @@ function uniformFloatCount(bundle) {
   return requested;
 }
 
+function createSceneResources(bundle, device) {
+  const create = bundle.resources?.createWebGPU;
+  if (!create) {
+    return null;
+  }
+  const resources = create(device);
+  if (
+    !resources
+    || !Array.isArray(resources.entries)
+    || typeof resources.dispose !== "function"
+  ) {
+    resources?.dispose?.();
+    throw new Error(
+      "Scene WebGPU resources must provide bind-group entries and dispose()",
+    );
+  }
+  const bindings = new Set();
+  for (const entry of resources.entries) {
+    if (
+      !Number.isInteger(entry?.binding)
+      || entry.binding < 3
+      || !entry.resource
+      || bindings.has(entry.binding)
+    ) {
+      resources.dispose();
+      throw new Error(
+        "Scene WebGPU resource bindings must be unique integers starting at 3",
+      );
+    }
+    bindings.add(entry.binding);
+  }
+  return resources;
+}
+
 function isApplePlatform() {
   const platform = navigator.userAgentData?.platform || navigator.platform || "";
   return /Mac|iPhone|iPad/i.test(platform);
@@ -235,8 +269,13 @@ export class WebGPURenderer {
       negotiation,
       options,
     );
-    await instance.init(skyUrl);
-    return instance;
+    try {
+      await instance.init(skyUrl);
+      return instance;
+    } catch (error) {
+      instance.dispose();
+      throw error;
+    }
   }
 
   constructor(canvas, context, adapter, device, negotiation, options = undefined) {
@@ -475,6 +514,7 @@ export class WebGPURenderer {
       primitive: { topology: "triangle-list" },
     });
 
+    this.sceneResourceState = createSceneResources(this.shaderBundle, device);
     this.traceBindGroup = this.createTraceBindGroup(this.skyTexture);
 
     device.lost.then((info) => {
@@ -505,6 +545,7 @@ export class WebGPURenderer {
         { binding: 0, resource: { buffer: this.uniformBuffer } },
         { binding: 1, resource: texture.createView() },
         { binding: 2, resource: this.skySampler },
+        ...(this.sceneResourceState?.entries || []),
       ],
     });
   }
@@ -649,6 +690,8 @@ export class WebGPURenderer {
   }
 
   dispose() {
+    this.sceneResourceState?.dispose();
+    this.sceneResourceState = null;
     this.traceTexture?.destroy();
     this.skyTexture?.destroy();
     this.uniformBuffer?.destroy();

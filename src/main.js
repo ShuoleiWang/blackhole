@@ -130,24 +130,46 @@ function sceneHref(sceneId) {
 }
 
 function configureSceneLinks(sceneId) {
-  const schwarzschildLink = document.querySelector("#sceneSchwarzschild");
-  const binaryLink = document.querySelector("#sceneBinary");
-  schwarzschildLink.href = sceneHref("schwarzschild");
-  binaryLink.href = sceneHref("binary-approx");
-  const binaryActive = sceneId === "binary-approx";
-  schwarzschildLink.classList.toggle("is-active", !binaryActive);
-  binaryLink.classList.toggle("is-active", binaryActive);
-  if (binaryActive) {
-    schwarzschildLink.removeAttribute("aria-current");
-    binaryLink.setAttribute("aria-current", "page");
-  } else {
-    schwarzschildLink.setAttribute("aria-current", "page");
-    binaryLink.removeAttribute("aria-current");
+  const links = [
+    ["schwarzschild", document.querySelector("#sceneSchwarzschild")],
+    ["binary-approx", document.querySelector("#sceneBinary")],
+    ["transfer-map-reference", document.querySelector("#sceneTransferMap")],
+  ];
+  for (const [id, link] of links) {
+    if (!link) {
+      throw new Error(`Missing scene navigation link for ${id}`);
+    }
+    link.href = sceneHref(id);
+    const active = sceneId === id;
+    link.classList.toggle("is-active", active);
+    if (active) {
+      link.setAttribute("aria-current", "page");
+    } else {
+      link.removeAttribute("aria-current");
+    }
   }
 }
 
 async function loadRequestedScene() {
-  if (query.get("scene") !== "binary-approx") {
+  const requestedScene = query.get("scene");
+  if (requestedScene === "transfer-map-reference") {
+    const {
+      createTransferMapReferenceScene,
+    } = await import("./scenes/transfer-map-reference-scene.js");
+    const scene = await createTransferMapReferenceScene({
+      document,
+      ui,
+      state,
+      controls: {
+        requestRender() {
+          state.needsRender = true;
+        },
+      },
+    });
+    validateCustomScene(scene);
+    return scene;
+  }
+  if (requestedScene !== "binary-approx") {
     return null;
   }
   const { createBinaryApproxScene } = await import("./scenes/binary-approx-scene.js");
@@ -164,7 +186,12 @@ async function loadRequestedScene() {
       },
     },
   });
-  const bundle = scene.rendererOptions?.shaderBundle;
+  validateCustomScene(scene);
+  return scene;
+}
+
+function validateCustomScene(scene) {
+  const bundle = scene?.rendererOptions?.shaderBundle;
   if (!bundle?.id || !bundle.wgsl?.trace || !bundle.glsl?.trace) {
     throw new Error(
       "A custom scene must provide both WGSL and GLSL trace shaders so GPU fallback stays consistent",
@@ -180,7 +207,17 @@ async function loadRequestedScene() {
       "Version 1 scene bundles may replace only the trace shader; vertex and HDR post stages stay shared",
     );
   }
-  return scene;
+  if (
+    bundle.resources
+    && (
+      typeof bundle.resources.createWebGPU !== "function"
+      || typeof bundle.resources.createWebGL !== "function"
+    )
+  ) {
+    throw new Error(
+      "A resource-backed scene must support both WebGPU and WebGL2 fallback",
+    );
+  }
 }
 
 function replaceCanvasForFallback() {
@@ -277,6 +314,9 @@ function setMode(mode) {
 }
 
 function setMotion(running) {
+  if (activeScene?.motionEnabled === false) {
+    running = false;
+  }
   state.running = running;
   const labels = activeScene?.motionLabels ?? {
     pause: "暂停物理轨道",
@@ -284,6 +324,7 @@ function setMotion(running) {
   };
   const actionLabel = running ? labels.pause : labels.resume;
   ui.toggleMotion.dataset.state = running ? "running" : "paused";
+  ui.toggleMotion.disabled = activeScene?.motionEnabled === false;
   ui.toggleMotion.setAttribute("aria-pressed", String(!running));
   ui.toggleMotion.setAttribute("aria-label", actionLabel);
   ui.toggleMotion.setAttribute("title", actionLabel);
@@ -296,6 +337,9 @@ function setMotion(running) {
 }
 
 function resetView() {
+  if (activeScene?.cameraLocked) {
+    return;
+  }
   if (activeScene?.resetState) {
     activeScene.resetState();
   } else {
@@ -333,6 +377,9 @@ function beginUserHold(duration = 2600) {
 
 function bindInteractions() {
   canvas.addEventListener("pointerdown", (event) => {
+    if (activeScene?.cameraLocked) {
+      return;
+    }
     canvas.setPointerCapture(event.pointerId);
     state.pointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
     state.dragging = true;
@@ -382,6 +429,9 @@ function bindInteractions() {
   canvas.addEventListener(
     "wheel",
     (event) => {
+      if (activeScene?.cameraLocked) {
+        return;
+      }
       event.preventDefault();
       state.distance = clamp(state.distance * Math.exp(event.deltaY * 0.0008), 34, 90);
       beginUserHold(1800);
@@ -390,11 +440,18 @@ function bindInteractions() {
     { passive: false },
   );
 
-  canvas.addEventListener("dblclick", resetView);
+  canvas.addEventListener("dblclick", () => {
+    if (!activeScene?.cameraLocked) {
+      resetView();
+    }
+  });
   canvas.addEventListener("contextmenu", (event) => event.preventDefault());
 
   window.addEventListener("keydown", (event) => {
     if (event.target instanceof HTMLInputElement || event.target instanceof HTMLButtonElement) {
+      return;
+    }
+    if (activeScene?.cameraLocked) {
       return;
     }
     let handled = true;
@@ -644,7 +701,7 @@ async function start() {
     bindUi();
     updateReadouts();
     setMode(state.mode);
-    setMotion(true);
+    setMotion(activeScene?.startsRunning ?? true);
 
     renderer = await createRenderer();
     ui.backendStatus.textContent = renderer.backend;
