@@ -2,51 +2,41 @@
   "accuracy": {
     "constraintNorms": {
       "method": null,
-      "quantity": "maximum dimensionless constraint norm",
+      "quantity": "NR constraint norms",
       "status": "not-applicable",
       "value": null
     },
-    "fixtureAssertions": {
-      "expectedOutcomeCounts": {
-        "captured": 2,
-        "escaped": 2,
-        "integrator-failure": 1,
-        "missing": 1,
-        "outside-domain": 1,
-        "unresolved": 1
-      },
-      "worldCameraRoundTripTolerance": 1e-12
-    },
+    "fixtureAssertions": null,
     "geodesicNullResidual": {
-      "method": "synthetic sentinel values exercise the binary layout",
-      "quantity": "p99 normalized null residual",
-      "status": "not-measured",
-      "value": null
+      "method": "Reconstructed in float64 from E,Lz, radial and polar canonical momenta at every accepted trajectory state.",
+      "quantity": "maximum reconstructed |g^{mu nu}p_mu p_nu|",
+      "status": "measured",
+      "value": 3.0682398843850933e-09
     },
     "interpolationError": {
-      "method": "synthetic sentinel values exercise the binary layout",
-      "quantity": "p95 projection interpolation error in pixels",
-      "status": "not-measured",
-      "value": null
+      "method": "Maximum of the embedded DP5(4) fine local estimate and the full-ray fine/coarse ICRS endpoint separation, plus a 2e-7 rad float32 allowance, converted with the pinhole focal length. Outcome disagreement or error above 0.25 pixel is fail-closed as unresolved. Runtime interpolation is disabled. Boundary-doubling p95=2.526465e-05 rad.",
+      "quantity": "p95 stored-texel numerical and float32 direction projection estimate in pixels",
+      "status": "measured",
+      "value": 0.00019290702589717964
     },
-    "notMeasuredReason": "The fixture contains hand-authored synthetic records and no numerical-relativity or geodesic solution.",
+    "notMeasuredReason": null,
     "nrConvergence": {
       "method": null,
-      "quantity": "NR grid-convergence order",
+      "quantity": "NR spacetime grid-convergence order",
       "status": "not-applicable",
       "value": null
     },
     "outcomeFractions": {
-      "captured": null,
-      "escaped": null,
-      "integrator-failure": null,
-      "missing": null,
-      "outside-domain": null,
-      "unresolved": null,
-      "unusable": null
+      "captured": 0.05279541015625,
+      "escaped": 0.94720458984375,
+      "integrator-failure": 0.0,
+      "missing": 0.0,
+      "outside-domain": 0.0,
+      "unresolved": 0.0,
+      "unusable": 0.0
     },
-    "status": "not-measured",
-    "unresolvedFraction": null
+    "status": "measured",
+    "unresolvedFraction": 0.0
   },
   "camera": {
     "basisOrder": [
@@ -55,18 +45,18 @@
       "forward"
     ],
     "cameraToWorld": [
+      0.0,
+      0.0,
+      -1.0,
+      40.00588993677423,
+      -1.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
       1.0,
       0.0,
       0.0,
-      4.0,
-      0.0,
-      1.0,
-      0.0,
-      3.0,
-      0.0,
-      0.0,
-      1.0,
-      12.0,
       0.0,
       0.0,
       0.0,
@@ -77,18 +67,18 @@
     "motion": "fixed",
     "physicalRelation": "The affine frame is for deterministic playback coordinates; physical ray initialization uses the observer tetrad.",
     "worldToCamera": [
-      1.0,
+      0.0,
+      -1.0,
       0.0,
       0.0,
-      -4.0,
-      0.0,
-      1.0,
-      0.0,
-      -3.0,
       0.0,
       0.0,
       1.0,
-      -12.0,
+      0.0,
+      -1.0,
+      0.0,
+      0.0,
+      40.00588993677423,
       0.0,
       0.0,
       0.0,
@@ -99,22 +89,10 @@
     {
       "classificationPriority": 0,
       "code": 0,
-      "description": "Synthetic capture target A",
-      "id": "A",
+      "description": "Stretched future-horizon worldtube at constant Kerr r=r_++0.02M=1.74716598291341M. It is an oblate Kerr-r surface, not a Euclidean sphere.",
+      "id": "remnant",
       "sourceArtifactRole": null,
-      "surfaceKind": "synthetic-coordinate-sphere",
-      "validityIntervalProtocolM": [
-        0.0,
-        0.0
-      ]
-    },
-    {
-      "classificationPriority": 1,
-      "code": 1,
-      "description": "Synthetic capture target B",
-      "id": "B",
-      "sourceArtifactRole": null,
-      "surfaceKind": "synthetic-coordinate-sphere",
+      "surfaceKind": "constant-Kerr-r oblate stretched-horizon worldtube",
       "validityIntervalProtocolM": [
         0.0,
         0.0
@@ -123,27 +101,139 @@
   ],
   "chunks": [
     {
-      "byteLength": 256,
+      "byteLength": 2097152,
       "recordBytes": 32,
-      "recordCount": 8,
+      "recordCount": 65536,
       "sampleIndex": 0,
-      "sha256": "d96a31f2c4bf3c753116d8729555b424c5a56f7fd541bf30dcb2c07af615ada6",
+      "sha256": "6975ea615a620a0cae1b273ee25fb3d7b9e0ba3685d1ff381a6ede3fd1dee174",
       "tile": {
-        "height": 2,
-        "width": 4,
+        "height": 64,
+        "width": 1024,
         "x": 0,
         "y": 0
       },
       "uri": "chunks/t0000-y0000-x0000.bin"
+    },
+    {
+      "byteLength": 2097152,
+      "recordBytes": 32,
+      "recordCount": 65536,
+      "sampleIndex": 0,
+      "sha256": "64f7f5dbc9e7b992e09200452280a30f1bc49ff8ff20b92adf290d02caeb3369",
+      "tile": {
+        "height": 64,
+        "width": 1024,
+        "x": 0,
+        "y": 64
+      },
+      "uri": "chunks/t0000-y0064-x0000.bin"
+    },
+    {
+      "byteLength": 2097152,
+      "recordBytes": 32,
+      "recordCount": 65536,
+      "sampleIndex": 0,
+      "sha256": "caa9c660b986572337dff73b326dbe6b420a7695344386f3761e56b8a7838901",
+      "tile": {
+        "height": 64,
+        "width": 1024,
+        "x": 0,
+        "y": 128
+      },
+      "uri": "chunks/t0000-y0128-x0000.bin"
+    },
+    {
+      "byteLength": 2097152,
+      "recordBytes": 32,
+      "recordCount": 65536,
+      "sampleIndex": 0,
+      "sha256": "25b3205eb37b7c2773ddb486dbc05093a88cd01426cfec848407e9a9f2cfeabe",
+      "tile": {
+        "height": 64,
+        "width": 1024,
+        "x": 0,
+        "y": 192
+      },
+      "uri": "chunks/t0000-y0192-x0000.bin"
+    },
+    {
+      "byteLength": 2097152,
+      "recordBytes": 32,
+      "recordCount": 65536,
+      "sampleIndex": 0,
+      "sha256": "f83450f6f9f933a1a4b144238ceab6e8bcdcffefbf3887710eb69a65e909cd06",
+      "tile": {
+        "height": 64,
+        "width": 1024,
+        "x": 0,
+        "y": 256
+      },
+      "uri": "chunks/t0000-y0256-x0000.bin"
+    },
+    {
+      "byteLength": 2097152,
+      "recordBytes": 32,
+      "recordCount": 65536,
+      "sampleIndex": 0,
+      "sha256": "ad912bf88c90ef451fe6b06e09a6230598be201a7c163ff69422c6a987ce905b",
+      "tile": {
+        "height": 64,
+        "width": 1024,
+        "x": 0,
+        "y": 320
+      },
+      "uri": "chunks/t0000-y0320-x0000.bin"
+    },
+    {
+      "byteLength": 2097152,
+      "recordBytes": 32,
+      "recordCount": 65536,
+      "sampleIndex": 0,
+      "sha256": "1255313cfca04c4bcc8496da959bfe6e16012679bb1f6d196b7b7e80891852f7",
+      "tile": {
+        "height": 64,
+        "width": 1024,
+        "x": 0,
+        "y": 384
+      },
+      "uri": "chunks/t0000-y0384-x0000.bin"
+    },
+    {
+      "byteLength": 2097152,
+      "recordBytes": 32,
+      "recordCount": 65536,
+      "sampleIndex": 0,
+      "sha256": "a52d6e52665026914365228faa1df2f1cfe35157af9b90dc1a0c11511a050bc1",
+      "tile": {
+        "height": 64,
+        "width": 1024,
+        "x": 0,
+        "y": 448
+      },
+      "uri": "chunks/t0000-y0448-x0000.bin"
+    },
+    {
+      "byteLength": 2097152,
+      "recordBytes": 32,
+      "recordCount": 65536,
+      "sampleIndex": 0,
+      "sha256": "be3df996f962bf797764afb1f459101781e30ffd0998f1060e14dc79cc89c4d1",
+      "tile": {
+        "height": 64,
+        "width": 1024,
+        "x": 0,
+        "y": 512
+      },
+      "uri": "chunks/t0000-y0512-x0000.bin"
     }
   ],
   "coordinates": {
     "metricSignature": "-+++",
     "nrChart": {
-      "coordinates": "Cartesian (t,x,y,z)",
-      "gauge": "not applicable; synthetic Minkowski contract fixture",
-      "status": "synthetic",
-      "timeSlicing": "constant synthetic coordinate-time slices"
+      "coordinates": "Cartesian Kerr-Schild (t_KS,x,y,z)",
+      "gauge": "ingoing Cartesian Kerr-Schild coordinates, with Kerr radius defined by the standard oblate-spheroidal quartic",
+      "status": "declared",
+      "timeSlicing": "constant ingoing Kerr-Schild coordinate time"
     },
     "sky": {
       "escapeDirectionFrame": "ICRS",
@@ -153,11 +243,11 @@
         "z": "ICRS north celestial pole"
       },
       "icrsToWorld": [
-        1.0,
-        0.0,
-        0.0,
         0.0,
         1.0,
+        0.0,
+        -1.0,
+        0.0,
         0.0,
         0.0,
         0.0,
@@ -169,11 +259,11 @@
       "referenceFrame": "ICRS",
       "rotationConvention": "proper right-handed row-major 3x3 rotations multiplying spatial column vectors",
       "worldToIcrs": [
+        0.0,
+        -1.0,
+        0.0,
         1.0,
         0.0,
-        0.0,
-        0.0,
-        1.0,
         0.0,
         0.0,
         0.0,
@@ -206,7 +296,7 @@
         0.0,
         1.0
       ],
-      "origin": "synthetic NR chart origin",
+      "origin": "Kerr symmetry centre",
       "worldToNr": [
         1.0,
         0.0,
@@ -227,16 +317,16 @@
       ]
     }
   },
-  "datasetKind": "synthetic-contract-fixture",
+  "datasetKind": "stationary-reference-transfer-map",
   "escapeBoundary": {
     "frequencyShiftConvention": "g=(u_observer·k_observer)/(u_boundary·k_boundary)",
     "referenceObserver": {
-      "definition": "Future-directed unit inertial observer u=(1,0,0,0) in the synthetic Cartesian NR chart.",
-      "kind": "synthetic-inertial",
+      "definition": "Future-directed normal to Boyer-Lindquist t slices, equivalently the ZAMO u=alpha^-1(partial_t+omega partial_phi), evaluated where the ray crosses the oblate Kerr coordinate surface r=1000M; this is not the normal to a Cartesian Kerr-Schild t slice.",
+      "kind": "Boyer-Lindquist-ZAMO",
       "sourceArtifactRole": null
     },
     "storedEscapeDirection": {
-      "continuationBeyondBoundary": "Synthetic straight continuation in the declared ICRS asymptotic frame with no additional lensing.",
+      "continuationBeyondBoundary": "After time/frequency termination at r=1000M, the exact stationary Kerr equations are integrated numerically for theta and ingoing-KS phi through r=2000M to u=0. The asymptotic Cartesian radial direction is stored; a boundary-doubling Richardson audit is included in generator metrics.",
       "frame": "ICRS",
       "normalization": "unit Euclidean spatial vector"
     },
@@ -246,11 +336,11 @@
         0.0,
         0.0
       ],
-      "kind": "synthetic-coordinate-sphere",
-      "radiusM": 100.0
+      "kind": "constant-Kerr-r-oblate-worldtube",
+      "radiusM": 1000.0
     }
   },
-  "id": "nr-contract-fixture-v1",
+  "id": "kerr-remnant-reference-v1",
   "integrity": {
     "algorithm": "sha256",
     "chunkHashes": "embedded-in-manifest",
@@ -263,28 +353,28 @@
       {
         "eventNr": [
           0.0,
-          4.0,
-          3.0,
-          12.0
-        ],
-        "fourVelocityContravariantNr": [
-          1.0,
-          0.0,
+          40.00588993677423,
           0.0,
           0.0
         ],
+        "fourVelocityContravariantNr": [
+          1.025977954616686,
+          0.0,
+          0.0008802256114049516,
+          0.0
+        ],
         "metricContravariantNr": [
-          -1.0,
+          -1.05,
+          0.04999263866297746,
+          -0.0008579507637224069,
           0.0,
+          0.04999263866297746,
+          0.9500147215902595,
+          0.0008578244504279967,
           0.0,
-          0.0,
-          0.0,
-          1.0,
-          0.0,
-          0.0,
-          0.0,
-          0.0,
-          1.0,
+          -0.0008579507637224069,
+          0.0008578244504279966,
+          0.9999852784097406,
           0.0,
           0.0,
           0.0,
@@ -292,17 +382,17 @@
           1.0
         ],
         "metricCovariantNr": [
-          -1.0,
+          -0.95,
+          0.04999263866297746,
+          -0.0008579507637224069,
           0.0,
+          0.04999263866297746,
+          1.0499852784097405,
+          -0.0008578244504279967,
           0.0,
-          0.0,
-          0.0,
-          1.0,
-          0.0,
-          0.0,
-          0.0,
-          0.0,
-          1.0,
+          -0.0008579507637224069,
+          -0.0008578244504279966,
+          1.0000147215902595,
           0.0,
           0.0,
           0.0,
@@ -314,28 +404,28 @@
         "sampleIndex": 0,
         "tetradContravariantNr": [
           [
-            1.0,
+            1.025977954616686,
             0.0,
-            0.0,
+            0.0008802256114049516,
             0.0
           ],
           [
-            0.0,
-            1.0,
-            0.0,
-            0.0
+            -0.0,
+            -0.0,
+            -0.9999926392861413,
+            -0.0
           ],
           [
-            0.0,
-            0.0,
-            1.0,
-            0.0
-          ],
-          [
-            0.0,
-            0.0,
-            0.0,
+            -0.0,
+            -6.124135632263984e-17,
+            -0.0,
             1.0
+          ],
+          [
+            -0.051290967620417495,
+            -0.9746869864680965,
+            -0.0008801024968399686,
+            -5.969115304133274e-17
           ]
         ]
       }
@@ -350,23 +440,31 @@
   },
   "physicalSystem": {
     "componentIds": [
-      "A",
-      "B"
+      "remnant"
     ],
-    "description": "Two synthetic identifiers exercise capture classification; they are not physical black holes.",
-    "dimensionlessSpins": [],
+    "description": "Vacuum Kerr M=1 with spin along world +Z. The pinned SXS remnant vector [-7.29520687012e-10, 7.40468371215e-10, 0.686461676493] is rigidly rotated (not component-truncated) onto world +Z; its invariant magnitude a/M=0.686461676493 is used.",
+    "dimensionlessSpins": [
+      {
+        "componentId": "remnant",
+        "vector": [
+          0.0,
+          0.0,
+          0.686461676493
+        ]
+      }
+    ],
     "eccentricity": null,
-    "kind": "synthetic-contract-fixture",
+    "kind": "stationary-black-hole",
     "massRatioQ": null,
-    "notApplicableReason": "The protocol fixture has capture identifiers but no physical binary parameters or remnant.",
-    "parameterEpochProtocolM": null,
+    "notApplicableReason": "Binary orbital parameters do not apply to the eternal stationary Kerr reference.",
+    "parameterEpochProtocolM": 0.0,
     "referenceOrbitalPhaseRad": null,
     "remnant": null,
-    "vacuum": null
+    "vacuum": true
   },
   "projection": {
     "aspectConvention": "aspect=widthPixels/heightPixels",
-    "heightPixels": 2,
+    "heightPixels": 576,
     "imageOrigin": "top-left",
     "localRayConvention": "k^(a)=(-1,normalize(screenX,screenY,1)) in the time/right/up/forward tetrad",
     "model": "rectilinear-pinhole",
@@ -374,18 +472,18 @@
     "rayTimeOrientation": "past-directed",
     "screenXFormula": "screenX=((x+0.5)/widthPixels*2-1)*aspect*tan(verticalFieldOfViewRad/2)",
     "screenYFormula": "screenY=(1-(y+0.5)/heightPixels*2)*tan(verticalFieldOfViewRad/2)",
-    "verticalFieldOfViewRad": 0.8,
-    "widthPixels": 4
+    "verticalFieldOfViewRad": 0.6981317007977318,
+    "widthPixels": 1024
   },
   "provenance": {
     "artifactUriBase": "repository-root",
     "datasetVersion": "1.0.0",
     "generator": {
-      "codeRevision": "sha256:84603d450fdc8c61702f6bc77957af3925b53329c60dd4592d361b0989ae015f",
-      "command": "python3 scripts/generate_nr_contract_fixture.py",
+      "codeRevision": "sha256:76667d624f4d1a1bbbecd0cc3ed2f6e782ee402bd7bbcf7ae08414b7316f79cf",
+      "command": "python3 scripts/generate_kerr_transfer_map.py",
       "deterministic": true,
-      "name": "generate_nr_contract_fixture.py",
-      "uri": "scripts/generate_nr_contract_fixture.py",
+      "name": "generate_kerr_transfer_map.py",
+      "uri": "scripts/generate_kerr_transfer_map.py",
       "version": "1.0.0"
     },
     "license": "NOASSERTION",
@@ -393,11 +491,11 @@
     "project": "ShuoleiWang/blackhole",
     "sourceArtifacts": [
       {
-        "byteLength": 26053,
+        "byteLength": 67274,
         "role": "generator-source",
-        "sha256": "84603d450fdc8c61702f6bc77957af3925b53329c60dd4592d361b0989ae015f",
+        "sha256": "76667d624f4d1a1bbbecd0cc3ed2f6e782ee402bd7bbcf7ae08414b7316f79cf",
         "storage": "bundled",
-        "uri": "scripts/generate_nr_contract_fixture.py"
+        "uri": "scripts/generate_kerr_transfer_map.py"
       },
       {
         "byteLength": 46404,
@@ -405,15 +503,29 @@
         "sha256": "6a25b764c114ba668ff11722ed4eb9146599a990eee53a55693ec452b548677a",
         "storage": "bundled",
         "uri": "schemas/nr-transfer-map-v1.schema.json"
+      },
+      {
+        "byteLength": 26053,
+        "role": "manifest-template-helper",
+        "sha256": "84603d450fdc8c61702f6bc77957af3925b53329c60dd4592d361b0989ae015f",
+        "storage": "bundled",
+        "uri": "scripts/generate_nr_contract_fixture.py"
+      },
+      {
+        "byteLength": 8180,
+        "role": "remnant-spin-source",
+        "sha256": "a9e0b6796af5f6d604dc5ea3ed35c7cc82967c9f288ab179d608434f9c91df25",
+        "storage": "bundled",
+        "uri": "assets/scenes/binary-sxs-bbh-0001-v2.json"
       }
     ],
     "sourceSimulation": {
-      "catalog": null,
+      "catalog": "SXS",
       "doi": null,
       "evolutionCode": null,
-      "identifier": "project-generated-nr-contract-fixture",
-      "kind": "none",
-      "notApplicableReason": "The fixture is synthetic protocol test data and has no source numerical-relativity simulation.",
+      "identifier": "analytic-kerr-m1-sxs-bbh-0001-remnant-spin",
+      "kind": "stationary-reference",
+      "notApplicableReason": "The metric is the analytic Kerr solution; SXS supplies only the pinned remnant spin parameter, not ray pixels.",
       "version": "1"
     }
   },
@@ -421,13 +533,13 @@
     "initialNormalization": "u_observer·k_observer=1",
     "integrationPrecision": "float64",
     "integrator": {
-      "method": "hand-authored protocol sentinel records",
-      "name": "none"
+      "method": "adaptive Dormand-Prince 5(4) integration of the exact separated Kerr Hamilton-Jacobi equations in Mino time for u=1/r and theta, conserving E, Lz and Carter Q; ingoing Kerr-Schild t and phi are integrated by the exact BL-to-KS differential transform",
+      "name": "dormand-prince-kerr-carter-mino"
     },
     "outputPrecision": "float32",
-    "spacetimeMode": "synthetic",
-    "spatialInterpolation": "not applicable; no spacetime samples",
-    "temporalInterpolation": "not applicable; one synthetic sample",
+    "spacetimeMode": "stationary",
+    "spatialInterpolation": "none; exact analytic Kerr metric and separated potentials",
+    "temporalInterpolation": "none; Kerr is stationary and the map has one sample",
     "termination": {
       "captured": "intersect a captureTargets surface",
       "escaped": "intersect escapeBoundary",
@@ -438,9 +550,9 @@
     },
     "timeOrientation": "past-directed",
     "tolerances": {
-      "absolute": null,
-      "nullConstraint": null,
-      "relative": null
+      "absolute": 2e-12,
+      "nullConstraint": 1e-08,
+      "relative": 2e-11
     }
   },
   "recordLayout": {
@@ -524,7 +636,7 @@
       "projectionErrorPx": 4
     }
   },
-  "renderable": false,
+  "renderable": true,
   "sampling": {
     "dimensionOrder": [
       "time",
@@ -533,8 +645,8 @@
     ],
     "interpolation": {
       "categorical": "nearest-no-blend",
-      "continuous": "validity-strict-linear",
-      "escapeDirection": "validity-strict-linear-then-normalize",
+      "continuous": "none-nearest-texel-center",
+      "escapeDirection": "nearest-no-blend",
       "invalidRecords": "never-sample-sky",
       "time": "none"
     },
@@ -547,11 +659,11 @@
   },
   "schema": "blackhole.nr-transfer-map/v1",
   "scientificStatus": {
-    "classification": "project-generated protocol fixture; not NR",
+    "classification": "project-generated analytic stationary Kerr reference; not NR",
     "derivedFromNearZoneSpacetime": false,
     "derivedWithSlowLightGeodesics": false,
-    "description": "A deterministic 2x4 record-layout fixture for validating data contracts, hashes, coordinate transforms, and invalid-ray handling.",
-    "prohibitedClaim": "Do not render this fixture or describe it as a physical binary-black-hole simulation.",
+    "description": "A fixed-camera vacuum transfer map from exact stationary Kerr null geodesics for the SXS:BBH:0001 remnant spin. It contains no accretion emission.",
+    "prohibitedClaim": "Do not describe this analytic Kerr reference as a binary merger image, NR-backed pixels, or a GRMHD simulation.",
     "sourceIsNumericalRelativity": false
   },
   "timeReference": {
@@ -560,13 +672,13 @@
     "sourceTimeDirection": "future-increasing",
     "waveformTimeMapping": {
       "mapping": null,
-      "notApplicableReason": "The synthetic fixture contains no waveform.",
+      "notApplicableReason": "An eternal stationary Kerr black hole has no merger waveform.",
       "sourceQuantity": null,
       "status": "not-applicable"
     },
     "zeroEvent": {
-      "description": "The only observer sample is assigned protocol time zero.",
-      "name": "synthetic fixture origin",
+      "description": "An arbitrary t_KS=0 event in the stationary spacetime.",
+      "name": "stationary Kerr reference epoch",
       "source": "project-generated"
     }
   },
@@ -578,8 +690,8 @@
     "frequencyShift": "dimensionless",
     "length": "M",
     "massNormalization": {
-      "definition": "A dimensionless unit chosen only to exercise protocol fields.",
-      "quantity": "synthetic unit mass",
+      "definition": "The Kerr mass parameter; all radii and coordinate times are expressed in this M.",
+      "quantity": "stationary black-hole mass",
       "referenceEpochSourceM": null,
       "symbol": "M",
       "value": 1.0

@@ -498,9 +498,9 @@
         "uri": "scripts/generate_schwarzschild_transfer_map.py"
       },
       {
-        "byteLength": 46312,
+        "byteLength": 46404,
         "role": "schema",
-        "sha256": "5819aa4b4790a5ccf79048d0566b707f1f1b67125d5035932ef40082ef78ecf5",
+        "sha256": "6a25b764c114ba668ff11722ed4eb9146599a990eee53a55693ec452b548677a",
         "storage": "bundled",
         "uri": "schemas/nr-transfer-map-v1.schema.json"
       },

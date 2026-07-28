@@ -123,6 +123,46 @@ black-hole simulation. See
 [`docs/nr-transfer-map-v1.md`](../docs/nr-transfer-map-v1.md) for the normative
 field and safety semantics.
 
+## `transfer-maps/kerr-remnant-reference-v1/` (project-generated analytic reference)
+
+- Description: deterministic 1024×576 stationary Kerr vacuum transfer map
+- Dataset ID: `kerr-remnant-reference-v1`
+- Metric: exact analytic Kerr solution, normalized to `M = 1`
+- Dimensionless spin: `a/M = 0.686461676493`, aligned with world `+Z`
+- Spin provenance:
+  [`scenes/binary-sxs-bbh-0001-v2.json`](./scenes/binary-sxs-bbh-0001-v2.json),
+  which in turn pins the official `SXS:BBH:0001/Lev5` metadata listed above
+- Generator:
+  [`scripts/generate_kerr_transfer_map.py`](../scripts/generate_kerr_transfer_map.py)
+- Independent verifier:
+  [`scripts/verify_kerr_transfer_map.py`](../scripts/verify_kerr_transfer_map.py)
+- Scientific specification:
+  [`docs/kerr-reference.md`](../docs/kerr-reference.md)
+- License declaration in manifest: `NOASSERTION`
+- Records: 589,824 (`escaped=558,684`, `captured=31,140`, `unusable=0`)
+- Manifest SHA-256:
+  `5b0022ab963c0cc35d3d8acab17190bd1294bc72da2b49003d785f964ac81d99`
+
+The SXS-derived input to this product is exactly one remnant-spin parameter.
+Its magnitude is computed from the full pinned three-vector, and the manifest
+declares a rigid alignment of that vector to world `+Z` rather than dropping
+the small transverse components.
+The generator does not read an SXS near-zone metric, horizon geometry, or
+ray-transfer product. Every pixel is generated locally from the analytic Kerr
+metric with a finite-distance Boyer-Lindquist ZAMO camera. The resulting image
+is therefore a stationary analytic reference, **not NR ray tracing** and not a
+binary-merger reconstruction.
+
+The manifest authenticates the generator, schema, remnant-spin source, and
+every binary chunk by byte length and SHA-256. Reproduce the product with:
+
+```bash
+python3 scripts/generate_kerr_transfer_map.py
+PYTHONDONTWRITEBYTECODE=1 python3 scripts/verify_nr_contract.py \
+  assets/transfer-maps/kerr-remnant-reference-v1/manifest.json
+PYTHONDONTWRITEBYTECODE=1 python3 scripts/verify_kerr_transfer_map.py
+```
+
 ## `gaia-edr3-16k.png` (default on native 16K GPUs)
 
 - Title: **The colour of the sky from Gaia's Early Data Release 3 – equirectangular projection**

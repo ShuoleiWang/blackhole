@@ -44,6 +44,10 @@ const ui = Object.fromEntries(
     "shadowValue",
     "modeScience",
     "modeHubble",
+    "modeLookback",
+    "modeFrequency",
+    "modeNull",
+    "modeError",
     "toggleMotion",
     "resetView",
     "togglePanel",
@@ -122,8 +126,14 @@ function sceneHref(sceneId) {
   const parameters = new URLSearchParams(query);
   if (sceneId === "schwarzschild") {
     parameters.delete("scene");
+    parameters.delete("reference");
+    parameters.delete("diagnostic");
   } else {
     parameters.set("scene", sceneId);
+    if (sceneId !== "transfer-map-reference") {
+      parameters.delete("reference");
+      parameters.delete("diagnostic");
+    }
   }
   const encoded = parameters.toString();
   return `./${encoded ? `?${encoded}` : ""}`;
@@ -305,11 +315,19 @@ function updateReadouts() {
 
 function setMode(mode) {
   state.mode = mode;
-  const science = mode === 0;
-  ui.modeScience.classList.toggle("is-active", science);
-  ui.modeScience.setAttribute("aria-pressed", String(science));
-  ui.modeHubble.classList.toggle("is-active", !science);
-  ui.modeHubble.setAttribute("aria-pressed", String(!science));
+  [
+    ui.modeScience,
+    ui.modeHubble,
+    ui.modeLookback,
+    ui.modeFrequency,
+    ui.modeNull,
+    ui.modeError,
+  ].forEach((button, buttonMode) => {
+    const active = mode === buttonMode;
+    button.classList.toggle("is-active", active);
+    button.setAttribute("aria-pressed", String(active));
+  });
+  activeScene?.onModeChanged?.(mode);
   state.needsRender = true;
 }
 
@@ -626,8 +644,16 @@ function bindUi() {
     state.dynamicScale = 1;
     state.resizePending = true;
   });
-  ui.modeScience.addEventListener("click", () => setMode(0));
-  ui.modeHubble.addEventListener("click", () => setMode(1));
+  [
+    ui.modeScience,
+    ui.modeHubble,
+    ui.modeLookback,
+    ui.modeFrequency,
+    ui.modeNull,
+    ui.modeError,
+  ].forEach((button, mode) => {
+    button.addEventListener("click", () => setMode(mode));
+  });
   ui.toggleMotion.addEventListener("click", () => setMotion(!state.running));
   ui.resetView.addEventListener("click", resetView);
   ui.togglePanel.addEventListener("click", () => {
@@ -730,6 +756,10 @@ async function start() {
     requestAnimationFrame(animate);
   } catch (error) {
     console.error(error);
+    if (error?.sceneUiHandled) {
+      ui.backendStatus.textContent = "数据验证失败";
+      return;
+    }
     showFatalError(error instanceof Error ? error.message : error);
   }
 }

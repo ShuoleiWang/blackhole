@@ -502,6 +502,33 @@ function decodeRecord(view, offset, path, captureCodes, nullResidualLimit) {
   };
 }
 
+function createDiagnosticRange() {
+  return {
+    minimum: Infinity,
+    maximum: -Infinity,
+    minimumPositive: Infinity,
+  };
+}
+
+function includeDiagnosticValue(range, value) {
+  range.minimum = Math.min(range.minimum, value);
+  range.maximum = Math.max(range.maximum, value);
+  if (value > 0) {
+    range.minimumPositive = Math.min(range.minimumPositive, value);
+  }
+}
+
+function freezeDiagnosticRange(range) {
+  const hasValues = Number.isFinite(range.minimum);
+  return Object.freeze({
+    minimum: hasValues ? range.minimum : 0,
+    maximum: hasValues ? range.maximum : 0,
+    minimumPositive: Number.isFinite(range.minimumPositive)
+      ? range.minimumPositive
+      : 0,
+  });
+}
+
 export function decodeTransferMapChunks(manifest, chunkPayloads) {
   const metadata = validateTransferMapManifest(manifest);
   const primary = new Float32Array(metadata.recordCount * 4);
@@ -513,6 +540,12 @@ export function decodeTransferMapChunks(manifest, chunkPayloads) {
   const outcomeNames = Object.fromEntries(
     Object.entries(CANONICAL_OUTCOMES).map(([name, code]) => [code, name]),
   );
+  const diagnosticRanges = {
+    frequencyShift: createDiagnosticRange(),
+    lookback: createDiagnosticRange(),
+    nullResidual: createDiagnosticRange(),
+    projectionError: createDiagnosticRange(),
+  };
   const captureCodes = new Set(manifest.captureTargets.map((target) => target.code));
   const nullResidualLimit = finiteNumber(
     manifest.rayIntegration?.tolerances?.nullConstraint,
@@ -575,6 +608,27 @@ export function decodeTransferMapChunks(manifest, chunkPayloads) {
         bytes.subarray(sourceOffset, sourceOffset + RECORD_BYTES),
         pixel * RECORD_BYTES,
       );
+      if (record.validityMask & VALID_FREQUENCY_SHIFT) {
+        includeDiagnosticValue(
+          diagnosticRanges.frequencyShift,
+          record.frequencyShift,
+        );
+      }
+      if (record.validityMask & VALID_LOOKBACK) {
+        includeDiagnosticValue(diagnosticRanges.lookback, record.lookback);
+      }
+      if (record.validityMask & VALID_NULL_RESIDUAL) {
+        includeDiagnosticValue(
+          diagnosticRanges.nullResidual,
+          record.nullResidual,
+        );
+      }
+      if (record.validityMask & VALID_PROJECTION_ERROR) {
+        includeDiagnosticValue(
+          diagnosticRanges.projectionError,
+          record.projectionError,
+        );
+      }
       counts[outcomeNames[record.outcome]] += 1;
     }
   }
@@ -608,7 +662,76 @@ export function decodeTransferMapChunks(manifest, chunkPayloads) {
     metrics,
     records,
     counts: Object.freeze(counts),
+    diagnosticRanges: Object.freeze(
+      Object.fromEntries(
+        Object.entries(diagnosticRanges).map(([name, range]) => [
+          name,
+          freezeDiagnosticRange(range),
+        ]),
+      ),
+    ),
     totalBytes: metadata.totalBytes,
+  });
+}
+
+export function readTransferMapRecord(dataset, x, y) {
+  if (
+    !(dataset?.records instanceof Uint8Array)
+    || !Number.isInteger(dataset.width)
+    || !Number.isInteger(dataset.height)
+    || dataset.records.byteLength !== dataset.width * dataset.height * RECORD_BYTES
+  ) {
+    throw new TypeError(
+      "Transfer-map inspection requires a validated canonical record array",
+    );
+  }
+  if (
+    !Number.isInteger(x)
+    || !Number.isInteger(y)
+    || x < 0
+    || y < 0
+    || x >= dataset.width
+    || y >= dataset.height
+  ) {
+    throw new RangeError(`Transfer-map pixel ${x},${y} lies outside the dataset`);
+  }
+
+  const byteOffset = (y * dataset.width + x) * RECORD_BYTES;
+  const bytes = dataset.records.subarray(byteOffset, byteOffset + RECORD_BYTES);
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const outcome = view.getUint8(28);
+  const captureTarget = view.getUint8(29);
+  const validityMask = view.getUint16(30, true);
+  const outcomeName = Object.entries(CANONICAL_OUTCOMES)
+    .find(([, code]) => code === outcome)?.[0] ?? `unknown-${outcome}`;
+  const captureTargetId = captureTarget === 255
+    ? null
+    : dataset.manifest?.captureTargets
+      ?.find((target) => target.code === captureTarget)?.id ?? null;
+
+  return Object.freeze({
+    x,
+    y,
+    byteOffset,
+    escapeDirection: Object.freeze([
+      view.getFloat32(0, true),
+      view.getFloat32(4, true),
+      view.getFloat32(8, true),
+    ]),
+    frequencyShiftG: view.getFloat32(12, true),
+    coordinateLookbackTimeM: view.getFloat32(16, true),
+    nullResidual: view.getFloat32(20, true),
+    projectionErrorPx: view.getFloat32(24, true),
+    rayOutcome: outcome,
+    rayOutcomeName: outcomeName,
+    captureTarget,
+    captureTargetId,
+    validityMask,
+    rawBytes: new Uint8Array(bytes),
+    rawHex: Array.from(
+      bytes,
+      (byte) => byte.toString(16).padStart(2, "0"),
+    ).join(" "),
   });
 }
 

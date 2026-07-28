@@ -18,14 +18,19 @@ unchanged, frame-frozen, multi-centre **weak-field fast-light shader**. No SXS
 near-zone metric or ray-transfer product is consumed, and the result is
 **not NR ray tracing**, not a solved binary-spacetime image, and not a
 quantitatively accurate merger shadow. The project is intended for real-time
-visualization and education; it is not a Kerr, full-NR light-propagation,
-GRMHD, or high-precision radiative-transfer solver.
+visualization and education. Its real-time scenes are not Kerr or full-NR
+light-propagation solvers, and the project is not a GRMHD or high-precision
+radiative-transfer solver. The optional stationary Kerr reference described
+below is deliberately isolated from that real-time binary renderer.
 
-A second opt-in path, `?scene=transfer-map-reference`, exercises the transfer-map
-pipeline with a project-generated, stationary analytic Schwarzschild reference.
-Its fixed 1024×576 camera contains no accretion disk and is **not numerical
-relativity**; it validates offline ray generation, authenticated playback, GPU
-consumption, and sky composition without changing either existing scene.
+A second opt-in path, `?scene=transfer-map-reference`, exercises the
+transfer-map pipeline with project-generated stationary analytic
+**Schwarzschild and Kerr** references. The Kerr product uses the pinned
+`SXS:BBH:0001` remnant spin only; its metric and pixels are analytic,
+project-generated data, not SXS near-zone data. Both fixed 1024×576 cameras
+contain no accretion disk and are **not numerical relativity**. They validate
+offline ray generation, authenticated playback, GPU consumption, diagnostics,
+and sky composition without changing either existing scene.
 
 ![A Schwarzschild black hole, accretion disk, and gravitationally lensed Milky Way](./docs/images/blackhole-galaxy-hero.webp)
 
@@ -49,10 +54,15 @@ consumption, and sky composition without changing either existing scene.
 - **Explicit rendering boundary** — The binary scene retains the existing
   WGSL/GLSL weak-field fast-light lens shader. NR-derived trajectories and a
   real NR waveform do not make the pixels NR ray tracing.
-- **Transfer-map reference consumer** — `?scene=transfer-map-reference`
-  authenticates a bundled 1024×576 stationary Schwarzschild map and its nine
-  chunks before either backend consumes it. This analytic vacuum reference is
-  neither NR, an accretion-disk model, nor a future binary slow-light product.
+- **Schwarzschild/Kerr transfer-map workbench** —
+  `?scene=transfer-map-reference` authenticates one of two bundled 1024×576
+  stationary maps before either backend consumes it. The Kerr reference
+  numerically integrates separated null geodesics of the exact analytic Kerr
+  metric, with a finite-distance BL-ZAMO, a constant-Kerr-r oblate capture
+  surface, and continuation to infinity.
+- **Inspectable scientific diagnostics** — Stable URL modes show sky,
+  outcomes, lookback time, frequency shift, null residual, or projection
+  error. Clicking a texel exposes its decoded canonical 32-byte record.
 - **Non-breaking scene architecture** — Optional scene descriptors and shader bundles extend the shared WebGPU/WebGL2 backends, while the default URL retains the original Schwarzschild shader, observer model, disk, and controls.
 - **WebGPU first, WebGL2 fallback** — Chooses the rendering path from the GPU limits, texture dimensions, and framebuffer capabilities exposed at runtime, without chip-model-specific branches.
 - **Progressive sky assets** — Ships with ESO 6K and 4K fallbacks and can optionally load the 16000×8000 ESA/Gaia all-sky map.
@@ -76,8 +86,9 @@ Use the in-app scene selector, or open
 <http://localhost:4173/?scene=binary-approx>, to enter the experimental binary
 preview. Open
 <http://localhost:4173/?scene=transfer-map-reference> for the fixed-camera
-stationary transfer-map reference. Returning to the default URL restores the
-interactive Schwarzschild scene; all three paths remain isolated.
+Schwarzschild transfer-map reference, or append `&reference=kerr-remnant` for
+the stationary Kerr remnant reference. Returning to the default URL restores
+the interactive Schwarzschild scene; all paths remain isolated.
 
 The bundled 6K Milky Way background works immediately. To install the optional, approximately 236 MiB Gaia 16K map:
 
@@ -110,10 +121,13 @@ CoM-corrected SXS `Extrapolated_N2` `h22` mode, with peak amplitude at protocol
 binary. None of these controls changes the weak-field fast-light rendering
 model.
 
-The transfer-map reference has a fixed camera and projection, so drag, zoom,
-reset, motion, mass, accretion, and time controls are disabled. Its two display
-modes select sky composition or explicit ray-outcome classification; exposure
-and display quality remain presentation controls.
+The transfer-map workbench has a fixed camera and projection, so drag, zoom,
+reset, motion, mass, accretion, and time controls are disabled. It can switch
+between the Schwarzschild and Kerr references and display sky composition,
+ray outcomes, lookback time, frequency factor, null residual, or projection
+error. Click the canvas to inspect one canonical 32-byte ray record; arrow keys
+move the selected texel, Shift accelerates movement, and Escape closes the
+inspector. Exposure and display quality remain presentation controls.
 
 ## URL parameters
 
@@ -121,6 +135,8 @@ and display quality remain presentation controls.
 | --- | --- |
 | `?scene=binary-approx` | Opt into SXS-driven binary dynamics rendered by the isolated weak-field fast-light preview; the default remains Schwarzschild |
 | `?scene=transfer-map-reference` | Open the fixed-camera stationary analytic Schwarzschild transfer-map reference; not NR and no accretion disk |
+| `?scene=transfer-map-reference&reference=kerr-remnant` | Open the stationary analytic Kerr remnant-spin reference; not NR and no accretion disk |
+| `&diagnostic=sky\|outcome\|lookback\|frequency-shift\|null-residual\|projection-error` | Select a stable transfer-map workbench view |
 | `?renderer=webgl` | Force the WebGL2 fallback path |
 | `?hdr=0` | Disable extended HDR and use stable SDR output |
 | `?sky=high` | Force the bundled ESO 6K Milky Way background |
@@ -130,7 +146,7 @@ and display quality remain presentation controls.
 Parameters can be combined:
 
 ```text
-http://localhost:4173/?scene=transfer-map-reference&presentation=1&sky=high&hdr=0
+http://localhost:4173/?scene=transfer-map-reference&reference=kerr-remnant&diagnostic=outcome&renderer=webgl&hdr=0
 ```
 
 ## Rendering pipeline
@@ -157,17 +173,22 @@ spacetime, integrate null geodesics through an NR metric, render remnant spin,
 or compute either capture surface as an apparent/event horizon. The camera
 also does not reuse the single-hole circular-observer Lorentz boost.
 
-The reference path completes a separate fail-closed chain: deterministically
-generate the analytic map; authenticate the exact manifest bytes, sidecar, and
-nine chunks; validate the v1 schema, 32-byte records, coordinates, outcomes, and
-accuracy; upload 589,824 records through the selected WebGPU or WebGL2 resource
-path; select the nearest stored texel without blending ray directions; and
-sample the panorama only for `escaped` outcomes before the shared HDR/SDR stage.
+The reference path completes a separate fail-closed chain: select a reference
+from a hard-coded trust registry; authenticate the exact manifest bytes,
+sidecar, and chunks; validate the v1 schema, 32-byte records, coordinates,
+outcomes, and accuracy; upload 589,824 records through the selected WebGPU or
+WebGL2 resource path; select the nearest stored texel without blending ray
+directions; and sample the panorama only for `escaped` outcomes before the
+shared HDR/SDR stage.
 
-The map is one observation at `r = 40M`, with a 40-degree vertical field of view
-and a fixed 1024×576 projection. It contains 557,772 escaped and 32,052 captured
-rays with no unusable records. It is an analytic stationary reference, not an NR
-spacetime, binary merger, accretion disk, or GRMHD/radiative-transfer result.
+Both products are single observations at `r = 40M`, with a 40-degree vertical
+field of view and a fixed 1024×576 projection. The Schwarzschild map contains
+557,772 escaped and 32,052 captured rays. The Kerr map uses
+`a/M = 0.686461676493`, a finite-distance BL-ZAMO, and ingoing Cartesian
+Kerr-Schild manifest coordinates; it contains 558,684 escaped and 31,140
+captured rays. Both have zero unusable records. They are analytic stationary
+references, not NR spacetimes, binary-merger images, accretion disks, or
+GRMHD/radiative-transfer results.
 
 Primary implementation files:
 
@@ -183,6 +204,10 @@ Primary implementation files:
 - [`assets/transfer-maps/schwarzschild-reference-v1/manifest.json`](./assets/transfer-maps/schwarzschild-reference-v1/manifest.json) — Renderable 1024×576 analytic reference and nine hashed chunks
 - [`scripts/generate_schwarzschild_transfer_map.py`](./scripts/generate_schwarzschild_transfer_map.py) — Deterministic offline generator
 - [`scripts/verify_schwarzschild_transfer_map.py`](./scripts/verify_schwarzschild_transfer_map.py) — Independent stationary-physics verifier
+- [`assets/transfer-maps/kerr-remnant-reference-v1/manifest.json`](./assets/transfer-maps/kerr-remnant-reference-v1/manifest.json) — Renderable 1024×576 analytic Kerr reference and hashed chunks
+- [`scripts/generate_kerr_transfer_map.py`](./scripts/generate_kerr_transfer_map.py) — Deterministic Kerr null-geodesic generator with full-ray tolerance refinement
+- [`scripts/verify_kerr_transfer_map.py`](./scripts/verify_kerr_transfer_map.py) — Independent finite-ZAMO shadow, Kerr-Schild identity, and fixed-step ray verifier
+- [`docs/kerr-reference.md`](./docs/kerr-reference.md) — Kerr configuration, equations, validation boundary, and reproduction guide
 - [`assets/scenes/binary-sxs-bbh-0001-v2.json`](./assets/scenes/binary-sxs-bbh-0001-v2.json) — Phase 2 source, scientific-status, event, integrity, error, renderer-boundary, and playback manifest
 - [`assets/scenes/binary-sxs-bbh-0001-v2.samples.json`](./assets/scenes/binary-sxs-bbh-0001-v2.samples.json) — 2,732-sample compact SXS dynamics and waveform track
 - [`scripts/generate_binary_sxs_dynamics.py`](./scripts/generate_binary_sxs_dynamics.py) — Offline, deterministic generator from three pinned official SXS files
@@ -213,11 +238,16 @@ Primary implementation files:
 | Binary merger/remnant data | Common apparent horizon at `t = -6.072285 M`; exact metadata remnant mass `0.951609417715 M` and spin vector `(-7.29520687012e-10, 7.40468371215e-10, 0.686461676493)` | The topology blend from the common-horizon event to waveform peak is a presentation proxy; the shader does not render horizon geometry, recoil, Kerr spin, or frame dragging |
 | Binary lensing | Fast-light bending from two frame-frozen weak-field monopoles, followed by one spherical remnant proxy | Not strong-field geodesic integration; remnant spin/frame dragging are not rendered, and fine photon rings, caustics, delays, and horizon topology are not quantitatively reliable |
 | Binary emission | Vacuum sky lensing with no accretion disk | Adding luminous plasma would require physical gas initial data, GRMHD, and radiative transfer |
-| Stationary transfer-map reference | Fixed 1024×576 analytic Schwarzschild vacuum map, nine authenticated chunks, nearest-texel WebGPU/WebGL2 playback | Fixed camera; no disk, NR source, time interpolation, or binary slow-light rays |
+| Stationary Schwarzschild reference | Fixed 1024×576 analytic vacuum map, authenticated chunks, nearest-texel WebGPU/WebGL2 playback | Fixed camera; no disk, NR source, time interpolation, or binary slow-light rays |
+| Stationary Kerr remnant reference | Numerically integrated vacuum geodesics of the exact analytic Kerr metric at `a/M = 0.686461676493`, finite BL-ZAMO camera, oblate Kerr-r capture surface, authenticated playback and diagnostics | Uses only the SXS remnant spin parameter; no SXS near-zone metric, binary time dependence, emission, or NR-derived pixels |
 | NR transfer-map protocol | Versioned schema, deterministic synthetic fixture, fail-closed validators, reference consumer, and regression tests | The runtime is proven with analytic data only; no NR-derived transfer map is bundled |
 | Shared renderer | WebGPU primary path with WebGL2 fallback | HDR, P3, FP16, and 16K textures depend on runtime capabilities; HDR does not improve model accuracy |
 
-See [`docs/physics-notes.md`](./docs/physics-notes.md) (currently in Simplified Chinese) for the Schwarzschild model, and [`docs/binary-model.md`](./docs/binary-model.md) for the binary preview boundary, authoritative references, implemented data contract, and offline NR-to-transfer-map architecture.
+See [`docs/physics-notes.md`](./docs/physics-notes.md) (currently in Simplified
+Chinese) for the real-time Schwarzschild model,
+[`docs/kerr-reference.md`](./docs/kerr-reference.md) for the stationary Kerr
+product, and [`docs/binary-model.md`](./docs/binary-model.md) for the binary
+preview boundary and offline NR-to-transfer-map architecture.
 
 ## M3 Pro compatibility and HDR
 
@@ -241,6 +271,9 @@ PYTHONDONTWRITEBYTECODE=1 python3 -m unittest tests/test_nr_contract.py
 PYTHONDONTWRITEBYTECODE=1 python3 scripts/verify_nr_contract.py assets/transfer-maps/schwarzschild-reference-v1/manifest.json
 PYTHONDONTWRITEBYTECODE=1 python3 scripts/verify_schwarzschild_transfer_map.py
 PYTHONDONTWRITEBYTECODE=1 python3 -m unittest tests/test_schwarzschild_transfer_map.py
+PYTHONDONTWRITEBYTECODE=1 python3 scripts/verify_nr_contract.py assets/transfer-maps/kerr-remnant-reference-v1/manifest.json
+PYTHONDONTWRITEBYTECODE=1 python3 scripts/verify_kerr_transfer_map.py
+PYTHONDONTWRITEBYTECODE=1 python3 -m unittest tests/test_kerr_transfer_map.py
 node --test tests/transfer-map-runtime.test.mjs
 ```
 
@@ -248,6 +281,7 @@ Regenerate the bundled reference deterministically with:
 
 ```bash
 python3 scripts/generate_schwarzschild_transfer_map.py
+python3 scripts/generate_kerr_transfer_map.py
 ```
 
 The Schwarzschild numerical regression checks cover:
@@ -286,13 +320,26 @@ path escapes, and ambiguous invalid-ray states are rejected. Passing these
 checks means **protocol-conformant**, not **NR-backed** or
 **physically validated**.
 
-The stationary verifier independently recovers a `14.548010°` finite-distance
+The Schwarzschild verifier independently recovers a `14.548010°` finite-distance
 shadow diameter and boundary frequency factor `g = 1.024951860`. It reports a
 maximum sampled analytic null residual of `7.678e-14`, maximum independent
 direction error `1.062e-8 rad`, and maximum stored per-ray projection estimate
 `1.415e-2 px`. These are stationary-reference checks: the NR convergence and
 constraint-norm fields are correctly `not-applicable`, not zero-valued NR
 measurements.
+
+The Kerr verifier independently reconstructs the Cartesian Kerr-Schild metric
+and BL-ZAMO tetrad, evaluates the finite-distance spherical-photon critical
+curve, checks the complete capture mask, and traces representative full rays
+with a fixed-step RK4 implementation. The wider Kerr validation suite adds
+generator-level Schwarzschild-limit and spin-reversal mirror regressions, while
+the verifier checks first-integral separation, infinity-tail, null, and
+per-record projection gates. The bundled map has zero analytic capture-mask
+mismatches, maximum stored null residual `3.068e-9`, p95/maximum projection
+estimates `1.929e-4 / 3.752e-3 px`, and maximum independent direction error
+`8.679e-9 rad`. See
+[`docs/kerr-reference.md`](./docs/kerr-reference.md) for the exact model and
+measured acceptance criteria.
 
 Together, these scripts validate selected numerical properties and architecture
 contracts. They are not complete visual, radiative-model, or cross-GPU

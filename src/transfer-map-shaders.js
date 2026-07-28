@@ -31,6 +31,7 @@ struct Params {
   observerVelocityBeta: vec4<f32>,
   displayOutput: vec4<f32>,
   sceneTransferState: vec4<f32>,
+  sceneTransferRange: vec4<f32>,
 };
 
 struct FragmentInput {
@@ -195,7 +196,7 @@ fn outcomeColour(outcome: u32) -> vec3<f32> {
     return vec3<f32>(0.10, 0.72, 0.92);
   }
   if (outcome == 1u) {
-    return vec3<f32>(0.015, 0.018, 0.022);
+    return vec3<f32>(0.94, 0.22, 0.10);
   }
   if (outcome == 2u) {
     return vec3<f32>(0.95, 0.61, 0.10);
@@ -209,6 +210,58 @@ fn outcomeColour(outcome: u32) -> vec3<f32> {
   return vec3<f32>(0.95, 0.12, 0.65);
 }
 
+fn hasValidity(sample: TransferSample, bit: u32) -> bool {
+  return ((sample.state >> 16u) & bit) != 0u;
+}
+
+fn linearDiagnostic(value: f32) -> f32 {
+  let limits = params.sceneTransferRange.xy;
+  return clamp(
+    (value - limits.x) / max(limits.y - limits.x, 1.0e-30),
+    0.0,
+    1.0
+  );
+}
+
+fn logarithmicDiagnostic(value: f32) -> f32 {
+  if (value <= 0.0) {
+    return 0.0;
+  }
+  let limits = max(params.sceneTransferRange.xy, vec2<f32>(1.0e-30));
+  return clamp(
+    (log2(max(value, limits.x)) - log2(limits.x))
+      / max(log2(limits.y) - log2(limits.x), 1.0e-20),
+    0.0,
+    1.0
+  );
+}
+
+fn scalarColour(value: f32) -> vec3<f32> {
+  let t = clamp(value, 0.0, 1.0);
+  let cold = vec3<f32>(0.035, 0.055, 0.18);
+  let middle = vec3<f32>(0.13, 0.82, 0.75);
+  let hot = vec3<f32>(1.0, 0.72, 0.12);
+  if (t < 0.5) {
+    return mix(cold, middle, t * 2.0);
+  }
+  return mix(middle, hot, (t - 0.5) * 2.0);
+}
+
+fn frequencyColour(value: f32) -> vec3<f32> {
+  if (value < 1.0) {
+    let extent = max(1.0 - params.sceneTransferRange.x, 1.0e-20);
+    let amount = clamp((1.0 - value) / extent, 0.0, 1.0);
+    return mix(vec3<f32>(0.94), vec3<f32>(1.0, 0.12, 0.035), amount);
+  }
+  let extent = max(params.sceneTransferRange.y - 1.0, 1.0e-20);
+  let amount = clamp((value - 1.0) / extent, 0.0, 1.0);
+  return mix(vec3<f32>(0.94), vec3<f32>(0.08, 0.38, 1.0), amount);
+}
+
+fn invalidDiagnosticColour() -> vec3<f32> {
+  return vec3<f32>(0.95, 0.12, 0.65);
+}
+
 @fragment
 fn fsMain(input: FragmentInput) -> @location(0) vec4<f32> {
   let mapped = mapUvForCanvas(input.uv);
@@ -216,8 +269,41 @@ fn fsMain(input: FragmentInput) -> @location(0) vec4<f32> {
     return vec4<f32>(0.0, 0.0, 0.0, 1.0);
   }
   let sample = transferAt(mapped.xy);
-  if (params.sceneTransferState.x > 0.5) {
+  let mode = u32(params.sceneTransferState.x + 0.5);
+  if (mode == 1u) {
     return vec4<f32>(outcomeColour(sample.state & 255u), 1.0);
+  }
+  if (mode == 2u) {
+    let colour = select(
+      invalidDiagnosticColour(),
+      scalarColour(linearDiagnostic(sample.metrics.x)),
+      hasValidity(sample, 4u)
+    );
+    return vec4<f32>(colour, 1.0);
+  }
+  if (mode == 3u) {
+    let colour = select(
+      invalidDiagnosticColour(),
+      frequencyColour(sample.primary.w),
+      hasValidity(sample, 2u)
+    );
+    return vec4<f32>(colour, 1.0);
+  }
+  if (mode == 4u) {
+    let colour = select(
+      invalidDiagnosticColour(),
+      scalarColour(logarithmicDiagnostic(sample.metrics.y)),
+      hasValidity(sample, 8u)
+    );
+    return vec4<f32>(colour, 1.0);
+  }
+  if (mode == 5u) {
+    let colour = select(
+      invalidDiagnosticColour(),
+      scalarColour(logarithmicDiagnostic(sample.metrics.z)),
+      hasValidity(sample, 16u)
+    );
+    return vec4<f32>(colour, 1.0);
   }
   if (!isEscaped(sample)) {
     return vec4<f32>(0.0, 0.0, 0.0, 1.0);
@@ -234,6 +320,7 @@ precision highp int;
 uniform vec2 uResolution;
 uniform float uSkyRadianceScale;
 uniform vec4 uSceneTransferState;
+uniform vec4 uSceneTransferRange;
 uniform sampler2D tSky;
 uniform sampler2D uSceneTransferPrimary;
 uniform sampler2D uSceneTransferMetrics;
@@ -379,7 +466,7 @@ vec3 outcomeColour(float outcome) {
     return vec3(0.10, 0.72, 0.92);
   }
   if (abs(outcome - OUTCOME_CAPTURED) < 0.25) {
-    return vec3(0.015, 0.018, 0.022);
+    return vec3(0.94, 0.22, 0.10);
   }
   if (abs(outcome - 2.0) < 0.25) {
     return vec3(0.95, 0.61, 0.10);
@@ -393,6 +480,59 @@ vec3 outcomeColour(float outcome) {
   return vec3(0.95, 0.12, 0.65);
 }
 
+bool hasValidity(TransferSample transferValue, float bit) {
+  float validityMask = floor(transferValue.metrics.w / 65536.0);
+  return mod(floor(validityMask / bit), 2.0) > 0.5;
+}
+
+float linearDiagnostic(float value) {
+  vec2 limits = uSceneTransferRange.xy;
+  return clamp(
+    (value - limits.x) / max(limits.y - limits.x, 1.0e-30),
+    0.0,
+    1.0
+  );
+}
+
+float logarithmicDiagnostic(float value) {
+  if (value <= 0.0) {
+    return 0.0;
+  }
+  vec2 limits = max(uSceneTransferRange.xy, vec2(1.0e-30));
+  return clamp(
+    (log2(max(value, limits.x)) - log2(limits.x))
+      / max(log2(limits.y) - log2(limits.x), 1.0e-20),
+    0.0,
+    1.0
+  );
+}
+
+vec3 scalarColour(float value) {
+  float t = clamp(value, 0.0, 1.0);
+  vec3 cold = vec3(0.035, 0.055, 0.18);
+  vec3 middle = vec3(0.13, 0.82, 0.75);
+  vec3 hot = vec3(1.0, 0.72, 0.12);
+  if (t < 0.5) {
+    return mix(cold, middle, t * 2.0);
+  }
+  return mix(middle, hot, (t - 0.5) * 2.0);
+}
+
+vec3 frequencyColour(float value) {
+  if (value < 1.0) {
+    float extent = max(1.0 - uSceneTransferRange.x, 1.0e-20);
+    float amount = clamp((1.0 - value) / extent, 0.0, 1.0);
+    return mix(vec3(0.94), vec3(1.0, 0.12, 0.035), amount);
+  }
+  float extent = max(uSceneTransferRange.y - 1.0, 1.0e-20);
+  float amount = clamp((value - 1.0) / extent, 0.0, 1.0);
+  return mix(vec3(0.94), vec3(0.08, 0.38, 1.0), amount);
+}
+
+vec3 invalidDiagnosticColour() {
+  return vec3(0.95, 0.12, 0.65);
+}
+
 void main() {
   // Three.js UVs use a bottom-left origin; transfer-map rows are top-left.
   vec3 mapped = mapUvForCanvas(vec2(vUv.x, 1.0 - vUv.y));
@@ -401,9 +541,46 @@ void main() {
     return;
   }
   TransferSample transferValue = transferAt(mapped.xy);
-  if (uSceneTransferState.x > 0.5) {
+  float mode = floor(uSceneTransferState.x + 0.5);
+  if (abs(mode - 1.0) < 0.25) {
     gl_FragColor = vec4(
       outcomeColour(mod(transferValue.metrics.w, 256.0)),
+      1.0
+    );
+    return;
+  }
+  if (abs(mode - 2.0) < 0.25) {
+    gl_FragColor = vec4(
+      hasValidity(transferValue, 4.0)
+        ? scalarColour(linearDiagnostic(transferValue.metrics.x))
+        : invalidDiagnosticColour(),
+      1.0
+    );
+    return;
+  }
+  if (abs(mode - 3.0) < 0.25) {
+    gl_FragColor = vec4(
+      hasValidity(transferValue, 2.0)
+        ? frequencyColour(transferValue.primary.w)
+        : invalidDiagnosticColour(),
+      1.0
+    );
+    return;
+  }
+  if (abs(mode - 4.0) < 0.25) {
+    gl_FragColor = vec4(
+      hasValidity(transferValue, 8.0)
+        ? scalarColour(logarithmicDiagnostic(transferValue.metrics.y))
+        : invalidDiagnosticColour(),
+      1.0
+    );
+    return;
+  }
+  if (abs(mode - 5.0) < 0.25) {
+    gl_FragColor = vec4(
+      hasValidity(transferValue, 16.0)
+        ? scalarColour(logarithmicDiagnostic(transferValue.metrics.z))
+        : invalidDiagnosticColour(),
       1.0
     );
     return;
@@ -451,7 +628,7 @@ export function createTransferMapShaderBundle(dataset) {
     id: "stationary-transfer-map-reference-v1",
     labels: Object.freeze({
       uniforms: "Stationary transfer-map frame uniforms",
-      trace: "Validated Schwarzschild transfer-map compositor",
+      trace: "Validated stationary transfer-map compositor",
     }),
     wgsl: Object.freeze({
       trace: transferMapTraceFragmentWGSL,
@@ -467,15 +644,23 @@ export function createTransferMapShaderBundle(dataset) {
           || [0, dataset.width, dataset.height, 0],
           0,
         );
+        tail.set(
+          frame.sceneTransferRange || [0, 1, 0, 0],
+          4,
+        );
       },
       createWebGLExtras(THREE) {
         return {
           uSceneTransferState: { value: new THREE.Vector4() },
+          uSceneTransferRange: { value: new THREE.Vector4() },
         };
       },
       writeWebGLExtras(uniforms, frame) {
         uniforms.uSceneTransferState.value.fromArray(
           frame.sceneTransferState || [0, 0, 0, 0],
+        );
+        uniforms.uSceneTransferRange.value.fromArray(
+          frame.sceneTransferRange || [0, 1, 0, 0],
         );
       },
     }),

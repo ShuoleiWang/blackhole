@@ -7,7 +7,8 @@ camera-specific, vacuum, slow-light transfer maps. The schema discriminator is
 > **Status:** the schema, deterministic synthetic fixture, fail-closed
 > validators, and regression tests are implemented. The repository now also
 > bundles a runtime decoder and `?scene=transfer-map-reference`, backed by a
-> project-generated stationary analytic Schwarzschild map. No
+> project-generated stationary analytic Schwarzschild map and an analytic Kerr
+> remnant-spin reference. No
 > numerical-relativity spacetime, NR-derived transfer map, or NR playback scene
 > is bundled. The default Schwarzschild renderer and opt-in
 > `?scene=binary-approx` remain isolated and unchanged.
@@ -54,6 +55,16 @@ tracing.
   deterministically generates that reference.
 - [`scripts/verify_schwarzschild_transfer_map.py`](../scripts/verify_schwarzschild_transfer_map.py)
   independently checks its stationary geodesic physics.
+- [`assets/transfer-maps/kerr-remnant-reference-v1/manifest.json`](../assets/transfer-maps/kerr-remnant-reference-v1/manifest.json)
+  declares the renderable 1024×576 stationary analytic Kerr reference.
+- [`scripts/generate_kerr_transfer_map.py`](../scripts/generate_kerr_transfer_map.py)
+  deterministically integrates separated null geodesics of the exact analytic
+  Kerr metric.
+- [`scripts/verify_kerr_transfer_map.py`](../scripts/verify_kerr_transfer_map.py)
+  independently checks the finite-ZAMO shadow, Kerr-Schild observer identity,
+  complete capture mask, and selected fixed-step rays.
+- [`kerr-reference.md`](./kerr-reference.md) defines that product's physics and
+  scientific boundary.
 - [`src/transfer-map-loader.js`](../src/transfer-map-loader.js) and
   [`src/transfer-map-shaders.js`](../src/transfer-map-shaders.js) implement the
   authenticated runtime consumer and matching WebGPU/WebGL2 playback.
@@ -75,6 +86,10 @@ python3 scripts/generate_schwarzschild_transfer_map.py
 PYTHONDONTWRITEBYTECODE=1 python3 scripts/verify_nr_contract.py assets/transfer-maps/schwarzschild-reference-v1/manifest.json
 PYTHONDONTWRITEBYTECODE=1 python3 scripts/verify_schwarzschild_transfer_map.py
 PYTHONDONTWRITEBYTECODE=1 python3 -m unittest tests/test_schwarzschild_transfer_map.py
+python3 scripts/generate_kerr_transfer_map.py
+PYTHONDONTWRITEBYTECODE=1 python3 scripts/verify_nr_contract.py assets/transfer-maps/kerr-remnant-reference-v1/manifest.json
+PYTHONDONTWRITEBYTECODE=1 python3 scripts/verify_kerr_transfer_map.py
+PYTHONDONTWRITEBYTECODE=1 python3 -m unittest tests/test_kerr_transfer_map.py
 node --test tests/transfer-map-runtime.test.mjs
 ```
 
@@ -154,6 +169,19 @@ stationary verifier additionally recovers the `14.548010°` finite-distance
 shadow diameter and `g=1.024951860`, with maximum sampled analytic null residual
 `7.678e-14`, maximum independent direction error `1.062e-8 rad`, and maximum
 stored per-ray projection estimate `1.415e-2 px`.
+
+The separately shipped `kerr-remnant-reference-v1` product has the same
+projection and record count. It uses the exact stationary Kerr metric with
+`a/M=0.686461676493`, a finite-distance Boyer-Lindquist ZAMO at `r=40M`,
+ingoing Cartesian Kerr-Schild manifest coordinates, a constant-Kerr-radius
+oblate stretched horizon, and numerical continuation from the `r=1000M`
+boundary to infinity. The SXS-derived input is only the pinned remnant-spin
+parameter; the metric and every ray are project-generated analytic data. See
+[`kerr-reference.md`](./kerr-reference.md) for its independent validation. Its
+payload contains 558,684 escaped and 31,140 captured rays with no unresolved or
+unusable records. The stored maximum null residual is `3.068e-9`, the
+p95/maximum projection estimates are `1.929e-4 / 3.752e-3 px`, and the
+independent maximum direction error is `8.679e-9 rad`.
 
 ## Required manifest sections
 
@@ -285,12 +313,17 @@ g = (u_observer·k_observer) / (u_boundary·k_boundary)
 
 The denominator uses the future-directed unit reference observer declared at
 `escapeBoundary`; it must be positive. `frequencyShiftG` is therefore positive
-and dimensionless.
+and dimensionless. The closed observer kinds include `eulerian-normal`,
+`asymptotic-inertial`, `synthetic-inertial`, and
+`Boyer-Lindquist-ZAMO`; the free-text definition must identify the actual
+slicing and frame rather than treating those observers as interchangeable.
 
-In the bundled reference that denominator is the static observer at the
-`r=1000M` escape worldtube. The panorama is interpreted in that boundary
-observer's reference frame; `g` is not a disk-emitter redshift and does not
-imply any accretion emission.
+In the bundled Schwarzschild reference that denominator is the static observer
+at the `r=1000M` escape worldtube. In the bundled Kerr reference it is a
+Boyer-Lindquist ZAMO on the constant-Kerr-radius `r=1000M` oblate worldtube,
+not the normal to a Cartesian Kerr-Schild time slice. The panorama is
+interpreted in the declared boundary observer's frame; `g` is not a
+disk-emitter redshift and does not imply any accretion emission.
 
 `rayIntegration` records whether the spacetime is time-dependent, stationary,
 or synthetic, together with the spatial/temporal metric interpolation,
@@ -302,6 +335,10 @@ An escaped ray terminates at the declared `escapeBoundary` surface. The stored
 `escapeDirection` is the outgoing unit direction **after** the producer's
 declared continuation beyond that boundary, expressed in ICRS. The contract
 does not silently assume that a finite coordinate sphere is already infinity.
+Closed boundary kinds include ordinary coordinate spheres, areal-radius
+worldtubes, the synthetic fixture sphere, and the
+`constant-Kerr-r-oblate-worldtube`. In the last case `radiusM` is the oblate
+Kerr coordinate radius and must not be interpreted as Euclidean distance.
 
 ## Capture surfaces and terminal outcomes
 
@@ -421,12 +458,13 @@ artifacts and chunks are checked against their declared byte sizes and SHA-256
 hashes. The generator URI must name the `generator-source` artifact and its
 `codeRevision` must bind that artifact's SHA-256.
 
-For `?scene=transfer-map-reference`, the runtime first matches the raw manifest
-bytes against a digest pinned in the scene module, then cross-checks the
-sidecar, validates the parsed manifest, authenticates all nine chunks, strictly
-decodes all 589,824 records, and only then creates GPU resources. A failed
-manifest, chunk, ABI, outcome, or accuracy check stops the scene; partial data
-is never rendered and invalid states never sample the sky.
+For `?scene=transfer-map-reference`, the runtime first resolves a closed
+reference key to a URL, dataset ID, and raw-manifest digest pinned in the scene
+module. It then cross-checks the sidecar, validates the parsed manifest,
+authenticates every chunk, strictly decodes all 589,824 records, and only then
+creates GPU resources. A query parameter cannot provide an arbitrary URL or
+hash. A failed manifest, chunk, ABI, outcome, or accuracy check stops the
+scene; partial data is never rendered and invalid states never sample the sky.
 
 ## Fail-closed behavior
 

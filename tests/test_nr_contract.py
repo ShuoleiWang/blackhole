@@ -252,6 +252,34 @@ class NrContractTests(unittest.TestCase):
                 self.write_manifest(data)
                 self.assert_contract_error(expected)
 
+    def test_schema_accepts_explicit_kerr_boundary_semantics(self) -> None:
+        data = self.make_stationary_renderable()
+        data["escapeBoundary"]["surface"]["kind"] = (
+            "constant-Kerr-r-oblate-worldtube"
+        )
+        data["escapeBoundary"]["referenceObserver"].update(
+            {
+                "kind": "Boyer-Lindquist-ZAMO",
+                "definition": (
+                    "Future-directed normal to Boyer-Lindquist time slices "
+                    "on the declared constant-Kerr-r boundary."
+                ),
+            }
+        )
+        self.write_manifest(data)
+        report = validate_contract(self.manifest_path, DEFAULT_SCHEMA)
+        self.assertEqual(report["status"], "protocol-conformant")
+
+        for path, value in (
+            (("surface", "kind"), "euclidean-kerr-sphere"),
+            (("referenceObserver", "kind"), "unspecified-rotating-observer"),
+        ):
+            with self.subTest(path=path):
+                invalid = copy.deepcopy(data)
+                invalid["escapeBoundary"][path[0]][path[1]] = value
+                self.write_manifest(invalid)
+                self.assert_contract_error("allowed enum")
+
     def test_schema_dialect_rejects_unknown_validation_keywords(self) -> None:
         schema = json.loads(DEFAULT_SCHEMA.read_bytes())
         schema["properties"]["id"]["unsupportedValidationKeyword"] = True

@@ -34,6 +34,19 @@ u'' = -u + 3u²
 双黑洞或 GRMHD 模拟；完整 ABI、ICRS 轴映射、精度指标与验证命令见
 [`nr-transfer-map-v1.md`](./nr-transfer-map-v1.md)。
 
+同一工作台还提供
+`?scene=transfer-map-reference&reference=kerr-remnant`。它使用解析 stationary
+Kerr 度规与 `a/M=0.686461676493`，从 `r=40M` 的有限距离
+Boyer-Lindquist ZAMO 反向追踪光线。捕获面是恒 Kerr 半径的扁球 stretched
+horizon，不是欧氏球；逃逸方向从 `r=1000M` 继续积分到无穷远后才写入 ICRS。
+SXS 只提供固定余留体自旋参数，不提供度规或像素，因此它仍是项目生成的解析
+参考，不是 NR ray tracing。方程、来源约束和独立验证见
+[`kerr-reference.md`](./kerr-reference.md)。
+
+工作台可显示天空、outcome、回溯坐标时间、频移 `g`、null residual 和投影
+误差；点击 texel 会解码其原始 32-byte 光线记录。这些伪彩诊断不改变物理
+数据。
+
 ## 运动观察者
 
 相机位于经过黑洞中心的 Schwarzschild 圆轨道平面上。屏幕光线首先从观察者的局部共动标架做 Lorentz 变换，再进入局部 Schwarzschild 静态标架；观察者自身的运动因此会影响像差和频移。
@@ -75,7 +88,8 @@ UI 输入的是无量纲 Eddington 光度比 `L/L_Edd`；在固定效率归一�
 
 ## 数值边界
 
-- 模型固定为非旋转 Schwarzschild 时空，不包含 Kerr 自旋与 frame dragging。
+- 默认实时单黑洞模型固定为非旋转 Schwarzschild 时空，不包含 Kerr 自旋与
+  frame dragging；独立的离线 Kerr 参考不会改变默认 shader。
 - 临界光子轨道附近的高阶像会指数级变窄，最终受步数上限和像素覆盖限制。
 - 临界曲线窄带使用固定 2×2 测地线覆盖采样；其他区域通常只追踪像素中心光线。
 - 盘面发射、三波段色度、光学深度和湍流都是面向实时显示的近似。

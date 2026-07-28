@@ -17,7 +17,7 @@ of Einstein's field equations.
 | Light propagation | Existing real-time, frame-frozen multi-centre weak-field bending | **Not NR ray tracing** and invalid as precision strong-field imaging |
 | Emission | Lensed all-sky background in vacuum | No accretion disks, plasma, GRMHD, or radiative transfer |
 | Display | WebGPU with WebGL2 fallback and the existing HDR pipeline | Display fidelity does not increase physical accuracy |
-| Transfer-map interface | Versioned schema, synthetic fixture, fail-closed validators, plus a fixed-camera stationary Schwarzschild reference consumer | The consumer is proven with analytic data only; no NR-derived transfer map or binary slow-light playback |
+| Transfer-map interface | Versioned schema, synthetic fixture, fail-closed validators, plus fixed-camera stationary Schwarzschild and Kerr reference consumers | The consumer is proven with analytic data only; no NR-derived transfer map or binary slow-light playback |
 
 The precise classification is **NR-driven dynamics with weak-field fast-light
 rendering**. “NR-driven” applies to the orbital track, waveform, source events,
@@ -335,7 +335,7 @@ The project status is deliberately reported by layer:
 | --- | --- | --- |
 | Phase 1 transfer-map schema, fixture, validator, and tests | Implemented | `contract-conformant` ingestion boundary |
 | Phase 2 SXS orbital dynamics, waveform, events, and remnant metadata | Implemented | `NR-driven dynamics` |
-| Stationary Schwarzschild reference map and runtime consumer | Implemented | Analytic fixed-camera transfer-map playback; not NR |
+| Stationary Schwarzschild and Kerr reference maps and runtime consumer | Implemented | Analytic fixed-camera transfer-map playback, diagnostics, and record inspection; not NR |
 | Slow-light rays through a time-dependent NR spacetime | Not implemented | No `NR-backed` pixel or image path |
 | GRMHD plasma and GR radiative transfer | Not implemented | No physically modelled luminous merger |
 

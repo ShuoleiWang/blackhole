@@ -1452,6 +1452,7 @@
               "enum": [
                 "coordinate-sphere",
                 "areal-radius-worldtube",
+                "constant-Kerr-r-oblate-worldtube",
                 "synthetic-coordinate-sphere"
               ]
             },
@@ -1476,6 +1477,7 @@
               "enum": [
                 "eulerian-normal",
                 "asymptotic-inertial",
+                "Boyer-Lindquist-ZAMO",
                 "synthetic-inertial"
               ]
             },

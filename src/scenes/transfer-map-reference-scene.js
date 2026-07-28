@@ -1,20 +1,63 @@
 import {
   loadTransferMap,
+  readTransferMapRecord,
+  TransferMapContractError,
+  TRANSFER_MAP_ABI,
 } from "../transfer-map-loader.js";
 import {
   createTransferMapShaderBundle,
 } from "../transfer-map-shaders.js";
 
-const MANIFEST_URL = new URL(
+const SCHWARZSCHILD_MANIFEST_URL = new URL(
   "../../assets/transfer-maps/schwarzschild-reference-v1/manifest.json",
   import.meta.url,
 );
-
-// This is the trust root for the bundled scientific product. The sidecar and
-// every chunk are checked only after these exact manifest bytes are accepted.
-export const REFERENCE_MANIFEST_SHA256 = (
-  "8ab373b5af8f51dc7c702f7be418caf0a7bac5d8f59dd108afb0f0ee99d0e792"
+const KERR_REMNANT_MANIFEST_URL = new URL(
+  "../../assets/transfer-maps/kerr-remnant-reference-v1/manifest.json",
+  import.meta.url,
 );
+
+// These hashes are the browser trust roots. A query parameter may select a
+// registry key, but it can never provide a URL or digest.
+export const REFERENCE_MANIFEST_SHA256 = (
+  "b70898ebe36f9f72147481c68fbd1ac31053cc6718da5258c60f84f4f0723e20"
+);
+
+export const TRUSTED_REFERENCE_REGISTRY = Object.freeze({
+  schwarzschild: Object.freeze({
+    key: "schwarzschild",
+    datasetId: "schwarzschild-reference-v1",
+    title: "Schwarzschild 强场参考",
+    manifestUrl: SCHWARZSCHILD_MANIFEST_URL.href,
+    expectedManifestSha256: REFERENCE_MANIFEST_SHA256,
+  }),
+  "kerr-remnant": Object.freeze({
+    key: "kerr-remnant",
+    datasetId: "kerr-remnant-reference-v1",
+    title: "Kerr 余留黑洞参考",
+    manifestUrl: KERR_REMNANT_MANIFEST_URL.href,
+    expectedManifestSha256: (
+      "5b0022ab963c0cc35d3d8acab17190bd1294bc72da2b49003d785f964ac81d99"
+    ),
+  }),
+});
+
+export const TRANSFER_MAP_DIAGNOSTIC_MODES = Object.freeze([
+  Object.freeze({ id: "sky", label: "天空合成", range: null }),
+  Object.freeze({ id: "outcome", label: "结果分类", range: null }),
+  Object.freeze({ id: "lookback", label: "回溯时间", range: "lookback" }),
+  Object.freeze({ id: "frequency-shift", label: "频移 g", range: "frequencyShift" }),
+  Object.freeze({ id: "null-residual", label: "零约束", range: "nullResidual", logarithmic: true }),
+  Object.freeze({ id: "projection-error", label: "投影误差", range: "projectionError", logarithmic: true }),
+]);
+
+export class TransferMapSceneLoadError extends Error {
+  constructor(message, options = {}) {
+    super(message, options);
+    this.name = "TransferMapSceneLoadError";
+    this.sceneUiHandled = true;
+  }
+}
 
 function requiredElement(documentRef, id) {
   const element = documentRef.getElementById(id);
@@ -54,12 +97,92 @@ function restoreElement(element, snapshot) {
   }
 }
 
-function progressLabel(progress) {
+function locationHref(locationRef) {
+  return locationRef?.href || "http://localhost/";
+}
+
+export function referenceHref(href, referenceKey) {
+  const url = new URL(href);
+  url.searchParams.set("scene", "transfer-map-reference");
+  if (referenceKey === "schwarzschild") {
+    url.searchParams.delete("reference");
+  } else {
+    url.searchParams.set("reference", referenceKey);
+  }
+  return url.href;
+}
+
+export function defaultSceneHref(href) {
+  const url = new URL(href);
+  url.searchParams.delete("scene");
+  url.searchParams.delete("reference");
+  url.searchParams.delete("diagnostic");
+  return url.href;
+}
+
+export function diagnosticModeFromSearch(searchParams) {
+  const requested = searchParams?.get?.("diagnostic") || "sky";
+  const mode = TRANSFER_MAP_DIAGNOSTIC_MODES.findIndex(
+    (definition) => definition.id === requested,
+  );
+  return mode >= 0 ? mode : 0;
+}
+
+export function diagnosticHref(href, mode) {
+  const definition = TRANSFER_MAP_DIAGNOSTIC_MODES[mode];
+  if (!definition) {
+    throw new RangeError(`Unknown transfer-map diagnostic mode ${mode}`);
+  }
+  const url = new URL(href);
+  if (definition.id === "sky") {
+    url.searchParams.delete("diagnostic");
+  } else {
+    url.searchParams.set("diagnostic", definition.id);
+  }
+  return url.href;
+}
+
+export function resolveTrustedReference(
+  searchParams,
+  registry = TRUSTED_REFERENCE_REGISTRY,
+) {
+  const requested = searchParams?.get?.("reference") || "schwarzschild";
+  if (!Object.hasOwn(registry, requested)) {
+    throw new TransferMapContractError(
+      "$.reference",
+      `unknown trusted reference key ${JSON.stringify(requested)}`,
+    );
+  }
+  const entry = registry[requested];
+  if (
+    entry?.key !== requested
+    || typeof entry.datasetId !== "string"
+    || !entry.datasetId.length
+    || typeof entry.manifestUrl !== "string"
+  ) {
+    throw new TransferMapContractError(
+      `$.referenceRegistry.${requested}`,
+      "registry entry is malformed",
+    );
+  }
+  if (
+    typeof entry.expectedManifestSha256 !== "string"
+    || !/^[0-9a-f]{64}$/.test(entry.expectedManifestSha256)
+  ) {
+    throw new TransferMapContractError(
+      `$.referenceRegistry.${requested}.expectedManifestSha256`,
+      "reference is unavailable until a pinned manifest SHA-256 is registered",
+    );
+  }
+  return entry;
+}
+
+function progressLabel(progress, title) {
   switch (progress.phase) {
     case "manifest":
       return progress.completed
-        ? "Manifest SHA-256 已验证"
-        : "正在获取固定版本 manifest…";
+        ? `${title} manifest SHA-256 已验证`
+        : `正在获取 ${title} 的固定版本 manifest…`;
     case "sidecar":
       return progress.completed
         ? "Manifest sidecar 已交叉验证"
@@ -69,7 +192,7 @@ function progressLabel(progress) {
     case "decoded":
       return `已严格解码 ${progress.total.toLocaleString("zh-CN")} 条光线记录`;
     default:
-      return "正在验证 Schwarzschild transfer map…";
+      return "正在验证 stationary transfer map…";
   }
 }
 
@@ -85,11 +208,238 @@ function cameraFromManifest(manifest) {
   });
 }
 
+function finiteVectorMagnitude(vector) {
+  return Array.isArray(vector) && vector.length === 3
+    ? Math.hypot(...vector)
+    : 0;
+}
+
+function observerCoordinate(manifest, spinMagnitude) {
+  const event = manifest.observer.samples[0].eventNr;
+  const x = event[1];
+  const y = event[2];
+  const z = event[3];
+  const euclideanNorm = Math.hypot(x, y, z);
+  const chartDescription = [
+    manifest.coordinates.nrChart.coordinates,
+    manifest.coordinates.nrChart.gauge,
+  ].join(" ");
+  if (/Kerr-Schild/i.test(chartDescription)) {
+    // In Cartesian Kerr-Schild coordinates, Euclidean rho is not the Kerr
+    // oblate-spheroidal radial coordinate. Invert the defining quartic:
+    // r^4 - (rho^2-a^2)r^2 - a^2 z^2 = 0.
+    const aSquared = spinMagnitude ** 2;
+    const rhoSquared = x * x + y * y + z * z;
+    const difference = rhoSquared - aSquared;
+    const rSquared = 0.5 * (
+      difference
+      + Math.sqrt(difference * difference + 4 * aSquared * z * z)
+    );
+    return Object.freeze({
+      affineCameraDistance: euclideanNorm,
+      coordinateRadius: Math.sqrt(Math.max(rSquared, 0)),
+      label: "rKS",
+    });
+  }
+  if (/Schwarzschild/i.test(chartDescription) && /areal/i.test(chartDescription)) {
+    return Object.freeze({
+      affineCameraDistance: euclideanNorm,
+      coordinateRadius: euclideanNorm,
+      label: "r areal",
+    });
+  }
+  return Object.freeze({
+    affineCameraDistance: euclideanNorm,
+    coordinateRadius: euclideanNorm,
+    label: "|x| chart",
+  });
+}
+
+export function readoutsFromManifest(manifest) {
+  const spinMagnitude = Math.max(
+    0,
+    ...manifest.physicalSystem.dimensionlessSpins.map(
+      (spin) => finiteVectorMagnitude(spin.vector),
+    ),
+  );
+  const coordinate = observerCoordinate(manifest, spinMagnitude);
+  const captured = manifest.accuracy.outcomeFractions.captured;
+  const escaped = manifest.accuracy.outcomeFractions.escaped;
+  const fovDegrees = manifest.projection.verticalFieldOfViewRad * 180 / Math.PI;
+  const mass = manifest.units.massNormalization;
+  return Object.freeze({
+    affineCameraDistance: coordinate.affineCameraDistance,
+    observerCoordinateRadius: coordinate.coordinateRadius,
+    observerCoordinateLabel: coordinate.label,
+    spinMagnitude,
+    captured,
+    escaped,
+    fovDegrees,
+    massLabel: `${mass.symbol} = ${Number(mass.value).toLocaleString("zh-CN")}`,
+    outcomeLabel: (
+      `${(captured * 100).toFixed(2)}% 捕获 · `
+      + `${(escaped * 100).toFixed(2)}% 逃逸`
+    ),
+  });
+}
+
+export function diagnosticRangeForMode(dataset, mode) {
+  const definition = TRANSFER_MAP_DIAGNOSTIC_MODES[mode];
+  const range = definition?.range
+    ? dataset.diagnosticRanges[definition.range]
+    : null;
+  if (!range) {
+    return Object.freeze([0, 1, 0, 0]);
+  }
+  let minimum = definition.logarithmic
+    ? range.minimumPositive
+    : range.minimum;
+  let maximum = range.maximum;
+  if (!(maximum > minimum)) {
+    if (maximum > 0) {
+      minimum = maximum * 0.5;
+    } else {
+      minimum = 0;
+      maximum = 1;
+    }
+  }
+  return Object.freeze([minimum, maximum, 0, 0]);
+}
+
+export function canvasPointToTransferPixel(
+  clientX,
+  clientY,
+  rect,
+  mapWidth,
+  mapHeight,
+) {
+  if (
+    !(rect?.width > 0)
+    || !(rect?.height > 0)
+    || !Number.isInteger(mapWidth)
+    || !Number.isInteger(mapHeight)
+    || mapWidth <= 0
+    || mapHeight <= 0
+  ) {
+    return null;
+  }
+  const canvasUv = [
+    (clientX - rect.left) / rect.width,
+    (clientY - rect.top) / rect.height,
+  ];
+  if (
+    canvasUv[0] < 0
+    || canvasUv[0] > 1
+    || canvasUv[1] < 0
+    || canvasUv[1] > 1
+  ) {
+    return null;
+  }
+
+  const canvasAspect = rect.width / rect.height;
+  const mapAspect = mapWidth / mapHeight;
+  const mapUv = [...canvasUv];
+  if (canvasAspect > mapAspect) {
+    const widthFraction = mapAspect / canvasAspect;
+    mapUv[0] = (canvasUv[0] - 0.5) / widthFraction + 0.5;
+  } else {
+    const heightFraction = canvasAspect / mapAspect;
+    mapUv[1] = (canvasUv[1] - 0.5) / heightFraction + 0.5;
+  }
+  if (
+    mapUv[0] < 0
+    || mapUv[0] > 1
+    || mapUv[1] < 0
+    || mapUv[1] > 1
+  ) {
+    return null;
+  }
+  return Object.freeze({
+    x: Math.min(mapWidth - 1, Math.floor(mapUv[0] * mapWidth)),
+    y: Math.min(mapHeight - 1, Math.floor(mapUv[1] * mapHeight)),
+  });
+}
+
+export function transferPixelToCanvasPoint(x, y, rect, mapWidth, mapHeight) {
+  const mapUv = [(x + 0.5) / mapWidth, (y + 0.5) / mapHeight];
+  const canvasAspect = rect.width / rect.height;
+  const mapAspect = mapWidth / mapHeight;
+  const canvasUv = [...mapUv];
+  if (canvasAspect > mapAspect) {
+    const widthFraction = mapAspect / canvasAspect;
+    canvasUv[0] = 0.5 + (mapUv[0] - 0.5) * widthFraction;
+  } else {
+    const heightFraction = canvasAspect / mapAspect;
+    canvasUv[1] = 0.5 + (mapUv[1] - 0.5) * heightFraction;
+  }
+  return Object.freeze({
+    left: rect.left + canvasUv[0] * rect.width,
+    top: rect.top + canvasUv[1] * rect.height,
+  });
+}
+
+function createRecoveryLink(documentRef, className, label, href) {
+  const link = documentRef.createElement("a");
+  link.className = className;
+  link.textContent = label;
+  link.href = href;
+  return link;
+}
+
+function showLoadFailure(documentRef, elements, error, href) {
+  elements.sceneStatus.classList.add("is-error");
+  elements.sceneStatus.setAttribute("role", "alert");
+  const message = documentRef.createElement("span");
+  message.textContent = `Transfer map 验证失败：${error.message}`;
+  const actions = documentRef.createElement("span");
+  actions.className = "scene-recovery-actions";
+  actions.append(
+    createRecoveryLink(documentRef, "scene-recovery-link", "重试验证", href),
+    createRecoveryLink(
+      documentRef,
+      "scene-recovery-link",
+      "返回单黑洞",
+      defaultSceneHref(href),
+    ),
+  );
+  elements.sceneStatus.replaceChildren(message, actions);
+
+  // Asset authentication happens before the renderer and the shared mobile
+  // controls are initialized. Keep recovery actions reachable on compact
+  // viewports even when startup fails at that earlier boundary.
+  const panel = documentRef.getElementById("panel");
+  const panelToggle = documentRef.getElementById("togglePanel");
+  panel?.classList.add("is-open");
+  panelToggle?.setAttribute("aria-expanded", "true");
+  panelToggle?.setAttribute("aria-label", "收起观测参数");
+}
+
+function formatMetric(value, digits = 3) {
+  if (value === 0) {
+    return "0";
+  }
+  if (Math.abs(value) < 1e-3 || Math.abs(value) >= 1e4) {
+    return value.toExponential(3);
+  }
+  return value.toFixed(digits);
+}
+
+function validityNames(manifest, mask) {
+  return Object.entries(manifest.recordLayout.validityBits)
+    .filter(([, bit]) => mask & (1 << bit))
+    .map(([name]) => name);
+}
+
 export async function createTransferMapReferenceScene({
   document: documentRef,
   ui,
   state,
   controls,
+  searchParams = new URLSearchParams(documentRef.defaultView?.location?.search || ""),
+  location = documentRef.defaultView?.location,
+  history = documentRef.defaultView?.history,
+  referenceRegistry = TRUSTED_REFERENCE_REGISTRY,
+  loadTransferMapImpl = loadTransferMap,
 }) {
   if (typeof controls?.requestRender !== "function") {
     throw new Error("Transfer-map scene requires host render controls");
@@ -108,11 +458,36 @@ export async function createTransferMapReferenceScene({
     binaryTimeline: requiredElement(documentRef, "binaryTimeline"),
     desktopHint: requiredElement(documentRef, "desktopHint"),
     touchHint: documentRef.querySelector(".touch-hint"),
+    modeSwitch: requiredElement(documentRef, "modeSwitch"),
     scienceMode: ui.modeScience,
     alternateMode: ui.modeHubble,
+    lookbackMode: requiredElement(documentRef, "modeLookback"),
+    frequencyMode: requiredElement(documentRef, "modeFrequency"),
+    nullMode: requiredElement(documentRef, "modeNull"),
+    errorMode: requiredElement(documentRef, "modeError"),
+    referenceSwitch: requiredElement(documentRef, "transferReferenceSwitch"),
+    referenceSchwarzschild: requiredElement(documentRef, "referenceSchwarzschild"),
+    referenceKerr: requiredElement(documentRef, "referenceKerr"),
+    inspector: requiredElement(documentRef, "transferMapInspector"),
+    inspectorCoordinates: requiredElement(documentRef, "transferInspectorCoordinates"),
+    inspectorDirection: requiredElement(documentRef, "transferInspectorDirection"),
+    inspectorFrequency: requiredElement(documentRef, "transferInspectorFrequency"),
+    inspectorLookback: requiredElement(documentRef, "transferInspectorLookback"),
+    inspectorNull: requiredElement(documentRef, "transferInspectorNull"),
+    inspectorError: requiredElement(documentRef, "transferInspectorError"),
+    inspectorOutcome: requiredElement(documentRef, "transferInspectorOutcome"),
+    inspectorValidity: requiredElement(documentRef, "transferInspectorValidity"),
+    inspectorRaw: requiredElement(documentRef, "transferInspectorRaw"),
+    marker: requiredElement(documentRef, "transferPixelMarker"),
     motion: ui.toggleMotion,
     reset: ui.resetView,
   };
+  const shallowSnapshotElements = new Set([
+    elements.binaryTimeline,
+    elements.modeSwitch,
+    elements.referenceSwitch,
+    elements.inspector,
+  ]);
   const original = {
     documentTitle: documentRef.title,
     rootHadClass: documentRef.documentElement.classList.contains(
@@ -124,7 +499,7 @@ export async function createTransferMapReferenceScene({
         .map((element) => [
           element,
           snapshotElement(element, {
-            content: element !== elements.binaryTimeline,
+            content: !shallowSnapshotElements.has(element),
           }),
         ]),
     ),
@@ -137,35 +512,191 @@ export async function createTransferMapReferenceScene({
     },
   };
 
+  const href = locationHref(location);
+  const currentDiagnosticMode = () => diagnosticModeFromSearch(
+    location?.search !== undefined
+      ? new URLSearchParams(location.search)
+      : searchParams,
+  );
+  function configureReferenceLinks(activeKey, baseHref = locationHref(location)) {
+    elements.referenceSwitch.hidden = false;
+    for (const [key, link] of [
+      ["schwarzschild", elements.referenceSchwarzschild],
+      ["kerr-remnant", elements.referenceKerr],
+    ]) {
+      link.href = referenceHref(baseHref, key);
+      const active = key === activeKey;
+      link.classList.toggle("is-active", active);
+      if (active) {
+        link.setAttribute("aria-current", "true");
+      } else {
+        link.removeAttribute("aria-current");
+      }
+    }
+  }
+  configureReferenceLinks(searchParams.get("reference") || "schwarzschild", href);
   elements.sceneStatus.hidden = false;
   elements.sceneStatus.setAttribute("aria-live", "polite");
+
+  let reference;
   let dataset;
   try {
-    dataset = await loadTransferMap(MANIFEST_URL, {
-      expectedManifestSha256: REFERENCE_MANIFEST_SHA256,
+    reference = resolveTrustedReference(searchParams, referenceRegistry);
+    configureReferenceLinks(reference.key, href);
+    elements.eyebrow.textContent = "固定信任根 · 正在验证";
+    elements.title.textContent = reference.title;
+    dataset = await loadTransferMapImpl(reference.manifestUrl, {
+      expectedManifestSha256: reference.expectedManifestSha256,
       onProgress(progress) {
-        elements.sceneStatus.textContent = progressLabel(progress);
+        elements.sceneStatus.textContent = progressLabel(
+          progress,
+          reference.title,
+        );
       },
     });
+    if (dataset.manifest.id !== reference.datasetId) {
+      throw new TransferMapContractError(
+        "$.id",
+        `trusted registry expected ${reference.datasetId}, received ${dataset.manifest.id}`,
+      );
+    }
   } catch (error) {
-    elements.sceneStatus.setAttribute("role", "alert");
-    elements.sceneStatus.textContent = `Transfer map 验证失败：${error.message}`;
-    throw error;
+    const cause = error instanceof Error ? error : new Error(String(error));
+    showLoadFailure(documentRef, elements, cause, href);
+    throw new TransferMapSceneLoadError(cause.message, { cause });
   }
 
   const manifest = dataset.manifest;
   const fixedCamera = cameraFromManifest(manifest);
-  const observerRadius = Math.hypot(...manifest.observer.samples[0].eventNr.slice(1));
+  const readouts = readoutsFromManifest(manifest);
   const verticalFov = manifest.projection.verticalFieldOfViewRad;
-  const lapse = Math.sqrt(1 - 2 / observerRadius);
-  const shadowDiameterDeg = (
-    2 * Math.asin(3 * Math.sqrt(3) * lapse / observerRadius) * 180 / Math.PI
-  );
-  const capturePercent = (
-    100 * manifest.accuracy.outcomeFractions.captured
-  );
   const shaderBundle = createTransferMapShaderBundle(dataset);
+  const modeButtons = [
+    elements.scienceMode,
+    elements.alternateMode,
+    elements.lookbackMode,
+    elements.frequencyMode,
+    elements.nullMode,
+    elements.errorMode,
+  ];
   let initialized = false;
+  let selectedPixel = null;
+
+  function currentCanvas() {
+    return documentRef.getElementById("universe");
+  }
+
+  function updateMarker() {
+    if (!selectedPixel) {
+      elements.marker.hidden = true;
+      return;
+    }
+    const canvas = currentCanvas();
+    const point = transferPixelToCanvasPoint(
+      selectedPixel.x,
+      selectedPixel.y,
+      canvas.getBoundingClientRect(),
+      dataset.width,
+      dataset.height,
+    );
+    elements.marker.style.left = `${point.left}px`;
+    elements.marker.style.top = `${point.top}px`;
+    elements.marker.hidden = false;
+  }
+
+  function inspectPixel(x, y) {
+    const record = readTransferMapRecord(dataset, x, y);
+    const validity = validityNames(manifest, record.validityMask);
+    const directionValid = (
+      record.validityMask & TRANSFER_MAP_ABI.validity.direction
+    ) !== 0;
+    const target = record.captureTargetId
+      ? ` → ${record.captureTargetId}`
+      : "";
+    selectedPixel = { x, y };
+    elements.inspectorCoordinates.textContent = `x ${x} · y ${y}`;
+    elements.inspectorDirection.textContent = directionValid
+      ? record.escapeDirection.map((value) => value.toFixed(6)).join(", ")
+      : "—";
+    elements.inspectorFrequency.textContent = (
+      record.validityMask & TRANSFER_MAP_ABI.validity.frequencyShift
+    ) ? formatMetric(record.frequencyShiftG, 6) : "—";
+    elements.inspectorLookback.textContent = (
+      record.validityMask & TRANSFER_MAP_ABI.validity.lookback
+    ) ? `${formatMetric(record.coordinateLookbackTimeM)} M` : "—";
+    elements.inspectorNull.textContent = (
+      record.validityMask & TRANSFER_MAP_ABI.validity.nullResidual
+    ) ? formatMetric(record.nullResidual) : "—";
+    elements.inspectorError.textContent = (
+      record.validityMask & TRANSFER_MAP_ABI.validity.projectionError
+    ) ? `${formatMetric(record.projectionErrorPx)} px` : "—";
+    elements.inspectorOutcome.textContent = `${record.rayOutcomeName}${target}`;
+    elements.inspectorValidity.textContent = (
+      `0x${record.validityMask.toString(16).padStart(4, "0")} · `
+      + (validity.join(", ") || "none")
+    );
+    elements.inspectorRaw.textContent = record.rawHex;
+    elements.inspector.hidden = false;
+    updateMarker();
+  }
+
+  function inspectAtClientPoint(event) {
+    const canvas = currentCanvas();
+    if (event.target !== canvas || event.button !== 0) {
+      return;
+    }
+    const pixel = canvasPointToTransferPixel(
+      event.clientX,
+      event.clientY,
+      canvas.getBoundingClientRect(),
+      dataset.width,
+      dataset.height,
+    );
+    canvas.focus({ preventScroll: true });
+    if (pixel) {
+      inspectPixel(pixel.x, pixel.y);
+    }
+  }
+
+  function inspectWithKeyboard(event) {
+    if (event.target !== currentCanvas()) {
+      return;
+    }
+    const step = event.shiftKey ? 10 : 1;
+    let next = selectedPixel || {
+      x: Math.floor(dataset.width / 2),
+      y: Math.floor(dataset.height / 2),
+    };
+    let handled = true;
+    if (event.key === "ArrowLeft") {
+      next = { ...next, x: Math.max(0, next.x - step) };
+    } else if (event.key === "ArrowRight") {
+      next = { ...next, x: Math.min(dataset.width - 1, next.x + step) };
+    } else if (event.key === "ArrowUp") {
+      next = { ...next, y: Math.max(0, next.y - step) };
+    } else if (event.key === "ArrowDown") {
+      next = { ...next, y: Math.min(dataset.height - 1, next.y + step) };
+    } else if (event.key === "Enter" || event.key === " ") {
+      // Selecting the centre on first activation makes the keyboard path
+      // useful without requiring a prior pointer event.
+    } else if (event.key === "Escape") {
+      selectedPixel = null;
+      elements.inspector.hidden = true;
+      elements.marker.hidden = true;
+      event.preventDefault();
+      return;
+    } else {
+      handled = false;
+    }
+    if (handled) {
+      event.preventDefault();
+      inspectPixel(next.x, next.y);
+    }
+  }
+
+  function handleResize() {
+    updateMarker();
+  }
 
   return Object.freeze({
     id: "transfer-map-reference",
@@ -174,6 +705,7 @@ export async function createTransferMapReferenceScene({
     cameraLocked: true,
     manifest,
     dataset,
+    reference,
     rendererOptions: Object.freeze({ shaderBundle }),
 
     initialize() {
@@ -182,44 +714,56 @@ export async function createTransferMapReferenceScene({
       }
       initialized = true;
       documentRef.documentElement.classList.add("scene-transfer-map-reference");
-      documentRef.title = "Schwarzschild 传递图参考 · 深空观测台";
+      documentRef.title = `${reference.title} · 深空观测台`;
       state.running = false;
-      state.distance = observerRadius;
+      state.distance = readouts.affineCameraDistance;
       state.phase = 0;
       state.orbitTilt = 0;
-      state.mode = 0;
+      state.mode = currentDiagnosticMode();
+      configureReferenceLinks(reference.key);
+      selectedPixel = null;
+      elements.inspector.hidden = true;
+      elements.marker.hidden = true;
 
-      elements.canvas.setAttribute(
+      const canvas = currentCanvas();
+      canvas.setAttribute("tabindex", "0");
+      canvas.setAttribute(
         "aria-label",
-        "固定相机 Schwarzschild 真空传递图参考画面",
+        `${reference.title}固定相机画面；点击像素或使用方向键检查 32-byte 光线记录`,
       );
+      canvas.setAttribute("aria-describedby", "transferMapInspectorHelp");
       elements.eyebrow.textContent = "离线零测地线 · SHA-256 验证";
-      elements.title.textContent = "Schwarzschild 传递图参考";
+      elements.title.textContent = reference.title;
       elements.observerLabel.textContent = "固定观测者";
-      elements.radiusLabel.textContent = "传递图 ABI";
-      elements.shadowLabel.textContent = "解析阴影";
+      elements.radiusLabel.textContent = "自旋 / ABI";
+      elements.shadowLabel.textContent = "捕获 / 逃逸";
       elements.massLabel.textContent = "质量归一化";
       elements.sceneStatus.hidden = false;
+      elements.sceneStatus.classList.remove("is-error");
       elements.sceneStatus.setAttribute("role", "status");
       elements.sceneStatus.textContent = [
-        "stationary Schwarzschild reference",
+        manifest.id,
+        manifest.scientificStatus.classification,
         `${dataset.width}×${dataset.height}`,
-        `${manifest.chunks.length} chunks SHA-256 verified`,
-        "非 NR",
+        `${manifest.chunks.length} chunks verified`,
       ].join(" · ");
       elements.binaryTimeline.hidden = true;
-      elements.scienceMode.textContent = "天空合成";
-      elements.alternateMode.textContent = "结果分类";
-      elements.desktopHint.textContent = "固定相机与投影 · 可调曝光和显示画质";
+      elements.modeSwitch.setAttribute(
+        "aria-label",
+        "Transfer-map 科学诊断模式",
+      );
+      modeButtons.forEach((button, mode) => {
+        button.textContent = TRANSFER_MAP_DIAGNOSTIC_MODES[mode].label;
+      });
+      elements.desktopHint.textContent = "点击检查像素 · 方向键移动 · Shift 加速";
       if (elements.touchHint) {
-        elements.touchHint.textContent = "固定相机 · 可调曝光和显示画质";
+        elements.touchHint.textContent = "轻点画面检查 32-byte 光线记录";
       }
-      elements.physicsNote.innerHTML = [
-        "本场景逐像素消费项目生成的<strong>真空 Schwarzschild ",
-        "stationary transfer map</strong>：逃逸方向来自精确球对称零测地线，",
-        "捕获像素不采样天空。它用于验证数据协议与 GPU 消费链，",
-        "<strong>不是双黑洞 NR 光追，也不包含吸积盘或 GRMHD 辐射转移</strong>。",
-        "当前银河照片仅作显示合成；其绝对 ICRS 天球配准尚未独立验证。",
+      elements.physicsNote.textContent = [
+        manifest.scientificStatus.description,
+        ` 坐标：${manifest.coordinates.nrChart.coordinates}。`,
+        ` 积分器：${manifest.rayIntegration.integrator.name}。`,
+        ` ${manifest.scientificStatus.prohibitedClaim}`,
       ].join("");
 
       for (const input of [ui.mass, ui.accretion, ui.timeScale]) {
@@ -229,18 +773,30 @@ export async function createTransferMapReferenceScene({
       elements.motion.setAttribute("aria-hidden", "true");
       elements.reset.disabled = true;
       elements.reset.setAttribute("aria-hidden", "true");
+      documentRef.addEventListener("click", inspectAtClientPoint);
+      documentRef.addEventListener("keydown", inspectWithKeyboard);
+      documentRef.defaultView?.addEventListener("resize", handleResize);
       controls.requestRender();
     },
 
     updateReadouts() {
-      ui.massValue.textContent = "M = 1";
+      ui.massValue.textContent = (
+        `${readouts.massLabel} · |χ| = ${readouts.spinMagnitude.toFixed(6)}`
+      );
       ui.accretionValue.textContent = "真空 · 无发射模型";
       ui.exposureValue.textContent = `${state.exposure.toFixed(2)}×`;
       ui.timeScaleValue.textContent = "静态";
       ui.qualityValue.textContent = `${state.quality.toFixed(2)}×`;
-      ui.observerValue.innerHTML = `R = ${observerRadius.toFixed(0)} M · β = 0 · FOV ${(verticalFov * 180 / Math.PI).toFixed(0)}°`;
-      ui.rsValue.textContent = `${dataset.width}×${dataset.height} · 32 B/ray`;
-      ui.shadowValue.textContent = `${shadowDiameterDeg.toFixed(3)}° · ${capturePercent.toFixed(2)}% captured`;
+      ui.observerValue.textContent = (
+        `${readouts.observerCoordinateLabel} = `
+        + `${readouts.observerCoordinateRadius.toFixed(2)} M · `
+        + `fixed tetrad · FOV ${readouts.fovDegrees.toFixed(1)}°`
+      );
+      ui.rsValue.textContent = (
+        `|χ| ${readouts.spinMagnitude.toFixed(6)} · `
+        + `${manifest.recordLayout.recordBytes} B/ray`
+      );
+      ui.shadowValue.textContent = readouts.outcomeLabel;
       return true;
     },
 
@@ -248,15 +804,28 @@ export async function createTransferMapReferenceScene({
       return fixedCamera;
     },
 
+    onModeChanged(mode) {
+      if (!TRANSFER_MAP_DIAGNOSTIC_MODES[mode]) {
+        return;
+      }
+      const nextHref = diagnosticHref(locationHref(location), mode);
+      if (typeof history?.replaceState === "function") {
+        history.replaceState(history.state, "", nextHref);
+      }
+      configureReferenceLinks(reference.key, nextHref);
+    },
+
     extendFrame(baseFrame) {
       return {
         ...baseFrame,
         time: 0,
+        // Keep the shared post pass scientifically neutral. Diagnostic mode is
+        // carried separately so false-colour values are not Hubble-graded.
         mode: 0,
         bloom: 0,
         motion: 0,
         cameraPos: fixedCamera.cameraPos,
-        cameraRadius: observerRadius,
+        cameraRadius: readouts.affineCameraDistance,
         forward: fixedCamera.forward,
         right: fixedCamera.right,
         up: fixedCamera.up,
@@ -270,17 +839,29 @@ export async function createTransferMapReferenceScene({
           dataset.height,
           0,
         ],
+        sceneTransferRange: diagnosticRangeForMode(dataset, state.mode),
       };
     },
 
     dispose() {
+      if (initialized) {
+        documentRef.removeEventListener("click", inspectAtClientPoint);
+        documentRef.removeEventListener("keydown", inspectWithKeyboard);
+        documentRef.defaultView?.removeEventListener("resize", handleResize);
+      }
       initialized = false;
+      selectedPixel = null;
       if (!original.rootHadClass) {
         documentRef.documentElement.classList.remove(
           "scene-transfer-map-reference",
         );
       }
       documentRef.title = original.documentTitle;
+      const liveCanvas = currentCanvas();
+      const originalCanvasSnapshot = original.elements.get(elements.canvas);
+      if (liveCanvas !== elements.canvas && originalCanvasSnapshot) {
+        restoreElement(liveCanvas, originalCanvasSnapshot);
+      }
       for (const [element, snapshot] of original.elements) {
         restoreElement(element, snapshot);
       }
