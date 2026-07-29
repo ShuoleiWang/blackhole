@@ -1,9 +1,13 @@
 # Binary black-hole model
 
-This document defines the scientific scope of the optional binary black-hole
-scene. It is intentionally stricter than a visual feature list: a convincing
-image is not, by itself, evidence that the underlying spacetime is a solution
-of Einstein's field equations.
+This document defines the scientific scope of the real-time binary black-hole
+scene at the root URL. The legacy `?scene=binary-approx` URL remains an alias;
+the interactive single-hole renderer is explicit at `?scene=schwarzschild`.
+This document is intentionally stricter than a visual feature list: a
+convincing image is not, by itself, evidence that the underlying spacetime is a
+solution of Einstein's field equations. The repository-wide product layers and
+two development routes are defined in
+[`rendering-modes.md`](./rendering-modes.md).
 
 ## Status at a glance
 
@@ -26,6 +30,11 @@ not consume an SXS near-zone metric, a four-dimensional numerical spacetime, or
 an NR-derived ray-transfer payload. The rendered image must not be described as
 NR ray tracing, a solved binary-spacetime image, or a quantitatively accurate
 merger shadow.
+
+Mouse or touch input changes the camera, and every rendered frame rebuilds its
+camera rays and recomputes the GPU lens result. This makes the scene
+interactive; it does not strengthen the weak-field or fast-light physics
+classification.
 
 The runtime manifest is
 [`binary-sxs-bbh-0001-v2.json`](../assets/scenes/binary-sxs-bbh-0001-v2.json);
@@ -180,10 +189,13 @@ potential gradient,
 dn/ds ≈ -2 [∇Φ - n(n · ∇Φ)].
 ```
 
-The two positions are frozen at the current timeline sample for the duration
-of each ray integration (the `fast-light` approximation). The shader does not
-evaluate retarded positions or let one ray traverse a changing binary metric;
-it also omits velocity-dependent and gravitomagnetic terms.
+The camera ray and two positions are reconstructed for every rendered frame.
+The positions are then frozen at the current timeline sample for the duration
+of each ray integration (the `fast-light` approximation). This is GPU
+re-tracing from the current camera, not fixed-camera transfer-map playback.
+The shader does not evaluate retarded positions or let one ray traverse a
+changing binary metric; it also omits velocity-dependent and gravitomagnetic
+terms.
 
 For one isolated mass and a large impact parameter this has the expected
 leading deflection scale `4M/b`. It is not a valid strong-field metric near
@@ -263,32 +275,36 @@ approximation rather than mathematically exact. A defensible scientific claim
 would report resolution studies, constraint violation, null-geodesic error,
 interpolation error, and comparisons against known limits.
 
-## Isolation from the Schwarzschild renderer
+## Scene routing and isolation
 
-The binary scene is an opt-in experiment. The default URL continues to select
-the existing single, non-rotating Schwarzschild black hole and its original
-geodesic shader, observer model, disk model, controls, and validation suite.
-The binary module and its shader bundle are loaded only when the binary scene is
-requested explicitly, for example:
+The root URL selects the real-time binary scene. The legacy URL remains
+compatible:
 
 ```text
 http://localhost:4173/?scene=binary-approx
 ```
 
+The existing single, non-rotating Schwarzschild renderer and its geodesic
+shader, observer model, disk model, controls, and validation suite remain
+available at:
+
+```text
+http://localhost:4173/?scene=schwarzschild
+```
+
 The separate
-[`?scene=transfer-map-reference`](../README.md#url-parameters) path consumes a
-fixed 1024×576 stationary analytic Schwarzschild vacuum map. It has no
-accretion disk and no relationship to the SXS binary pixel path; its purpose is
-to prove the authenticated transfer-map and GPU-consumer chain. See
+[`?scene=transfer-map-reference`](../README.md#url-parameters) path consumes
+fixed 1024×576 stationary analytic Schwarzschild or Kerr vacuum maps. They have
+no accretion disk and no relationship to the SXS binary pixel path; their
+purpose is to provide analytic calibration, authenticated transfer-map
+delivery, and regression oracles. See
 [`nr-transfer-map-v1.md`](./nr-transfer-map-v1.md) for its exact claims,
 nearest-texel sampling rule, and validation metrics.
 
-Renderer extensions are optional: without a scene-provided shader and extra
-uniform writer, WebGPU and WebGL2 use their existing sources and uniform layout.
-This preserves the previous final single-black-hole behavior and avoids making
-the experimental model an implicit dependency of the default path. Scene
-switching still uses a page reload rather than mutating GPU pipelines in place;
-the binary lifecycle also restores shared UI state when disposed.
+Each route owns its scene descriptor, shader assumptions, controls, and
+validation. Scene switching uses a page reload rather than mutating GPU
+pipelines in place, and scene lifecycles restore shared UI state when disposed.
+Changing which route owns the root URL does not merge their physical models.
 
 The validation suites have different meanings:
 
@@ -304,30 +320,63 @@ The validation suites have different meanings:
   weak-field shader convergence regression. It does **not** certify NR light
   propagation or merger imaging.
 
-## Target architecture and current phase
+## Two rendering routes and current phase
 
-The browser should remain a deterministic playback and presentation layer.
-Expensive spacetime evolution and geodesic integration belong in an offline
-pipeline:
+The project now has two explicit, complementary routes.
+
+### Real-time interactive route
 
 ```text
-constraint-satisfying initial data
+mouse / touch / timeline input
         ↓
-3+1 numerical-relativity evolution
+camera event and local tetrad
         ↓
-time-dependent metric + horizon diagnostics
+fresh rays for every rendered frame
         ↓
-offline slow-light null-geodesic integration
+WebGPU/WebGL ray or lens integration
         ↓
-camera-specific transfer-map chunks
-        ↓
-WebGPU/WebGL interpolation, composition, and HDR display
+sky composition and HDR/SDR display
 ```
 
-“Slow light” is essential here: every ray samples the metric at the coordinate
-time it reaches each integration point. Freezing one numerical-relativity slice
-for an entire ray can be useful diagnostically, but it does not represent a
-rapidly changing merger.
+The implemented binary scene follows this route with weak-field, frame-frozen
+fast-light bending. The next intended physics layer is an isolated
+strong-field WebGPU geodesic tracer backed by a declared approximate binary
+metric. That layer is not implemented. Even when its numerical integration is
+accurate, a superposed or matched analytic metric must still be described as an
+approximate fast-light model rather than NR ray tracing.
+
+### High-fidelity offline route
+
+```text
+pinned 4D NR spacetime + horizon worldtubes
+        ↓
+gauge / frame / time adapter + source convergence metadata
+        ↓
+float64 slow-light ray bundles + geodesic deviation / Jacobi fields
+        ↓
+independent ray-tolerance and stationary Schwarzschild/Kerr gates
+        ↓
+optional GRMHD fluid + electron / emissivity prescription
+        ↓
+spectral and polarized GR radiative transfer
+        ↓
+adaptive subpixel sampling and convergence
+        ↓
+multilayer OpenEXR scientific master + immutable audit manifest
+        ↓
+derived HDR image/video and optional browser transfer-map proxy
+```
+
+“Slow light” is essential for NR-backed merger pixels: every ray samples the
+metric at the coordinate time it reaches each integration point. Freezing one
+NR slice for an entire ray can be useful diagnostically, but it does not
+represent a rapidly changing merger. A luminous result additionally needs
+physical matter fields and declared radiative-transfer assumptions; vacuum
+lensing alone cannot determine colour or brightness.
+
+The scientific master and browser delivery products are distinct. The browser
+may consume a compact vacuum transfer-map proxy, HDR still, or video without
+becoming the NR or GRRT solver.
 
 The project status is deliberately reported by layer:
 
@@ -335,9 +384,12 @@ The project status is deliberately reported by layer:
 | --- | --- | --- |
 | Phase 1 transfer-map schema, fixture, validator, and tests | Implemented | `contract-conformant` ingestion boundary |
 | Phase 2 SXS orbital dynamics, waveform, events, and remnant metadata | Implemented | `NR-driven dynamics` |
-| Stationary Schwarzschild and Kerr reference maps and runtime consumer | Implemented | Analytic fixed-camera transfer-map playback, diagnostics, and record inspection; not NR |
-| Slow-light rays through a time-dependent NR spacetime | Not implemented | No `NR-backed` pixel or image path |
-| GRMHD plasma and GR radiative transfer | Not implemented | No physically modelled luminous merger |
+| Root interactive binary scene | Implemented | Per-frame GPU recomputation with weak-field fast-light pixels |
+| Stationary Schwarzschild and Kerr reference maps and runtime consumer | Implemented | Analytic fixed-camera calibration, authenticated playback, diagnostics, and regression oracles; not NR |
+| Interactive strong-field WebGPU binary metric and geodesics | Not implemented | No strong-field binary claim |
+| Slow-light ray bundles through a time-dependent NR spacetime | Not implemented | No `NR-backed` pixel or image path |
+| GRMHD plasma and spectral/polarized GR radiative transfer | Not implemented | No physically modelled luminous merger |
+| Multilayer OpenEXR scientific master | Not implemented | No offline radiance master or associated convergence record |
 
 The status words are not interchangeable:
 
@@ -346,20 +398,27 @@ The status words are not interchangeable:
 - **NR-driven dynamics** means the displayed trajectories, waveform, events,
   and remnant parameters are derived from the pinned SXS simulation. It makes
   no claim about the pixel-generating light propagation.
+- **Stationary-analytic-validated** means a fixed analytic Schwarzschild or
+  Kerr product passes its independent geodesic, capture, refinement, and
+  delivery gates. It is not evidence for a binary spacetime.
 - **NR-ready** applies only to the ingestion boundary: it can reject or accept
   a future offline product without changing the protocol. It does not mean that
   such a product is bundled or that the browser solves Einstein's equations.
-- **NR-backed** may be used only when the actual rendered payload was derived
-  from a pinned numerical-relativity spacetime and documented slow-light
-  geodesic integration.
+- **NR-backed vacuum lensing** may be used only when the actual rendered
+  payload was derived from a pinned four-dimensional numerical-relativity
+  spacetime, horizon data, and documented slow-light geodesic integration.
+- **GRMHD/GRRT-backed radiance** additionally requires pinned matter fields and
+  declared emission, absorption, optical-depth, spectral, and polarization
+  transport.
 - **Physically validated** additionally requires the convergence and
   comparison gates below. Passing a schema validator is not a physics result.
 
 ### Implemented transfer-map protocol boundary
 
-Future data-backed scenes should consume versioned, immutable transfer maps
-rather than embedding a particular NR solver into the web application. The
-implemented v1 contract uses the discriminator
+The implemented delivery baseline is a versioned, immutable,
+camera-specific vacuum escape-transfer map. It allows a browser to consume a
+scientific endpoint product without embedding its generator. The v1 contract
+uses the discriminator
 `blackhole.nr-transfer-map/v1`; its normative semantics and safety rules are in
 [`nr-transfer-map-v1.md`](./nr-transfer-map-v1.md), and its machine-readable
 shape is in
@@ -386,9 +445,12 @@ Every v1 top-level field is required and unknown fields are rejected:
 | `accuracy` | NR/constraint/geodesic/interpolation status, unresolved and decoded outcome fractions, and fixture assertions |
 | `integrity`, `chunks` | Manifest sidecar plus ordered tiled payload paths, sizes, counts, and hashes |
 
-The v1 payload is a vacuum transfer map. It does not define GRMHD radiation,
-optical-depth, Stokes, or magnification/Jacobian channels; those require a
-future, separately versioned radiative-transfer contract.
+The v1 payload is an immutable vacuum escape-transfer ABI. It does not define
+adaptive ray bundles, subpixel samples, geodesic deviation or Jacobi fields,
+GRMHD radiation, optical depth, spectra, Stokes parameters, or Faraday
+coefficients. High-fidelity offline work therefore requires separately
+versioned ray-bundle and radiative-frame contracts; it must not change the
+meaning or 32-byte binary layout of v1.
 
 The legacy `blackhole.binary-scene/v1` timeline and current
 `blackhole.binary-scene/v2` dynamics track are both distinct from the
@@ -411,6 +473,16 @@ is distinct from that fixture: it contains 589,824 analytic stationary rays in
 nine chunks and is consumed at `?scene=transfer-map-reference`. It validates the
 format-to-browser path but supplies no evidence for a time-dependent NR merger.
 
+The separately selectable
+[`kerr-remnant-reference-v1`](../assets/transfer-maps/kerr-remnant-reference-v1/manifest.json)
+contains the same number of project-generated stationary vacuum rays for the
+pinned remnant-spin magnitude. Its generator and independent verifier add a
+finite BL-ZAMO, horizon-penetrating Kerr-Schild coordinates, an oblate
+Kerr-radius capture surface, frame dragging, and an analytic critical-curve
+oracle. It uses no SXS near-zone metric and is likewise not a merger frame.
+Together, the Schwarzschild and Kerr products are stationary calibration and
+delivery regressions for both future rendering routes.
+
 The fail-closed validator rejects unknown schema versions and fields, missing
 fields, duplicate JSON keys, non-finite values, booleans used as numbers,
 unsafe or symbolic-link paths, sidecar hash/size mismatches, chunk
@@ -431,6 +503,9 @@ PYTHONDONTWRITEBYTECODE=1 python3 -m unittest tests/test_nr_contract.py
 PYTHONDONTWRITEBYTECODE=1 python3 scripts/verify_nr_contract.py assets/transfer-maps/schwarzschild-reference-v1/manifest.json
 PYTHONDONTWRITEBYTECODE=1 python3 scripts/verify_schwarzschild_transfer_map.py
 PYTHONDONTWRITEBYTECODE=1 python3 -m unittest tests/test_schwarzschild_transfer_map.py
+PYTHONDONTWRITEBYTECODE=1 python3 scripts/verify_nr_contract.py assets/transfer-maps/kerr-remnant-reference-v1/manifest.json
+PYTHONDONTWRITEBYTECODE=1 python3 scripts/verify_kerr_transfer_map.py
+PYTHONDONTWRITEBYTECODE=1 python3 -m unittest tests/test_kerr_transfer_map.py
 node --test tests/transfer-map-runtime.test.mjs
 ```
 
@@ -451,9 +526,16 @@ at least the following gates:
   integration tolerances.
 - Recovery of analytic or high-accuracy Schwarzschild/Kerr lensing in stationary
   limits.
-- Temporal and spatial transfer-map interpolation error bounds.
+- Temporal and spatial metric/interpolant error bounds and convergence of
+  adaptive ray bundles, ray differentials, and Jacobi fields.
 - Cross-checks of orbital phase, waveform, radiated energy/angular momentum,
   final mass, and final spin against the source simulation.
+- For luminous output, convergence of spectral/subpixel sampling and explicit
+  validation of the GRMHD, electron, emissivity, absorption, optical-depth, and
+  polarization assumptions that actually determine radiance.
+- A multilayer scientific master whose physical channels and audit manifest
+  remain independent of tone mapping, gamut conversion, HDR mastering, and
+  video encoding.
 - Image-regression checks that are separated from physics checks so a tone-map
   change cannot masquerade as a physical change.
 

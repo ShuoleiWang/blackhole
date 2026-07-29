@@ -87,18 +87,18 @@
 
         <div id="panelContent" class="panel-content">
           <nav class="scene-switch" aria-label="时空场景">
-            <a id="sceneSchwarzschild" class="scene-link is-active" href="./" aria-current="page">
-              单黑洞
+            <a id="sceneBinary" class="scene-link is-active" href="./" aria-current="page">
+              实时双黑洞
             </a>
-            <a id="sceneBinary" class="scene-link" href="./?scene=binary-approx">
-              双黑洞预览
+            <a id="sceneSchwarzschild" class="scene-link" href="./?scene=schwarzschild">
+              单黑洞
             </a>
             <a
               id="sceneTransferMap"
-              class="scene-link"
+              class="scene-link scene-link-reference"
               href="./?scene=transfer-map-reference"
             >
-              传递图参考
+              科学参考
             </a>
           </nav>
 
@@ -107,7 +107,7 @@
           <nav
             id="transferReferenceSwitch"
             class="transfer-reference-switch"
-            aria-label="强场参考数据"
+            aria-label="固定相机离线校准参考"
             hidden
           >
             <a
@@ -115,14 +115,14 @@
               class="reference-link"
               href="./?scene=transfer-map-reference"
             >
-              Schwarzschild
+              Schwarzschild（非旋转）
             </a>
             <a
               id="referenceKerr"
               class="reference-link"
               href="./?scene=transfer-map-reference&amp;reference=kerr-remnant"
             >
-              Kerr remnant
+              Kerr（旋转余留体）
             </a>
           </nav>
 
@@ -144,37 +144,48 @@
               哈勃调色
             </button>
             <button
-              id="modeLookback"
-              class="mode-button diagnostic-only"
-              type="button"
-              aria-pressed="false"
-            >
-              回溯时间
-            </button>
-            <button
               id="modeFrequency"
-              class="mode-button diagnostic-only"
+              class="mode-button diagnostic-only reference-primary-mode"
               type="button"
               aria-pressed="false"
             >
-              频移 g
+              频移因子 g
             </button>
-            <button
-              id="modeNull"
-              class="mode-button diagnostic-only"
-              type="button"
-              aria-pressed="false"
+            <details
+              id="transferAdvancedDiagnostics"
+              class="transfer-advanced-diagnostics diagnostic-only"
             >
-              零约束
-            </button>
-            <button
-              id="modeError"
-              class="mode-button diagnostic-only"
-              type="button"
-              aria-pressed="false"
-            >
-              投影误差
-            </button>
+              <summary>高级数值诊断</summary>
+              <div class="advanced-diagnostic-grid">
+                <button
+                  id="modeLookback"
+                  class="mode-button diagnostic-only"
+                  type="button"
+                  aria-pressed="false"
+                  title="坐标量，不等同于可观测的相对到达时延"
+                >
+                  坐标回溯时间
+                </button>
+                <button
+                  id="modeNull"
+                  class="mode-button diagnostic-only"
+                  type="button"
+                  aria-pressed="false"
+                  title="沿光线记录的最大零性条件残差"
+                >
+                  零性残差
+                </button>
+                <button
+                  id="modeError"
+                  class="mode-button diagnostic-only"
+                  type="button"
+                  aria-pressed="false"
+                  title="以探测器像素为单位的数值投影误差"
+                >
+                  投影误差
+                </button>
+              </div>
+            </details>
           </div>
 
           <dl class="physical-readout" aria-label="物理观测读数">
@@ -199,45 +210,64 @@
             hidden
           >
             <header class="transfer-inspector-heading">
-              <h2 id="transferInspectorTitle">32-byte ray record</h2>
-              <output id="transferInspectorCoordinates">x — · y —</output>
+              <h2 id="transferInspectorTitle">
+                像素光线记录
+                <span>32 B ABI</span>
+              </h2>
+              <div class="transfer-inspector-actions">
+                <output id="transferInspectorCoordinates">像素 x — · y —</output>
+                <button
+                  id="transferInspectorClose"
+                  class="transfer-inspector-close"
+                  type="button"
+                  aria-label="关闭像素光线记录"
+                  title="关闭像素光线记录"
+                >
+                  ×
+                </button>
+              </div>
             </header>
             <dl class="transfer-inspector-grid">
               <div class="transfer-inspector-wide">
-                <dt>escapeDirection ICRS</dt>
+                <dt>逃逸方向（ICRS）</dt>
                 <dd id="transferInspectorDirection">—</dd>
               </div>
               <div>
-                <dt>frequencyShiftG</dt>
+                <dt>频移因子 g</dt>
                 <dd id="transferInspectorFrequency">—</dd>
               </div>
               <div>
-                <dt>lookbackTimeM</dt>
+                <dt>坐标回溯时间</dt>
                 <dd id="transferInspectorLookback">—</dd>
               </div>
               <div>
-                <dt>nullResidual</dt>
-                <dd id="transferInspectorNull">—</dd>
-              </div>
-              <div>
-                <dt>projectionErrorPx</dt>
-                <dd id="transferInspectorError">—</dd>
-              </div>
-              <div>
-                <dt>rayOutcome</dt>
+                <dt>光线结果</dt>
                 <dd id="transferInspectorOutcome">—</dd>
               </div>
-              <div>
-                <dt>validityMask</dt>
-                <dd id="transferInspectorValidity">—</dd>
-              </div>
-              <div class="transfer-inspector-wide">
-                <dt>raw little-endian bytes</dt>
-                <dd><code id="transferInspectorRaw">—</code></dd>
-              </div>
             </dl>
+            <details class="transfer-inspector-details">
+              <summary>数值与 ABI 详情</summary>
+              <dl class="transfer-inspector-grid transfer-inspector-advanced-grid">
+                <div>
+                  <dt>零性残差</dt>
+                  <dd id="transferInspectorNull">—</dd>
+                </div>
+                <div>
+                  <dt>投影误差</dt>
+                  <dd id="transferInspectorError">—</dd>
+                </div>
+                <div class="transfer-inspector-wide">
+                  <dt>有效位掩码</dt>
+                  <dd id="transferInspectorValidity">—</dd>
+                </div>
+                <div class="transfer-inspector-wide">
+                  <dt>原始小端序字节</dt>
+                  <dd><code id="transferInspectorRaw">—</code></dd>
+                </div>
+              </dl>
+            </details>
             <p id="transferMapInspectorHelp" class="transfer-inspector-help">
-              点击画面选择像素；聚焦画布后用方向键逐像素移动，Shift 加速，Esc 关闭。
+              点击画面选择像素；聚焦画布后用方向键逐像素移动，Shift 加速，关闭按钮或 Esc 退出。
             </p>
           </section>
 
@@ -300,7 +330,7 @@
           <section class="parameter-section" aria-labelledby="parameterTitle">
             <div class="section-heading">
               <h2 id="parameterTitle">观测参数</h2>
-              <span>实时</span>
+              <span id="parameterContext">实时</span>
             </div>
 
             <div class="control-list">

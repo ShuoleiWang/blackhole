@@ -88,8 +88,9 @@ UI 输入的是无量纲 Eddington 光度比 `L/L_Edd`；在固定效率归一�
 
 ## 数值边界
 
-- 默认实时单黑洞模型固定为非旋转 Schwarzschild 时空，不包含 Kerr 自旋与
-  frame dragging；独立的离线 Kerr 参考不会改变默认 shader。
+- 显式 `?scene=schwarzschild` 实时单黑洞模型固定为非旋转
+  Schwarzschild 时空，不包含 Kerr 自旋与 frame dragging；独立的离线 Kerr
+  校准参考不会改变该场景的 shader。
 - 临界光子轨道附近的高阶像会指数级变窄，最终受步数上限和像素覆盖限制。
 - 临界曲线窄带使用固定 2×2 测地线覆盖采样；其他区域通常只追踪像素中心光线。
 - 盘面发射、三波段色度、光学深度和湍流都是面向实时显示的近似。

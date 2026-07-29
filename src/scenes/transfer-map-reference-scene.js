@@ -27,14 +27,14 @@ export const TRUSTED_REFERENCE_REGISTRY = Object.freeze({
   schwarzschild: Object.freeze({
     key: "schwarzschild",
     datasetId: "schwarzschild-reference-v1",
-    title: "Schwarzschild 强场参考",
+    title: "Schwarzschild 离线校准",
     manifestUrl: SCHWARZSCHILD_MANIFEST_URL.href,
     expectedManifestSha256: REFERENCE_MANIFEST_SHA256,
   }),
   "kerr-remnant": Object.freeze({
     key: "kerr-remnant",
     datasetId: "kerr-remnant-reference-v1",
-    title: "Kerr 余留黑洞参考",
+    title: "Kerr 余留体离线校准",
     manifestUrl: KERR_REMNANT_MANIFEST_URL.href,
     expectedManifestSha256: (
       "5b0022ab963c0cc35d3d8acab17190bd1294bc72da2b49003d785f964ac81d99"
@@ -43,13 +43,15 @@ export const TRUSTED_REFERENCE_REGISTRY = Object.freeze({
 });
 
 export const TRANSFER_MAP_DIAGNOSTIC_MODES = Object.freeze([
-  Object.freeze({ id: "sky", label: "天空合成", range: null }),
-  Object.freeze({ id: "outcome", label: "结果分类", range: null }),
-  Object.freeze({ id: "lookback", label: "回溯时间", range: "lookback" }),
-  Object.freeze({ id: "frequency-shift", label: "频移 g", range: "frequencyShift" }),
-  Object.freeze({ id: "null-residual", label: "零约束", range: "nullResidual", logarithmic: true }),
+  Object.freeze({ id: "sky", label: "合成图", range: null }),
+  Object.freeze({ id: "outcome", label: "光线结果", range: null }),
+  Object.freeze({ id: "lookback", label: "坐标回溯时间", range: "lookback" }),
+  Object.freeze({ id: "frequency-shift", label: "频移因子 g", range: "frequencyShift" }),
+  Object.freeze({ id: "null-residual", label: "零性残差", range: "nullResidual", logarithmic: true }),
   Object.freeze({ id: "projection-error", label: "投影误差", range: "projectionError", logarithmic: true }),
 ]);
+
+const ADVANCED_DIAGNOSTIC_MODES = new Set([2, 4, 5]);
 
 export class TransferMapSceneLoadError extends Error {
   constructor(message, options = {}) {
@@ -398,7 +400,7 @@ function showLoadFailure(documentRef, elements, error, href) {
     createRecoveryLink(
       documentRef,
       "scene-recovery-link",
-      "返回单黑洞",
+      "返回实时双黑洞",
       defaultSceneHref(href),
     ),
   );
@@ -407,11 +409,9 @@ function showLoadFailure(documentRef, elements, error, href) {
   // Asset authentication happens before the renderer and the shared mobile
   // controls are initialized. Keep recovery actions reachable on compact
   // viewports even when startup fails at that earlier boundary.
-  const panel = documentRef.getElementById("panel");
-  const panelToggle = documentRef.getElementById("togglePanel");
-  panel?.classList.add("is-open");
-  panelToggle?.setAttribute("aria-expanded", "true");
-  panelToggle?.setAttribute("aria-label", "收起观测参数");
+  elements.panel.classList.add("is-open");
+  elements.panelToggle.setAttribute("aria-expanded", "true");
+  elements.panelToggle.setAttribute("aria-label", "收起显示设置");
 }
 
 function formatMetric(value, digits = 3) {
@@ -447,6 +447,8 @@ export async function createTransferMapReferenceScene({
 
   const elements = {
     canvas: requiredElement(documentRef, "universe"),
+    panel: requiredElement(documentRef, "panel"),
+    panelToggle: requiredElement(documentRef, "togglePanel"),
     eyebrow: requiredElement(documentRef, "sceneEyebrow"),
     title: requiredElement(documentRef, "panelTitle"),
     observerLabel: requiredElement(documentRef, "observerLabel"),
@@ -454,6 +456,8 @@ export async function createTransferMapReferenceScene({
     shadowLabel: requiredElement(documentRef, "shadowLabel"),
     massLabel: requiredElement(documentRef, "massLabel"),
     physicsNote: requiredElement(documentRef, "physicsNote"),
+    parameterTitle: requiredElement(documentRef, "parameterTitle"),
+    parameterContext: requiredElement(documentRef, "parameterContext"),
     sceneStatus: requiredElement(documentRef, "sceneStatus"),
     binaryTimeline: requiredElement(documentRef, "binaryTimeline"),
     desktopHint: requiredElement(documentRef, "desktopHint"),
@@ -465,10 +469,15 @@ export async function createTransferMapReferenceScene({
     frequencyMode: requiredElement(documentRef, "modeFrequency"),
     nullMode: requiredElement(documentRef, "modeNull"),
     errorMode: requiredElement(documentRef, "modeError"),
+    advancedDiagnostics: requiredElement(
+      documentRef,
+      "transferAdvancedDiagnostics",
+    ),
     referenceSwitch: requiredElement(documentRef, "transferReferenceSwitch"),
     referenceSchwarzschild: requiredElement(documentRef, "referenceSchwarzschild"),
     referenceKerr: requiredElement(documentRef, "referenceKerr"),
     inspector: requiredElement(documentRef, "transferMapInspector"),
+    inspectorClose: requiredElement(documentRef, "transferInspectorClose"),
     inspectorCoordinates: requiredElement(documentRef, "transferInspectorCoordinates"),
     inspectorDirection: requiredElement(documentRef, "transferInspectorDirection"),
     inspectorFrequency: requiredElement(documentRef, "transferInspectorFrequency"),
@@ -483,8 +492,11 @@ export async function createTransferMapReferenceScene({
     reset: ui.resetView,
   };
   const shallowSnapshotElements = new Set([
+    elements.panel,
+    elements.panelToggle,
     elements.binaryTimeline,
     elements.modeSwitch,
+    elements.advancedDiagnostics,
     elements.referenceSwitch,
     elements.inspector,
   ]);
@@ -614,7 +626,7 @@ export async function createTransferMapReferenceScene({
       ? ` → ${record.captureTargetId}`
       : "";
     selectedPixel = { x, y };
-    elements.inspectorCoordinates.textContent = `x ${x} · y ${y}`;
+    elements.inspectorCoordinates.textContent = `像素 x ${x} · y ${y}`;
     elements.inspectorDirection.textContent = directionValid
       ? record.escapeDirection.map((value) => value.toFixed(6)).join(", ")
       : "—";
@@ -638,6 +650,19 @@ export async function createTransferMapReferenceScene({
     elements.inspectorRaw.textContent = record.rawHex;
     elements.inspector.hidden = false;
     updateMarker();
+  }
+
+  function closeInspector({ focusCanvas = false } = {}) {
+    selectedPixel = null;
+    elements.inspector.hidden = true;
+    elements.marker.hidden = true;
+    if (focusCanvas) {
+      currentCanvas().focus({ preventScroll: true });
+    }
+  }
+
+  function handleInspectorClose() {
+    closeInspector({ focusCanvas: true });
   }
 
   function inspectAtClientPoint(event) {
@@ -680,9 +705,7 @@ export async function createTransferMapReferenceScene({
       // Selecting the centre on first activation makes the keyboard path
       // useful without requiring a prior pointer event.
     } else if (event.key === "Escape") {
-      selectedPixel = null;
-      elements.inspector.hidden = true;
-      elements.marker.hidden = true;
+      closeInspector();
       event.preventDefault();
       return;
     } else {
@@ -703,6 +726,7 @@ export async function createTransferMapReferenceScene({
     startsRunning: false,
     motionEnabled: false,
     cameraLocked: true,
+    panelLabel: "显示设置",
     manifest,
     dataset,
     reference,
@@ -720,50 +744,64 @@ export async function createTransferMapReferenceScene({
       state.phase = 0;
       state.orbitTilt = 0;
       state.mode = currentDiagnosticMode();
+      if (ADVANCED_DIAGNOSTIC_MODES.has(state.mode)) {
+        elements.advancedDiagnostics.setAttribute("open", "");
+      } else {
+        elements.advancedDiagnostics.removeAttribute("open");
+      }
       configureReferenceLinks(reference.key);
-      selectedPixel = null;
-      elements.inspector.hidden = true;
-      elements.marker.hidden = true;
+      closeInspector();
 
       const canvas = currentCanvas();
       canvas.setAttribute("tabindex", "0");
       canvas.setAttribute(
         "aria-label",
-        `${reference.title}固定相机画面；点击像素或使用方向键检查 32-byte 光线记录`,
+        `${reference.title}固定相机离线校准画面；点击像素或使用方向键检查光线记录`,
       );
       canvas.setAttribute("aria-describedby", "transferMapInspectorHelp");
-      elements.eyebrow.textContent = "离线零测地线 · SHA-256 验证";
+      elements.eyebrow.textContent = "研究工具 · 固定相机离线校准";
       elements.title.textContent = reference.title;
-      elements.observerLabel.textContent = "固定观测者";
-      elements.radiusLabel.textContent = "自旋 / ABI";
-      elements.shadowLabel.textContent = "捕获 / 逃逸";
-      elements.massLabel.textContent = "质量归一化";
+      elements.observerLabel.textContent = "固定观测相机";
+      elements.radiusLabel.textContent = "无量纲自旋";
+      elements.shadowLabel.textContent = "光线结果";
+      elements.massLabel.textContent = "质量标度";
+      elements.parameterTitle.textContent = "显示设置";
+      elements.parameterContext.textContent = "固定数据";
+      const panelExpanded = elements.panel.classList.contains("is-open");
+      elements.panelToggle.setAttribute("aria-expanded", String(panelExpanded));
+      elements.panelToggle.setAttribute(
+        "aria-label",
+        panelExpanded ? "收起显示设置" : "展开显示设置",
+      );
       elements.sceneStatus.hidden = false;
       elements.sceneStatus.classList.remove("is-error");
       elements.sceneStatus.setAttribute("role", "status");
       elements.sceneStatus.textContent = [
-        manifest.id,
-        manifest.scientificStatus.classification,
+        "解析真空参考",
+        "固定相机",
         `${dataset.width}×${dataset.height}`,
-        `${manifest.chunks.length} chunks verified`,
+        `${manifest.chunks.length}/${manifest.chunks.length} 数据块 SHA-256 已验证`,
       ].join(" · ");
       elements.binaryTimeline.hidden = true;
       elements.modeSwitch.setAttribute(
         "aria-label",
-        "Transfer-map 科学诊断模式",
+        "固定相机离线校准诊断视图",
       );
       modeButtons.forEach((button, mode) => {
         button.textContent = TRANSFER_MAP_DIAGNOSTIC_MODES[mode].label;
       });
-      elements.desktopHint.textContent = "点击检查像素 · 方向键移动 · Shift 加速";
+      elements.desktopHint.textContent = "点击查看光线记录 · 方向键移动 · Shift 加速";
       if (elements.touchHint) {
-        elements.touchHint.textContent = "轻点画面检查 32-byte 光线记录";
+        elements.touchHint.textContent = "轻点画面查看像素光线记录";
       }
+      const referenceDescription = reference.key === "kerr-remnant"
+        ? "解析 Kerr 余留体真空时空"
+        : "解析 Schwarzschild 真空时空";
       elements.physicsNote.textContent = [
-        manifest.scientificStatus.description,
+        `${referenceDescription}的固定相机离线校准画面，只用于研究与验证 transfer-map 数据链；`,
+        "不是双黑洞合并画面、NR 光追或高保真成品，不包含吸积发射。",
         ` 坐标：${manifest.coordinates.nrChart.coordinates}。`,
         ` 积分器：${manifest.rayIntegration.integrator.name}。`,
-        ` ${manifest.scientificStatus.prohibitedClaim}`,
       ].join("");
 
       for (const input of [ui.mass, ui.accretion, ui.timeScale]) {
@@ -775,6 +813,7 @@ export async function createTransferMapReferenceScene({
       elements.reset.setAttribute("aria-hidden", "true");
       documentRef.addEventListener("click", inspectAtClientPoint);
       documentRef.addEventListener("keydown", inspectWithKeyboard);
+      elements.inspectorClose.addEventListener("click", handleInspectorClose);
       documentRef.defaultView?.addEventListener("resize", handleResize);
       controls.requestRender();
     },
@@ -790,12 +829,9 @@ export async function createTransferMapReferenceScene({
       ui.observerValue.textContent = (
         `${readouts.observerCoordinateLabel} = `
         + `${readouts.observerCoordinateRadius.toFixed(2)} M · `
-        + `fixed tetrad · FOV ${readouts.fovDegrees.toFixed(1)}°`
+        + `固定正交标架 · FOV ${readouts.fovDegrees.toFixed(1)}°`
       );
-      ui.rsValue.textContent = (
-        `|χ| ${readouts.spinMagnitude.toFixed(6)} · `
-        + `${manifest.recordLayout.recordBytes} B/ray`
-      );
+      ui.rsValue.textContent = `|χ| ${readouts.spinMagnitude.toFixed(6)}`;
       ui.shadowValue.textContent = readouts.outcomeLabel;
       return true;
     },
@@ -807,6 +843,9 @@ export async function createTransferMapReferenceScene({
     onModeChanged(mode) {
       if (!TRANSFER_MAP_DIAGNOSTIC_MODES[mode]) {
         return;
+      }
+      if (ADVANCED_DIAGNOSTIC_MODES.has(mode)) {
+        elements.advancedDiagnostics.setAttribute("open", "");
       }
       const nextHref = diagnosticHref(locationHref(location), mode);
       if (typeof history?.replaceState === "function") {
@@ -847,6 +886,7 @@ export async function createTransferMapReferenceScene({
       if (initialized) {
         documentRef.removeEventListener("click", inspectAtClientPoint);
         documentRef.removeEventListener("keydown", inspectWithKeyboard);
+        elements.inspectorClose.removeEventListener("click", handleInspectorClose);
         documentRef.defaultView?.removeEventListener("resize", handleResize);
       }
       initialized = false;

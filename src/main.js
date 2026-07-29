@@ -124,7 +124,7 @@ let rendererFallbackReason = "";
 
 function sceneHref(sceneId) {
   const parameters = new URLSearchParams(query);
-  if (sceneId === "schwarzschild") {
+  if (sceneId === "binary-approx") {
     parameters.delete("scene");
     parameters.delete("reference");
     parameters.delete("diagnostic");
@@ -179,7 +179,7 @@ async function loadRequestedScene() {
     validateCustomScene(scene);
     return scene;
   }
-  if (requestedScene !== "binary-approx") {
+  if (requestedScene === "schwarzschild") {
     return null;
   }
   const { createBinaryApproxScene } = await import("./scenes/binary-approx-scene.js");
@@ -636,6 +636,8 @@ function updateFps(dt) {
 }
 
 function bindUi() {
+  const panelContext = activeScene?.panelLabel ?? "观测参数";
+  ui.togglePanel.setAttribute("aria-label", `展开${panelContext}`);
   [ui.mass, ui.accretion, ui.exposure, ui.timeScale].forEach((input) => {
     input.addEventListener("input", updateReadouts);
   });
@@ -660,7 +662,10 @@ function bindUi() {
     const expanded = !ui.panel.classList.contains("is-open");
     ui.panel.classList.toggle("is-open", expanded);
     ui.togglePanel.setAttribute("aria-expanded", String(expanded));
-    ui.togglePanel.setAttribute("aria-label", expanded ? "收起观测参数" : "展开观测参数");
+    ui.togglePanel.setAttribute(
+      "aria-label",
+      `${expanded ? "收起" : "展开"}${panelContext}`,
+    );
   });
   window.addEventListener("resize", () => {
     state.resizePending = true;

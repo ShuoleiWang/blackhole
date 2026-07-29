@@ -409,7 +409,7 @@ export async function createBinaryApproxScene({
       playbackHolding = false;
       rateAwaitingAdvance = false;
       documentRef.documentElement.classList.add("scene-binary-approx");
-      documentRef.title = "SXS 双黑洞动力学预览 · 深空观测台";
+      documentRef.title = "实时双黑洞 · 深空观测台";
       state.time = playbackClock.seek(firstTime);
       state.distance = defaults.observerRadiusM;
       state.phase = 0.58;
@@ -428,14 +428,15 @@ export async function createBinaryApproxScene({
         )
       );
 
-      elements.eyebrow.textContent = "SXS NR 动力学 · 弱场 fast-light 光线";
-      elements.title.textContent = "双黑洞动力学播放";
+      elements.eyebrow.textContent = "SXS 动力学 · GPU 实时 fast-light";
+      elements.title.textContent = "实时双黑洞";
       elements.observerLabel.textContent = "SXS 轨道状态";
       elements.radiusLabel.textContent = "1 M（GM/c²）";
       elements.shadowLabel.textContent = "数据区段";
       elements.massLabel.textContent = "系统总质量";
       elements.sceneStatus.hidden = false;
       elements.sceneStatus.textContent = [
+        "交互式近似",
         "SXS:BBH:0001 Lev5 动力学",
         "弱场 fast-light 透镜",
         "不是 NR 光追",

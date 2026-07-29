@@ -13,6 +13,14 @@ it does **not** use an SXS near-zone metric and its pixels are **not numerical
 relativity ray tracing**. It contains no accretion disk, plasma, emissivity,
 absorption, polarization, GRMHD, or binary time evolution.
 
+Its architectural role is calibration, authenticated delivery, and regression:
+it is a stationary oracle for camera/tetrad conventions, horizon-penetrating
+coordinates, capture/escape semantics, asymptotic direction, frequency and
+lookback bookkeeping, and integration refinement. It is not a remnant frame
+from the binary scene, a merger renderer, or the project's future offline
+radiance format. See [`rendering-modes.md`](./rendering-modes.md) for the
+real-time and high-fidelity offline routes.
+
 ## Physical configuration
 
 Geometric units are used throughout:
@@ -126,6 +134,13 @@ Each little-endian record is exactly 32 bytes:
 1 × uint16   validityMask
 ```
 
+This immutable v1 record is a camera-specific vacuum escape-transfer result.
+It contains no adaptive subpixel ray bundle, geodesic-deviation or Jacobi data,
+emission history, optical depth, spectrum, Stokes parameters, or Faraday
+coefficients. Future ray-bundle and radiative products require new contracts;
+the Kerr reference and its v1 ABI remain unchanged as their stationary
+regression baseline.
+
 The workbench can display the lensed sky, categorical outcomes, lookback time,
 frequency factor, null residual, or projection error. Clicking a texel exposes
 the decoded values and the original 32 bytes. Diagnostic colours are display
@@ -142,8 +157,9 @@ Validation is deliberately split into three layers:
    the Cartesian Kerr-Schild metric and transformed BL-ZAMO tetrad, evaluates
    the finite-distance spherical-photon-orbit shadow, checks every capture
    texel, and integrates selected complete rays with a fixed-step RK4 method.
-3. Browser tests exercise both WebGPU and WebGL2 playback, trusted reference
-   selection, diagnostics, record inspection, and fail-closed recovery.
+3. Browser-side tests exercise trusted reference selection, decoded
+   WebGPU/WebGL2 resource construction, diagnostics, record inspection, and
+   fail-closed recovery. They are not cross-GPU image-regression tests.
 
 The independent physics verifier additionally checks:
 
@@ -218,10 +234,18 @@ This reference demonstrates stationary strong-field frame dragging, a
 spin-displaced critical curve, capture classification on the declared oblate
 stretched-horizon worldtube, and consistent sky mapping for one camera. It
 does not make the binary scene's weak-field shader more accurate and it does
-not reconstruct the time-dependent merger spacetime. A complete binary
-slow-light implementation still requires a four-dimensional near-zone
-numerical metric, gauge-aware interpolation, time-dependent horizons, and rays
-evolved through changing source time.
+not reconstruct the time-dependent merger spacetime.
+
+For the real-time route, mouse-driven camera changes must continue to generate
+fresh GPU rays; a future strong-field WebGPU metric would not reuse this fixed
+map and would still be an approximate fast-light model unless backed by
+stronger spacetime evidence. For the high-fidelity offline route, NR-backed
+pixels require a four-dimensional near-zone numerical metric, gauge-aware
+interpolation, time-dependent horizon worldtubes, and slow-light ray bundles.
+Luminous output additionally requires declared GRMHD/GRRT, spectral, and
+polarization inputs, with a multilayer OpenEXR scientific master kept separate
+from HDR presentation. None of those future capabilities is implemented by
+this stationary reference.
 
 ## References
 

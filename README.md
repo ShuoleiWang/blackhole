@@ -3,46 +3,67 @@
 **English** | [简体中文](./README.zh-CN.md)
 
 An interactive, real-time black-hole renderer built with **WebGPU and WebGL2**.
+The root URL opens the real-time binary scene; the legacy
+`?scene=binary-approx` URL remains compatible, and
+`?scene=schwarzschild` opens the interactive single-hole scene.
 
-The default scene numerically integrates past-directed null geodesics in a Schwarzschild spacetime. The same ray path determines capture by the event horizon, intersections with an idealized accretion disk, relativistic frequency shifts, and gravitational lensing of an all-sky Milky Way background.
-
-An isolated, opt-in `?scene=binary-approx` experiment adds an equal-mass,
-effectively non-spinning binary-black-hole preview. **Phase 2 now drives the
-motion and waveform readout from pinned `SXS:BBH:0001` Lev5 numerical-
-relativity data**: the A/B apparent-horizon coordinate centroids provide
+The binary motion and waveform readout come from pinned `SXS:BBH:0001` Lev5
+numerical-relativity data: A/B apparent-horizon coordinate centroids provide
 separation and orbital phase, and the CoM-corrected
-`Extrapolated_N2.dir/Y_l2_m2.dat` mode provides the complex `h22` strip.
+`Extrapolated_N2.dir/Y_l2_m2.dat` mode provides the complex `h22` strip. Mouse
+or touch input changes the camera, and every rendered frame reconstructs its
+GPU rays for that camera.
 
-That upgrade applies to the **dynamics only**. The image still comes from the
-unchanged, frame-frozen, multi-centre **weak-field fast-light shader**. No SXS
-near-zone metric or ray-transfer product is consumed, and the result is
-**not NR ray tracing**, not a solved binary-spacetime image, and not a
-quantitatively accurate merger shadow. The project is intended for real-time
-visualization and education. Its real-time scenes are not Kerr or full-NR
-light-propagation solvers, and the project is not a GRMHD or high-precision
-radiative-transfer solver. The optional stationary Kerr reference described
-below is deliberately isolated from that real-time binary renderer.
+That source upgrade applies to the **dynamics only**. Binary pixels still come
+from a frame-frozen, multi-centre **weak-field fast-light shader**. No SXS
+near-zone metric or ray-transfer product is consumed, so the image is **not NR
+ray tracing**, not a solved binary spacetime, and not a quantitatively accurate
+merger shadow. The planned next interactive physics layer is an isolated
+strong-field WebGPU ray tracer; it is not implemented yet.
+No implemented scene is a full-NR light-propagation, GRMHD, or
+high-precision radiative-transfer solver.
 
-A second opt-in path, `?scene=transfer-map-reference`, exercises the
+The explicit Schwarzschild scene numerically integrates past-directed null
+geodesics on the GPU. A single ray path determines horizon capture, idealized
+disk intersections, frequency shifts, and lensing of an all-sky Milky Way
+background.
+
+The scientific `?scene=transfer-map-reference` path exercises the
 transfer-map pipeline with project-generated stationary analytic
 **Schwarzschild and Kerr** references. The Kerr product uses the pinned
 `SXS:BBH:0001` remnant spin only; its metric and pixels are analytic,
 project-generated data, not SXS near-zone data. Both fixed 1024×576 cameras
 contain no accretion disk and are **not numerical relativity**. They validate
 offline ray generation, authenticated playback, GPU consumption, diagnostics,
-and sky composition without changing either existing scene.
+and sky composition. They are calibration and regression oracles, not merger
+renderers.
 
 ![A Schwarzschild black hole, accretion disk, and gravitationally lensed Milky Way](./docs/images/blackhole-galaxy-hero.webp)
 
 <sub>A 5120×2576 in-app screenshot of the WebGPU/Metal renderer running on Apple Silicon, with the controls and live backend, output, and performance readouts visible. Milky Way source: ESO/S. Brunier; geodesically transformed, composited, and transcoded by this project from an original used under [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/). See [`assets/SOURCES.md`](./assets/SOURCES.md) for full provenance.</sub>
 
+## Rendering products and roadmap
+
+| Product layer | Status | Scientific boundary |
+| --- | --- | --- |
+| Root real-time binary scene | Implemented | SXS-driven dynamics with per-frame GPU recomputation, but weak-field fast-light pixels |
+| `?scene=schwarzschild` | Implemented | Interactive single-hole Schwarzschild geodesics and an idealized disk |
+| Stationary Schwarzschild/Kerr workbench | Implemented | Fixed-camera analytic vacuum calibration, authenticated delivery, and regression oracles; not a merger renderer |
+| Interactive strong-field WebGPU binary tracing | Planned | Would still be an approximate fast-light model unless supplied with stronger spacetime evidence |
+| Four-dimensional NR slow-light offline rendering | Planned | Requires ray bundles/Jacobi fields and, for luminous output, separately sourced GRMHD/GRRT, spectral, and polarization data |
+
+[`docs/rendering-modes.md`](./docs/rendering-modes.md) defines these two
+development routes, their permitted claims, and why transfer-map v1 remains a
+camera-specific vacuum escape-transfer ABI rather than a complete radiative
+rendering format.
+
 ## Key features
 
-- **Per-pixel null-geodesic integration** — Uses Störmer–Verlet integration of `u'' = -u + 3u²` instead of a screen-space distortion effect.
+- **Interactive Schwarzschild geodesics** — The explicit single-hole scene uses Störmer–Verlet integration of `u'' = -u + 3u²` instead of a screen-space distortion effect.
 - **Unified ray-path composition** — A single traced ray handles capture, multiple disk-plane intersections, and the final sky escape direction, producing critical-curve arcs and higher-order images.
 - **Relativistic disk appearance** — Includes frequency shifts from Schwarzschild circular motion, the bolometric intensity transfer factor `g⁴`, approximate blackbody chromaticity, surface optical depth, and limb darkening.
 - **Real-time procedural disk structure** — Turbulence-inspired, finite-lifetime noise is advected at the local Keplerian angular velocity. This is a visual approximation, not an MHD simulation.
-- **SXS-driven binary dynamics** — `?scene=binary-approx` lazy-loads a
+- **SXS-driven binary dynamics** — The root scene lazy-loads a
   2,732-sample, approximately 198 KiB track derived from
   `SXS:BBH:0001/Lev5`: real A/B horizon-centroid coordinate separation and
   phase, CoM-corrected extrapolated `h22`, source events, and exact remnant
@@ -54,16 +75,17 @@ and sky composition without changing either existing scene.
 - **Explicit rendering boundary** — The binary scene retains the existing
   WGSL/GLSL weak-field fast-light lens shader. NR-derived trajectories and a
   real NR waveform do not make the pixels NR ray tracing.
-- **Schwarzschild/Kerr transfer-map workbench** —
+- **Schwarzschild/Kerr calibration workbench** —
   `?scene=transfer-map-reference` authenticates one of two bundled 1024×576
   stationary maps before either backend consumes it. The Kerr reference
   numerically integrates separated null geodesics of the exact analytic Kerr
   metric, with a finite-distance BL-ZAMO, a constant-Kerr-r oblate capture
-  surface, and continuation to infinity.
+  surface, and continuation to infinity. These maps are stationary vacuum
+  oracles for the offline pipeline, not merger frames.
 - **Inspectable scientific diagnostics** — Stable URL modes show sky,
   outcomes, lookback time, frequency shift, null residual, or projection
   error. Clicking a texel exposes its decoded canonical 32-byte record.
-- **Non-breaking scene architecture** — Optional scene descriptors and shader bundles extend the shared WebGPU/WebGL2 backends, while the default URL retains the original Schwarzschild shader, observer model, disk, and controls.
+- **Isolated scene architecture** — Scene descriptors and shader bundles keep the root binary scene, explicit Schwarzschild scene, and fixed-camera scientific references from silently sharing physical assumptions.
 - **WebGPU first, WebGL2 fallback** — Chooses the rendering path from the GPU limits, texture dimensions, and framebuffer capabilities exposed at runtime, without chip-model-specific branches.
 - **Progressive sky assets** — Ships with ESO 6K and 4K fallbacks and can optionally load the 16000×8000 ESA/Gaia all-sky map.
 - **Capability-negotiated HDR** — Requests Display-P3, FP16, and extended-range output where available, then falls back to P3 or sRGB SDR. WebGL2 is used when WebGPU initialization is unavailable or fails.
@@ -82,13 +104,13 @@ Open <http://localhost:4173>. WebGPU requires a secure context such as `localhos
 
 The current application interface is in Simplified Chinese; this does not affect the rendering controls or URL parameters documented below.
 
-Use the in-app scene selector, or open
-<http://localhost:4173/?scene=binary-approx>, to enter the experimental binary
-preview. Open
+The root URL opens the real-time binary scene. The legacy
+<http://localhost:4173/?scene=binary-approx> URL selects the same scene.
+Open <http://localhost:4173/?scene=schwarzschild> for the interactive
+single-hole renderer, or open
 <http://localhost:4173/?scene=transfer-map-reference> for the fixed-camera
 Schwarzschild transfer-map reference, or append `&reference=kerr-remnant` for
-the stationary Kerr remnant reference. Returning to the default URL restores
-the interactive Schwarzschild scene; all paths remain isolated.
+the stationary Kerr remnant-spin reference. All paths remain isolated.
 
 The bundled 6K Milky Way background works immediately. To install the optional, approximately 236 MiB Gaia 16K map:
 
@@ -112,7 +134,9 @@ The script downloads the original asset from ESA and verifies a pinned SHA-256 d
 
 The neutral science color mode and the stylized Hubble palette alter only the display mapping and lightweight PSF. They do not change geodesics, disk occlusion, or frequency shifts.
 
-In the binary preview, drag and zoom still control the camera. The transport
+In the root binary scene, drag and zoom control the camera. Each rendered frame
+constructs fresh camera rays and recomputes the weak-field fast-light result;
+it does not sample the fixed-camera transfer maps. The transport
 button and Space pause or resume the same timeline; the range control scrubs
 protocol time, and **Merger slow motion** toggles a presentation-only `0.12×`
 rate from `t = -160 M` through `t = 70 M`. The waveform strip is the real,
@@ -133,7 +157,9 @@ inspector. Exposure and display quality remain presentation controls.
 
 | Parameter | Purpose |
 | --- | --- |
-| `?scene=binary-approx` | Opt into SXS-driven binary dynamics rendered by the isolated weak-field fast-light preview; the default remains Schwarzschild |
+| root URL | Open SXS-driven binary dynamics with per-frame weak-field fast-light GPU recomputation |
+| `?scene=binary-approx` | Legacy-compatible alias for the root binary scene |
+| `?scene=schwarzschild` | Open the interactive single-hole Schwarzschild geodesic and idealized-disk scene |
 | `?scene=transfer-map-reference` | Open the fixed-camera stationary analytic Schwarzschild transfer-map reference; not NR and no accretion disk |
 | `?scene=transfer-map-reference&reference=kerr-remnant` | Open the stationary analytic Kerr remnant-spin reference; not NR and no accretion disk |
 | `&diagnostic=sky\|outcome\|lookback\|frequency-shift\|null-residual\|projection-error` | Select a stable transfer-map workbench view |
@@ -151,7 +177,7 @@ http://localhost:4173/?scene=transfer-map-reference&reference=kerr-remnant&diagn
 
 ## Rendering pipeline
 
-The default Schwarzschild path:
+The explicit Schwarzschild path:
 
 1. Generate camera rays in the local comoving frame of a circular-orbit observer.
 2. Apply a Lorentz transformation into the local static Schwarzschild frame.
@@ -159,14 +185,15 @@ The default Schwarzschild path:
 4. Accumulate disk emission and transmittance from near to far, then sample the all-sky background in the escaped direction.
 5. On WebGPU, ray trace into an FP16 intermediate target and select extended-range or SDR canvas output from the capabilities the browser preserves. WebGL2 provides an sRGB/SDR fallback.
 
-The opt-in binary path lazy-loads and integrity-checks a versioned Phase 2
+The root binary path lazy-loads and integrity-checks a versioned Phase 2
 manifest plus its compact sample asset. The runtime linearly interpolates SXS
 A/B apparent-horizon centroid separation and unwrapped coordinate phase, the
 CoM-corrected extrapolated complex `h22`, and a separately labelled render-only
 topology blend. It then supplies separation, phase, and blend to the existing
 binary trace shader on both backends.
 
-That shader applies a fast-light, frame-frozen two-centre weak-field deflection
+For every rendered frame, that shader reconstructs rays from the current
+camera, applies a fast-light, frame-frozen two-centre weak-field deflection,
 and blends to one spherical visual remnant before reusing the shared sky,
 post-processing, and HDR stages. It does **not** load the SXS near-zone
 spacetime, integrate null geodesics through an NR metric, render remnant spin,
@@ -190,11 +217,17 @@ captured rays. Both have zero unusable records. They are analytic stationary
 references, not NR spacetimes, binary-merger images, accretion disks, or
 GRMHD/radiative-transfer results.
 
+These references are retained as stationary regression oracles for both
+development routes. The real-time route will continue to generate camera rays
+on the GPU; the future offline route will need four-dimensional NR slow-light
+ray bundles and separately versioned radiative products. It will not expand
+the meaning of the v1 32-byte vacuum ABI.
+
 Primary implementation files:
 
 - [`src/main.js`](./src/main.js) — Scene selection, camera orbit, physical parameters, interaction, and adaptive quality
-- [`src/shaders.js`](./src/shaders.js) — Default WGSL/GLSL Schwarzschild geodesics, disk emission, sky sampling, and post-processing
-- [`src/scenes/binary-approx-scene.js`](./src/scenes/binary-approx-scene.js) — Opt-in scene lifecycle, SXS-driven timeline, transport UI, and frame parameters
+- [`src/shaders.js`](./src/shaders.js) — Explicit-scene WGSL/GLSL Schwarzschild geodesics, disk emission, sky sampling, and post-processing
+- [`src/scenes/binary-approx-scene.js`](./src/scenes/binary-approx-scene.js) — Root binary-scene lifecycle, SXS-driven timeline, transport UI, and frame parameters
 - [`src/scenes/binary-dynamics-adapter.js`](./src/scenes/binary-dynamics-adapter.js) — Fail-closed browser loader, integrity checks, and deterministic dynamics interpolation
 - [`src/scenes/binary-playback-clock.js`](./src/scenes/binary-playback-clock.js) — Scrubbing, frame-rate-independent playback, end hold, looping, and presentation-only slow motion
 - [`src/binary-shaders.js`](./src/binary-shaders.js) — Matching WebGPU/WebGL2 weak-field binary trace shaders and scene-uniform adapter
@@ -215,7 +248,9 @@ Primary implementation files:
 - [`tests/binary-playback.test.mjs`](./tests/binary-playback.test.mjs) — Node tests for source anchors, interpolation, scrubbing, slow motion, end hold, and frame-rate independence
 - [`assets/scenes/binary-pn-equal-mass-v1.json`](./assets/scenes/binary-pn-equal-mass-v1.json) — Legacy v1 PN/phenomenological asset, retained only for regression
 - [`scripts/verify_binary_preview.py`](./scripts/verify_binary_preview.py) — Legacy PN contract and unchanged weak-field shader convergence regression
-- [`docs/binary-model.md`](./docs/binary-model.md) — Binary scientific boundary, protocol status, and offline NR transfer-map architecture
+- [`docs/binary-model.md`](./docs/binary-model.md) — Binary scientific boundary, current weak-field model, and future interactive/offline architecture
+- [`docs/rendering-modes.md`](./docs/rendering-modes.md) — Implemented product
+  layers, real-time strong-field route, offline NR/GRRT route, and claim ladder
 - [`docs/nr-transfer-map-v1.md`](./docs/nr-transfer-map-v1.md) — Normative
   terminology, field semantics, safety rules, and status of the transfer-map v1
   protocol
@@ -231,8 +266,8 @@ Primary implementation files:
 
 | Scene / component | Implemented | Current boundary |
 | --- | --- | --- |
-| Default single black hole | Non-rotating Schwarzschild spacetime and numerical GPU null-geodesic integration | No Kerr spin or frame dragging; the narrowest critical-curve features remain sampling-limited |
-| Default accretion disk | Idealized zero-thickness surface from `r = 6M` to `18M`, frequency shifts, approximate emission, and turbulence-inspired structure | No finite scale height, GRMHD, complete spectrum, polarization, or self-consistent radiative transfer |
+| Explicit single black hole | Non-rotating Schwarzschild spacetime and numerical GPU null-geodesic integration | No Kerr spin or frame dragging; the narrowest critical-curve features remain sampling-limited |
+| Explicit Schwarzschild accretion disk | Idealized zero-thickness surface from `r = 6M` to `18M`, frequency shifts, approximate emission, and turbulence-inspired structure | No finite scale height, GRMHD, complete spectrum, polarization, or self-consistent radiative transfer |
 | Binary orbital dynamics | SXS:BBH:0001 Lev5 A/B apparent-horizon inertial-coordinate centroid separation and unwrapped phase from relaxation through the last paired A/B sample | Real NR diagnostics, but coordinate- and gauge-dependent; after individual horizons end, the renderer holds their last separation/phase rather than inventing trajectories |
 | Binary waveform | CoM-corrected `Extrapolated_N2` complex `h22`, aligned so its maximum amplitude is protocol `t = 0` | A far-zone waveform is not a near-zone metric and cannot determine camera-ray propagation |
 | Binary merger/remnant data | Common apparent horizon at `t = -6.072285 M`; exact metadata remnant mass `0.951609417715 M` and spin vector `(-7.29520687012e-10, 7.40468371215e-10, 0.686461676493)` | The topology blend from the common-horizon event to waveform peak is a presentation proxy; the shader does not render horizon geometry, recoil, Kerr spin, or frame dragging |
@@ -243,11 +278,13 @@ Primary implementation files:
 | NR transfer-map protocol | Versioned schema, deterministic synthetic fixture, fail-closed validators, reference consumer, and regression tests | The runtime is proven with analytic data only; no NR-derived transfer map is bundled |
 | Shared renderer | WebGPU primary path with WebGL2 fallback | HDR, P3, FP16, and 16K textures depend on runtime capabilities; HDR does not improve model accuracy |
 
-See [`docs/physics-notes.md`](./docs/physics-notes.md) (currently in Simplified
+See [`docs/rendering-modes.md`](./docs/rendering-modes.md) for the product
+layers and two development routes,
+[`docs/physics-notes.md`](./docs/physics-notes.md) (currently in Simplified
 Chinese) for the real-time Schwarzschild model,
 [`docs/kerr-reference.md`](./docs/kerr-reference.md) for the stationary Kerr
 product, and [`docs/binary-model.md`](./docs/binary-model.md) for the binary
-preview boundary and offline NR-to-transfer-map architecture.
+model boundary and future offline NR architecture.
 
 ## M3 Pro compatibility and HDR
 

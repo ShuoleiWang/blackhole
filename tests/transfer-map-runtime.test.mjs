@@ -32,6 +32,7 @@ import {
 } from "../src/scenes/transfer-map-reference-scene.js";
 
 const root = new URL("../", import.meta.url);
+const indexHtml = await readFile(new URL("index.html", root), "utf8");
 const datasetRoot = new URL(
   "assets/transfer-maps/schwarzschild-reference-v1/",
   root,
@@ -215,6 +216,8 @@ const SCENE_ELEMENT_IDS = [
   "radiusLabel",
   "shadowLabel",
   "massLabel",
+  "parameterTitle",
+  "parameterContext",
   "physicsNote",
   "sceneStatus",
   "binaryTimeline",
@@ -226,10 +229,12 @@ const SCENE_ELEMENT_IDS = [
   "modeFrequency",
   "modeNull",
   "modeError",
+  "transferAdvancedDiagnostics",
   "transferReferenceSwitch",
   "referenceSchwarzschild",
   "referenceKerr",
   "transferMapInspector",
+  "transferInspectorClose",
   "transferInspectorCoordinates",
   "transferInspectorDirection",
   "transferInspectorFrequency",
@@ -262,6 +267,8 @@ function fakeSceneHost(href = "https://blackhole.test/?scene=transfer-map-refere
     SCENE_ELEMENT_IDS.map((id) => [id, new FakeElement("div", id)]),
   );
   elements.get("universe").tagName = "CANVAS";
+  elements.get("transferAdvancedDiagnostics").tagName = "DETAILS";
+  elements.get("transferInspectorClose").tagName = "BUTTON";
   elements.get("transferReferenceSwitch").hidden = true;
   elements.get("transferMapInspector").hidden = true;
   elements.get("transferPixelMarker").hidden = true;
@@ -470,6 +477,17 @@ test("diagnostic modes have stable query identities and preserve reference selec
       "projection-error",
     ],
   );
+  assert.deepEqual(
+    TRANSFER_MAP_DIAGNOSTIC_MODES.map((mode) => mode.label),
+    [
+      "合成图",
+      "光线结果",
+      "坐标回溯时间",
+      "频移因子 g",
+      "零性残差",
+      "投影误差",
+    ],
+  );
   for (const [mode, definition] of TRANSFER_MAP_DIAGNOSTIC_MODES.entries()) {
     const href = diagnosticHref(
       "https://blackhole.test/?scene=transfer-map-reference&reference=kerr-remnant",
@@ -494,6 +512,37 @@ test("diagnostic modes have stable query identities and preserve reference selec
     ),
     /reference=kerr-remnant/,
   );
+});
+
+test("reference workbench keeps realtime navigation primary and advanced diagnostics layered", () => {
+  const binaryPosition = indexHtml.indexOf("实时双黑洞");
+  const singlePosition = indexHtml.indexOf("单黑洞");
+  const referencePosition = indexHtml.indexOf("科学参考");
+  assert.ok(binaryPosition >= 0);
+  assert.ok(binaryPosition < singlePosition);
+  assert.ok(singlePosition < referencePosition);
+  assert.match(indexHtml, /Schwarzschild（非旋转）/);
+  assert.match(indexHtml, /Kerr（旋转余留体）/);
+
+  const advancedStart = indexHtml.indexOf('id="transferAdvancedDiagnostics"');
+  const advancedEnd = indexHtml.indexOf("</details>", advancedStart);
+  const frequencyPosition = indexHtml.indexOf('id="modeFrequency"');
+  assert.ok(frequencyPosition >= 0 && frequencyPosition < advancedStart);
+  for (const id of ["modeLookback", "modeNull", "modeError"]) {
+    const position = indexHtml.indexOf(`id="${id}"`);
+    assert.ok(position > advancedStart && position < advancedEnd);
+  }
+
+  const inspectorStart = indexHtml.indexOf('id="transferMapInspector"');
+  const inspectorEnd = indexHtml.indexOf("</section>", inspectorStart);
+  const abiDetails = indexHtml.indexOf(
+    '<details class="transfer-inspector-details">',
+    inspectorStart,
+  );
+  const rawRecord = indexHtml.indexOf('id="transferInspectorRaw"', inspectorStart);
+  assert.ok(abiDetails > inspectorStart);
+  assert.ok(rawRecord > abiDetails && rawRecord < inspectorEnd);
+  assert.match(indexHtml, /id="transferInspectorClose"/);
 });
 
 test("runtime loader authenticates, assembles, and preserves the v1 ray state", async () => {
@@ -848,10 +897,27 @@ test("reference scene inspector, diagnostic URL, and listeners survive dispose/r
 
   scene.initialize();
   scene.initialize();
+  assert.equal(scene.panelLabel, "显示设置");
   assert.equal(state.mode, 4);
   assert.equal(host.document.listenerCount("click"), 1);
   assert.equal(host.document.listenerCount("keydown"), 1);
   assert.equal(host.windowRef.listenerCount("resize"), 1);
+  assert.equal(
+    host.elements.get("transferAdvancedDiagnostics").attributeValues.has("open"),
+    true,
+  );
+  assert.equal(host.elements.get("modeScience").textContent, "合成图");
+  assert.equal(host.elements.get("modeHubble").textContent, "光线结果");
+  assert.equal(host.elements.get("modeFrequency").textContent, "频移因子 g");
+  assert.equal(host.elements.get("parameterTitle").textContent, "显示设置");
+  assert.equal(host.elements.get("parameterContext").textContent, "固定数据");
+  assert.equal(
+    host.elements.get("togglePanel").attributeValues.get("aria-label"),
+    "展开显示设置",
+  );
+  assert.match(host.elements.get("sceneEyebrow").textContent, /固定相机离线校准/);
+  assert.match(host.elements.get("physicsNote").textContent, /不是.*高保真成品/);
+  assert.equal(host.elements.get("transferInspectorClose").listenerCount("click"), 1);
   assert.equal(
     host.document.documentElement.classList.contains(
       "scene-transfer-map-reference",
@@ -879,6 +945,10 @@ test("reference scene inspector, diagnostic URL, and listeners survive dispose/r
     32,
   );
   assert.equal(host.elements.get("transferPixelMarker").hidden, false);
+  host.elements.get("transferInspectorClose").dispatch("click");
+  assert.equal(host.elements.get("transferMapInspector").hidden, true);
+  assert.equal(host.elements.get("transferPixelMarker").hidden, true);
+  assert.equal(canvas.focused, true);
 
   let keyboardPrevented = false;
   host.document.dispatch("keydown", {
@@ -910,6 +980,7 @@ test("reference scene inspector, diagnostic URL, and listeners survive dispose/r
   assert.equal(host.document.listenerCount("click"), 0);
   assert.equal(host.document.listenerCount("keydown"), 0);
   assert.equal(host.windowRef.listenerCount("resize"), 0);
+  assert.equal(host.elements.get("transferInspectorClose").listenerCount("click"), 0);
   assert.equal(
     host.document.documentElement.classList.contains(
       "scene-transfer-map-reference",
@@ -922,8 +993,10 @@ test("reference scene inspector, diagnostic URL, and listeners survive dispose/r
   assert.equal(host.document.listenerCount("click"), 1);
   assert.equal(host.document.listenerCount("keydown"), 1);
   assert.equal(host.windowRef.listenerCount("resize"), 1);
+  assert.equal(host.elements.get("transferInspectorClose").listenerCount("click"), 1);
   scene.dispose();
   assert.equal(host.document.listenerCount("click"), 0);
+  assert.equal(host.elements.get("transferInspectorClose").listenerCount("click"), 0);
   assert.ok(renderRequests >= 4);
 });
 
@@ -961,6 +1034,7 @@ test("reference scene failure UI stays fail-closed with retry and return actions
   const actions = status.children[1];
   assert.equal(actions.children.length, 2);
   assert.match(actions.children[0].href, /scene=transfer-map-reference/);
+  assert.equal(actions.children[1].textContent, "返回实时双黑洞");
   const returnUrl = new URL(actions.children[1].href);
   assert.equal(returnUrl.searchParams.get("scene"), null);
   assert.equal(returnUrl.searchParams.get("diagnostic"), null);
@@ -974,7 +1048,7 @@ test("reference scene failure UI stays fail-closed with retry and return actions
   );
   assert.equal(
     host.elements.get("togglePanel").attributeValues.get("aria-label"),
-    "收起观测参数",
+    "收起显示设置",
   );
   assert.equal(host.document.listenerCount("click"), 0);
   assert.equal(host.windowRef.listenerCount("resize"), 0);

@@ -1,8 +1,10 @@
 # NR transfer-map protocol v1
 
-This document defines the repository's implemented data boundary for future
-camera-specific, vacuum, slow-light transfer maps. The schema discriminator is
-`blackhole.nr-transfer-map/v1`.
+This document defines the repository's implemented, immutable data boundary for
+camera-specific **vacuum escape-transfer maps**. The schema discriminator is
+`blackhole.nr-transfer-map/v1`. This v1 ABI authenticates terminal ray
+endpoints and diagnostics; it is not a general ray-bundle, image, or
+radiative-transfer format.
 
 > **Status:** the schema, deterministic synthetic fixture, fail-closed
 > validators, and regression tests are implemented. The repository now also
@@ -10,8 +12,10 @@ camera-specific, vacuum, slow-light transfer maps. The schema discriminator is
 > project-generated stationary analytic Schwarzschild map and an analytic Kerr
 > remnant-spin reference. No
 > numerical-relativity spacetime, NR-derived transfer map, or NR playback scene
-> is bundled. The default Schwarzschild renderer and opt-in
-> `?scene=binary-approx` remain isolated and unchanged.
+> is bundled. The root weak-field binary renderer, explicit
+> `?scene=schwarzschild` renderer, and scientific references remain isolated.
+> Their routing and the real-time/offline development split are defined in
+> [`rendering-modes.md`](./rendering-modes.md).
 
 ## Scientific claim levels
 
@@ -20,17 +24,19 @@ The following terms have intentionally different meanings:
 | Term | Required evidence |
 | --- | --- |
 | **Contract-conformant** | The manifest, sidecars, chunks, coordinate declarations, and records pass the v1 validator. |
+| **Stationary-analytic-validated** | A Schwarzschild or Kerr reference additionally passes an independent physics verifier and declared numerical gates. |
 | **NR-ready ingestion boundary** | The protocol can represent and fail-closed validate a future offline NR-derived product. This describes the interface, not the repository's current data or renderer. |
-| **NR-backed** | The actual displayed payload was derived from a pinned numerical-relativity near-zone spacetime by a documented slow-light null-geodesic pipeline. |
-| **Physically validated** | In addition to being NR-backed, the spacetime, geodesics, transfer-map interpolation, and stationary limits pass declared convergence and error gates. |
+| **NR-backed vacuum lensing** | The actual displayed ray endpoints were derived from a pinned four-dimensional numerical-relativity near-zone spacetime and horizon data by a documented slow-light null-geodesic pipeline. |
+| **Physically validated vacuum lensing** | In addition to being NR-backed, the spacetime, geodesics, transfer-map interpolation, and stationary limits pass declared convergence and error gates. |
 
 Protocol conformance is necessary for future ingestion, but it is not evidence
 that Einstein's equations were solved or that a ray, merger, or image is
 physically correct. A browser that eventually plays an NR-derived transfer map
 will still be a playback/composition layer, not an NR solver.
 
-The existing `binary-approx` scene is **SXS-driven dynamics with weak-field
-fast-light rendering**. Phase 2 consumes pinned `SXS:BBH:0001` Lev5
+The root binary scene, also available through its legacy `binary-approx`
+alias, is **SXS-driven dynamics with weak-field fast-light rendering**. Phase 2
+consumes pinned `SXS:BBH:0001` Lev5
 apparent-horizon centroid diagnostics, the CoM-corrected extrapolated `h22`
 waveform, events, and remnant metadata. It does not consume the SXS near-zone
 spacetime or an NR-derived ray-transfer payload, so its pixels are not NR ray
@@ -69,7 +75,9 @@ tracing.
   [`src/transfer-map-shaders.js`](../src/transfer-map-shaders.js) implement the
   authenticated runtime consumer and matching WebGPU/WebGL2 playback.
 - [`binary-model.md`](./binary-model.md) explains how the contract fits into the
-  longer NR → slow-light geodesic → browser playback architecture.
+  binary model and longer offline NR architecture.
+- [`rendering-modes.md`](./rendering-modes.md) separates per-frame interactive
+  GPU tracing from fixed-camera references and high-fidelity offline output.
 
 Generate and validate the project fixture with:
 
@@ -132,6 +140,25 @@ Both non-fixture dataset kinds require measured accuracy; setting
 exactness. Declared unresolved/outcome fractions must agree with the binary
 records, and at least one ray must be resolved as escaped or captured. A
 consumer must still apply independent scientific quality thresholds.
+
+### Scope that v1 deliberately does not cover
+
+The canonical record represents one terminal vacuum ray result at one detector
+texel. It does not represent:
+
+- an adaptive list of subpixel rays or a ray bundle;
+- geodesic deviation, ray differentials, a Jacobi map, or magnification data;
+- samples along a finite emitting volume;
+- emissivity, absorption, optical depth, or electron thermodynamics;
+- spectral bins, Stokes parameters, or Faraday rotation/conversion;
+- a multilayer OpenEXR scientific master or its display transform.
+
+Those capabilities require new, separately versioned ray-bundle and
+radiative-frame contracts. They must not be added by changing the meaning,
+validity bits, or 32-byte binary layout of
+`blackhole.nr-transfer-map/v1`. A future high-fidelity offline renderer may
+publish a v1 vacuum endpoint proxy in addition to its scientific master, but
+the proxy does not contain the omitted physics.
 
 The shipped fixture has:
 
@@ -487,7 +514,7 @@ These rules are stricter than what is needed merely to display pixels.
 Corrupted or scientifically ambiguous input stops at the offline boundary
 instead of producing a plausible but unexplained image.
 
-## Requirements for a future NR-derived dataset
+## Requirements for a future NR-backed vacuum dataset
 
 Before a dataset can be described as NR-backed, its producer must at minimum:
 
@@ -505,9 +532,14 @@ Before a dataset can be described as NR-backed, its producer must at minimum:
    error, unresolved fraction, and stationary Schwarzschild/Kerr comparisons;
 6. pass the protocol validator and independent scientific convergence gates.
 
+For a high-fidelity offline render, these gates cover vacuum lensing only.
+Ray-bundle/Jacobi convergence and any GRMHD/GRRT, spectral, polarization, or
+OpenEXR master requirements belong to the additional contracts described in
+[`rendering-modes.md`](./rendering-modes.md).
+
 The implemented stationary runtime refuses `renderable=false`, preserves
 validity and outcome states, and keeps runtime tests separate from the
 independent physics verifier. It proves the browser ingestion and GPU-consumer
-chain with analytic Schwarzschild data only. Until a real time-dependent
+chain with analytic Schwarzschild and Kerr data. Until a real time-dependent
 NR-derived dataset passes the additional gates above, the protocol remains an
-NR-ready architecture boundary rather than an NR rendering feature.
+NR-ready vacuum-ingestion boundary rather than an NR rendering feature.
