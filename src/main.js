@@ -1,5 +1,13 @@
-import { WebGPURenderer } from "./webgpu-renderer.js";
+import {
+  WebGPURenderer,
+  webGLRecoveryUrl,
+  webGPUFallbackDescription,
+} from "./webgpu-renderer.js";
 import { WebGLRenderer } from "./webgl-renderer.js";
+import {
+  applyStrongFieldFrameParameters,
+  createStrongFieldQualityScheduler,
+} from "./strong-field-quality.js";
 
 const query = new URLSearchParams(window.location.search);
 if (query.get("presentation") === "1") {
@@ -64,6 +72,15 @@ for (const [id, element] of Object.entries(ui)) {
 
 const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
 
+function cameraDistanceLimits() {
+  return activeScene?.cameraDistanceLimits ?? { min: 34, max: 90 };
+}
+
+function clampCameraDistance(value) {
+  const { min, max } = cameraDistanceLimits();
+  return clamp(value, min, max);
+}
+
 function normalize(vector) {
   const length = Math.hypot(vector[0], vector[1], vector[2]) || 1;
   return [vector[0] / length, vector[1] / length, vector[2] / length];
@@ -121,6 +138,159 @@ const state = {
 
 let renderer;
 let rendererFallbackReason = "";
+let rendererRecoveryStarted = false;
+let runtimeRenderFailed = false;
+let strongFieldQualityScheduler = null;
+let strongFieldPreviousFrameRendered = false;
+let strongFieldInteractionUntil = 0;
+const RENDERER_ROOT_CLASSES = Object.freeze([
+  "renderer-webgpu",
+  "renderer-webgl2",
+]);
+
+function setRendererRootClass(api = null) {
+  document.documentElement.classList.remove(...RENDERER_ROOT_CLASSES);
+  if (api === "webgpu" || api === "webgl2") {
+    document.documentElement.classList.add(`renderer-${api}`);
+  }
+}
+
+function readOnlySceneRenderer(rendererInstance) {
+  const readableProperties = new Set([
+    "backend",
+    "gpu",
+    "hdrMode",
+    "outputDescription",
+    "skyDetail",
+    "capabilities",
+    "outputHDR",
+    "displayP3",
+    "hdrPeak",
+    "format",
+    "progressiveAccumulation",
+    "readyForFrame",
+    "lastQueueCompletionAtMs",
+    "lastCompletedFrameTimeMs",
+  ]);
+  const mutationError = () => {
+    throw new TypeError(
+      "onRendererReady() receives a read-only renderer diagnostic view",
+    );
+  };
+  return new Proxy(rendererInstance, {
+    get(target, property) {
+      if (!readableProperties.has(property)) {
+        throw new TypeError(
+          `onRendererReady() cannot access renderer.${String(property)}`,
+        );
+      }
+      return Reflect.get(target, property, target);
+    },
+    set: mutationError,
+    defineProperty: mutationError,
+    deleteProperty: mutationError,
+    setPrototypeOf: mutationError,
+  });
+}
+
+async function notifySceneRendererReady() {
+  const hook = activeScene?.onRendererReady;
+  if (hook == null) {
+    return;
+  }
+  if (typeof hook !== "function") {
+    throw new TypeError("Scene onRendererReady must be a function");
+  }
+  await hook.call(
+    activeScene,
+    renderer.capabilities,
+    readOnlySceneRenderer(renderer),
+  );
+}
+
+function usesStrongFieldQuality(scene) {
+  return (
+    scene?.qualityPolicy?.id === "m3-pro-strong-field-v1"
+    || scene?.rendererOptions?.shaderBundle?.id === "binary-strong-field-v1"
+  );
+}
+
+function invalidateStrongFieldQuality(reason, interactionMs = 0) {
+  strongFieldQualityScheduler?.invalidate(reason);
+  if (interactionMs > 0) {
+    strongFieldInteractionUntil = Math.max(
+      strongFieldInteractionUntil,
+      performance.now() + interactionMs,
+    );
+  }
+}
+
+function revisionNumber(value, name) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) {
+    throw new Error(`Strong-field ${name} must be finite`);
+  }
+  return Object.is(number, -0) ? "-0" : String(number);
+}
+
+function revisionSignature(fields) {
+  const parts = [];
+  for (const [name, value] of fields) {
+    if (value == null) {
+      parts.push(`${name}=null`);
+    } else if (Array.isArray(value) || ArrayBuffer.isView(value)) {
+      parts.push(
+        `${name}=[${Array.from(
+          value,
+          (entry, index) => revisionNumber(entry, `${name}[${index}]`),
+        ).join(",")}]`,
+      );
+    } else {
+      parts.push(`${name}=${revisionNumber(value, name)}`);
+    }
+  }
+  return parts.join("|");
+}
+
+function strongFieldRevisionTokens(frame) {
+  const sceneTokens = activeScene?.renderRevision?.(frame, state);
+  if (
+    sceneTokens != null
+    && (
+      typeof sceneTokens !== "object"
+      || Array.isArray(sceneTokens)
+    )
+  ) {
+    throw new Error("Strong-field renderRevision() must return an object");
+  }
+  const camera = revisionSignature([
+    ["cameraPos", frame.cameraPos],
+    ["cameraRadius", frame.cameraRadius],
+    ["forward", frame.forward],
+    ["fov", frame.fov],
+    ["right", frame.right],
+    ["up", frame.up],
+    ["observerVelocity", frame.observerVelocity],
+    ["observerBeta", frame.observerBeta],
+  ]);
+  const physics = sceneTokens?.physics ?? revisionSignature([
+    ["time", frame.time],
+    ["sceneStrongFieldUniforms", frame.sceneStrongFieldUniforms],
+  ]);
+  const transport = sceneTokens?.transport ?? revisionSignature([
+    ["mode", frame.mode],
+    ["massSolar", frame.massSolar],
+    ["accretion", frame.accretion],
+    ["exposure", frame.exposure],
+    ["skyRotation", frame.skyRotation],
+    ["diskOuterRadius", frame.diskOuterRadius],
+    ["bloom", frame.bloom],
+    ["sceneStrongIntegrator", frame.sceneStrongIntegrator],
+    ["sceneStrongDomain", frame.sceneStrongDomain],
+    ["sceneStrongDiagnostics", frame.sceneStrongDiagnostics],
+  ]);
+  return { camera, physics, transport };
+}
 
 function sceneHref(sceneId) {
   const parameters = new URLSearchParams(query);
@@ -228,6 +398,19 @@ function validateCustomScene(scene) {
       "A resource-backed scene must support both WebGPU and WebGL2 fallback",
     );
   }
+  if (scene.cameraDistanceLimits != null) {
+    const { min, max } = scene.cameraDistanceLimits;
+    if (
+      !Number.isFinite(min)
+      || !Number.isFinite(max)
+      || min <= 2
+      || max <= min
+    ) {
+      throw new Error(
+        "Scene cameraDistanceLimits must be finite with 2 < min < max",
+      );
+    }
+  }
 }
 
 function replaceCanvasForFallback() {
@@ -236,22 +419,66 @@ function replaceCanvasForFallback() {
   canvas = replacement;
 }
 
+function rendererErrorMessage(error) {
+  return error instanceof Error ? error.message : String(error || "unknown");
+}
+
+function requestWebGLRendererRecovery(reason, error, source = renderer) {
+  if (
+    rendererRecoveryStarted
+    || source?.capabilities?.api !== "webgpu"
+  ) {
+    return false;
+  }
+  rendererRecoveryStarted = true;
+  const detail = rendererErrorMessage(error);
+  if (reason === "device-lost") {
+    strongFieldQualityScheduler?.signalDeviceLost(detail);
+  }
+  console.error(
+    `WebGPU runtime failure (${reason}); reloading with the explicit WebGL2 fallback.`,
+    error,
+  );
+  const recoveryUrl = webGLRecoveryUrl(window.location.href, reason);
+  source.dispose?.();
+  window.location.replace(recoveryUrl);
+  return true;
+}
+
 async function createRenderer() {
   const requestedBackend = query.get("renderer");
   const rendererOptions = activeScene?.rendererOptions;
   if (requestedBackend === "webgl") {
+    rendererFallbackReason = webGPUFallbackDescription(query.get("fallback"));
     return WebGLRenderer.create(canvas, SKY_URLS, rendererOptions);
   }
   try {
     const webgpu = await WebGPURenderer.create(canvas, SKY_URLS, rendererOptions);
     webgpu.onLost = (info) => {
-      showFatalError(`GPU 设备连接已丢失：${info.message || info.reason || "unknown"}`);
+      requestWebGLRendererRecovery(
+        "device-lost",
+        info.message || info.reason || "unknown",
+        webgpu,
+      );
     };
+    webgpu.onError = (error) => {
+      requestWebGLRendererRecovery("render-error", error, webgpu);
+    };
+    // A device can fail in the short interval between init() installing the
+    // platform handlers and create() returning to this caller.
+    if (webgpu.lost) {
+      webgpu.onLost(
+        webgpu.deviceLossInfo || { reason: "unknown", message: "device lost during startup" },
+      );
+    } else if (webgpu.pendingRuntimeError) {
+      webgpu.onError(webgpu.pendingRuntimeError);
+    }
     return webgpu;
   } catch (error) {
     rendererFallbackReason = error instanceof Error ? error.message : String(error);
     console.info("WebGPU unavailable; using WebGL2 hardware fallback.", error);
     replaceCanvasForFallback();
+    strongFieldQualityScheduler?.setBackend("webgl2", rendererFallbackReason);
     return WebGLRenderer.create(canvas, SKY_URLS, rendererOptions);
   }
 }
@@ -285,6 +512,7 @@ function formatGravitationalRadius(massSolar) {
 }
 
 function updateReadouts() {
+  invalidateStrongFieldQuality("control-change");
   state.massSolar = valueOrPower(ui.mass);
   state.accretion = valueOrPower(ui.accretion);
   state.exposure = Number(ui.exposure.value);
@@ -314,6 +542,7 @@ function updateReadouts() {
 }
 
 function setMode(mode) {
+  invalidateStrongFieldQuality("display-mode-change");
   state.mode = mode;
   [
     ui.modeScience,
@@ -336,6 +565,7 @@ function setMotion(running) {
     running = false;
   }
   state.running = running;
+  invalidateStrongFieldQuality("timeline-state-change");
   const labels = activeScene?.motionLabels ?? {
     pause: "暂停物理轨道",
     resume: "继续物理轨道",
@@ -366,6 +596,7 @@ function resetView() {
     state.distance = 50;
   }
   state.dynamicScale = 1;
+  invalidateStrongFieldQuality("camera-reset", 180);
   state.userHoldUntil = performance.now() + 1200;
   state.resizePending = true;
   state.needsRender = true;
@@ -390,6 +621,7 @@ function pointerSeparation() {
 
 function beginUserHold(duration = 2600) {
   state.userHoldUntil = performance.now() + duration;
+  invalidateStrongFieldQuality("camera-input", 120);
   hideInteractionHint();
 }
 
@@ -422,7 +654,9 @@ function bindInteractions() {
     } else if (state.pointers.size >= 2) {
       const separation = pointerSeparation();
       if (state.pinchDistance > 0 && separation > 0) {
-        state.distance = clamp(state.distance * (state.pinchDistance / separation), 34, 90);
+        state.distance = clampCameraDistance(
+          state.distance * (state.pinchDistance / separation),
+        );
       }
       state.pinchDistance = separation;
     }
@@ -451,7 +685,9 @@ function bindInteractions() {
         return;
       }
       event.preventDefault();
-      state.distance = clamp(state.distance * Math.exp(event.deltaY * 0.0008), 34, 90);
+      state.distance = clampCameraDistance(
+        state.distance * Math.exp(event.deltaY * 0.0008),
+      );
       beginUserHold(1800);
       updateReadouts();
     },
@@ -478,8 +714,11 @@ function bindInteractions() {
     else if (event.key === "ArrowUp") state.orbitTilt = clamp(state.orbitTilt - 0.05, -1.46, 1.46);
     else if (event.key === "ArrowDown") state.orbitTilt = clamp(state.orbitTilt + 0.05, -1.46, 1.46);
     else if (event.key === "0") state.orbitTilt = 0;
-    else if (event.key === "+" || event.key === "=") state.distance = clamp(state.distance - 1.5, 34, 90);
-    else if (event.key === "-" || event.key === "_") state.distance = clamp(state.distance + 1.5, 34, 90);
+    else if (event.key === "+" || event.key === "=") {
+      state.distance = clampCameraDistance(state.distance - 1.5);
+    } else if (event.key === "-" || event.key === "_") {
+      state.distance = clampCameraDistance(state.distance + 1.5);
+    }
     else if (event.key === " ") setMotion(!state.running);
     else handled = false;
     if (handled) {
@@ -624,6 +863,113 @@ function frameParameters() {
   return activeScene?.extendFrame?.(baseFrame, state) ?? baseFrame;
 }
 
+function rendererCanSubmitFrame() {
+  if (typeof renderer?.canSubmitFrame === "function") {
+    return renderer.canSubmitFrame();
+  }
+  if (typeof renderer?.readyForFrame === "boolean") {
+    return renderer.readyForFrame;
+  }
+  return true;
+}
+
+function consumeRendererFrameTimeMs(frameElapsed) {
+  const completed = renderer?.consumeCompletedFrameTimeMs?.();
+  if (Number.isFinite(completed) && completed > 0) {
+    return completed;
+  }
+  const webgpu = (
+    renderer?.capabilities?.api === "webgpu"
+    || renderer instanceof WebGPURenderer
+  );
+  return !webgpu && strongFieldPreviousFrameRendered
+    ? frameElapsed * 1_000
+    : null;
+}
+
+function scheduledStrongFieldFrame(now, frameTimeMs) {
+  const baseFrame = frameParameters();
+  const revisions = strongFieldRevisionTokens(baseFrame);
+  if (state.needsRender) {
+    strongFieldQualityScheduler.invalidate("scene-render-request");
+  }
+  const decision = strongFieldQualityScheduler.nextFrame({
+    nowMs: now,
+    frameTimeMs,
+    viewportWidth: window.innerWidth,
+    viewportHeight: window.innerHeight,
+    devicePixelRatio: window.devicePixelRatio || 1,
+    requestedQuality: state.quality,
+    cameraRevision: revisions.camera,
+    physicsRevision: revisions.physics,
+    transportRevision: revisions.transport,
+    interactionActive: (
+      state.dragging
+      || now < strongFieldInteractionUntil
+    ),
+    timelineRunning: state.running,
+    backend: renderer.capabilities?.api || (
+      renderer instanceof WebGPURenderer ? "webgpu" : "webgl2"
+    ),
+    visible: !document.hidden,
+  });
+  const { width, height, renderScale } = decision.resolution;
+  if (
+    width !== state.lastWidth
+    || height !== state.lastHeight
+    || Math.abs(renderScale - state.lastScale) > 1e-9
+  ) {
+    renderer.resize(width, height);
+    state.lastWidth = width;
+    state.lastHeight = height;
+    state.lastScale = renderScale;
+    state.renderScale = renderScale;
+  }
+  ui.renderScaleValue.textContent = (
+    `${decision.qualityTierId} · ${renderScale.toFixed(2)}× · ${width}×${height}`
+  );
+  app.dataset.strongFieldTier = decision.qualityTierId;
+  app.dataset.strongFieldPerformanceTier = String(decision.performanceTier);
+  app.dataset.strongFieldPhase = decision.phase;
+  app.dataset.strongFieldGpuMs = Number.isFinite(decision.timing.frameTimeEmaMs)
+    ? decision.timing.frameTimeEmaMs.toFixed(2)
+    : "";
+  app.dataset.strongFieldFpsEma = Number.isFinite(decision.timing.fpsEma)
+    ? decision.timing.fpsEma.toFixed(2)
+    : "";
+  app.dataset.strongFieldHistoryEpoch = String(decision.historyEpoch);
+  // Keep the completed running-average count observable after the scheduler
+  // enters `steady`; the per-frame accumulation index intentionally returns to
+  // zero when no further trace submission is required.
+  app.dataset.strongFieldAccumulation = String(
+    strongFieldQualityScheduler.snapshot().accumulationSamples,
+  );
+  state.resizePending = false;
+  const qualityFrame = applyStrongFieldFrameParameters(
+    baseFrame,
+    decision,
+  );
+  const sceneQualityFrame = activeScene?.applyStrongFieldQuality?.(
+    qualityFrame,
+    decision,
+  ) ?? qualityFrame;
+  if (
+    !sceneQualityFrame
+    || typeof sceneQualityFrame !== "object"
+    || Array.isArray(sceneQualityFrame)
+  ) {
+    throw new Error("applyStrongFieldQuality() must return a frame object");
+  }
+  return {
+    decision,
+    frame: {
+      ...sceneQualityFrame,
+      // The strong-field shader consumes this as its sub-pixel sample index.
+      frame: decision.accumulationIndex,
+    },
+  };
+}
+
 function updateFps(dt) {
   state.fpsFrames += 1;
   state.fpsElapsed += dt;
@@ -668,25 +1014,35 @@ function bindUi() {
     );
   });
   window.addEventListener("resize", () => {
+    invalidateStrongFieldQuality("viewport-resize");
     state.resizePending = true;
     state.needsRender = true;
   });
   document.addEventListener("visibilitychange", () => {
+    invalidateStrongFieldQuality(
+      document.hidden ? "visibility-hidden" : "visibility-resume",
+    );
     lastFrameTime = performance.now();
   });
 }
 
 function showFatalError(message) {
   ui.backendStatus.textContent = "初始化失败";
-  const error = document.createElement("div");
+  const error = app.querySelector(".fatal-error") || document.createElement("div");
   error.className = "fatal-error";
-  error.innerHTML = `<strong>无法启动 GPU 渲染器</strong><span>${String(message)}</span>`;
-  app.append(error);
+  const title = document.createElement("strong");
+  title.textContent = "无法启动 GPU 渲染器";
+  const detail = document.createElement("span");
+  detail.textContent = String(message);
+  error.replaceChildren(title, detail);
+  if (!error.isConnected) {
+    app.append(error);
+  }
 }
 
 let lastFrameTime = performance.now();
 
-function animate(now) {
+function renderAnimationFrame(now) {
   const frameElapsed = Math.max((now - lastFrameTime) / 1000, 0);
   // Clamp only the physical simulation delta after a long stall.  FPS must use
   // the real wall-clock duration or the quality governor overestimates slow
@@ -709,24 +1065,81 @@ function animate(now) {
       }
     }
 
-    if (state.resizePending) {
-      resizeRenderer();
-    }
-    if (state.running || state.dragging || state.needsRender) {
-      renderer.render(frameParameters());
-      state.frame = (state.frame + 1) % 16_777_216;
-      state.needsRender = false;
-      updateFps(frameElapsed);
-      adaptQuality(now);
+    if (strongFieldQualityScheduler) {
+      // A strong-field frame can take much longer than a display refresh.
+      // Do not consume scheduler revisions or accumulation indices while the
+      // preceding Metal submission is still running.  The next free slot is
+      // built from the latest camera and physical time, so stale viewpoints
+      // can never form a queue.
+      if (rendererCanSubmitFrame()) {
+        const frameTimeMs = consumeRendererFrameTimeMs(frameElapsed);
+        const scheduled = scheduledStrongFieldFrame(now, frameTimeMs);
+        strongFieldPreviousFrameRendered = scheduled.decision.shouldRender;
+        if (scheduled.decision.shouldRender) {
+          const submitted = renderer.render(scheduled.frame) !== false;
+          strongFieldPreviousFrameRendered = submitted;
+          if (submitted) {
+            state.frame = (state.frame + 1) % 16_777_216;
+            state.needsRender = false;
+            updateFps((frameTimeMs ?? frameElapsed * 1_000) / 1_000);
+          }
+        }
+      }
+    } else {
+      if (rendererCanSubmitFrame()) {
+        if (state.resizePending) {
+          resizeRenderer();
+        }
+        if (state.running || state.dragging || state.needsRender) {
+          const frameTimeMs = renderer.consumeCompletedFrameTimeMs?.();
+          const submitted = renderer.render(frameParameters()) !== false;
+          if (submitted) {
+            state.frame = (state.frame + 1) % 16_777_216;
+            state.needsRender = false;
+            updateFps(
+              Number.isFinite(frameTimeMs) && frameTimeMs > 0
+                ? frameTimeMs / 1_000
+                : frameElapsed,
+            );
+            adaptQuality(now);
+          }
+        }
+      }
     }
   }
 
-  requestAnimationFrame(animate);
+}
+
+function animate(now) {
+  try {
+    if (!runtimeRenderFailed) {
+      renderAnimationFrame(now);
+    }
+  } catch (error) {
+    console.error("Renderer frame failed", error);
+    if (!requestWebGLRendererRecovery("render-error", error)) {
+      if (!rendererRecoveryStarted) {
+        runtimeRenderFailed = true;
+        renderer?.dispose?.();
+        showFatalError(rendererErrorMessage(error));
+      }
+    }
+  } finally {
+    // A synchronous canvas/device exception must never terminate the RAF
+    // driver. During WebGPU recovery this loop stays inert until navigation
+    // commits; on a non-recoverable backend it keeps the UI responsive.
+    requestAnimationFrame(animate);
+  }
 }
 
 async function start() {
+  setRendererRootClass();
   try {
     activeScene = await loadRequestedScene();
+    strongFieldQualityScheduler = usesStrongFieldQuality(activeScene)
+      ? createStrongFieldQualityScheduler()
+      : null;
+    strongFieldPreviousFrameRendered = false;
     configureSceneLinks(activeScene?.id || "schwarzschild");
     activeScene?.initialize?.();
     bindUi();
@@ -735,6 +1148,12 @@ async function start() {
     setMotion(activeScene?.startsRunning ?? true);
 
     renderer = await createRenderer();
+    setRendererRootClass(renderer.capabilities?.api);
+    await notifySceneRendererReady();
+    strongFieldQualityScheduler?.setBackend(
+      renderer.capabilities?.api || "webgl2",
+      rendererFallbackReason || "renderer-created",
+    );
     ui.backendStatus.textContent = renderer.backend;
     ui.gpuStatus.textContent = renderer.gpu;
     const updateOutputStatus = () => {
@@ -744,23 +1163,40 @@ async function start() {
     updateOutputStatus();
     renderer.onSkyChanged = () => {
       updateOutputStatus();
+      invalidateStrongFieldQuality("sky-texture-change");
       state.needsRender = true;
     };
     const dynamicRange = matchMedia("(dynamic-range: high)");
     dynamicRange.addEventListener?.("change", () => {
       updateOutputStatus();
+      invalidateStrongFieldQuality("output-dynamic-range-change");
       state.needsRender = true;
     });
     if (rendererFallbackReason) {
       ui.backendStatus.title = `WebGPU 回退原因：${rendererFallbackReason}`;
     }
     bindInteractions();
-    resizeRenderer(true);
+    if (strongFieldQualityScheduler) {
+      state.resizePending = true;
+      state.needsRender = true;
+    } else {
+      resizeRenderer(true);
+    }
     app.classList.add("is-ready");
     lastFrameTime = performance.now();
     requestAnimationFrame(animate);
   } catch (error) {
     console.error(error);
+    setRendererRootClass();
+    app.classList.remove("is-ready");
+    renderer?.dispose?.();
+    if (!error?.sceneUiHandled) {
+      try {
+        activeScene?.dispose?.();
+      } catch (disposeError) {
+        console.info("Scene cleanup after renderer startup failure was incomplete.", disposeError);
+      }
+    }
     if (error?.sceneUiHandled) {
       ui.backendStatus.textContent = "数据验证失败";
       return;

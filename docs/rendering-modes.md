@@ -10,10 +10,10 @@ claims.
 
 | Layer | Status | What it does | Permitted claim |
 | --- | --- | --- | --- |
-| Interactive binary scene at the root URL | Implemented | Reconstructs the camera and recomputes frame-frozen, two-centre weak-field bending on the GPU for every rendered frame | SXS-driven dynamics with weak-field fast-light rendering |
+| Interactive binary scene at the root URL | Implemented | Reconstructs the camera and integrates a 3+1 null Hamiltonian through a frame-frozen boosted-superposed Kerr-Schild approximation on WebGPU | Real-time approximate strong-field fast-light rendering; not NR |
 | Interactive Schwarzschild scene at `?scene=schwarzschild` | Implemented | Reconstructs the camera and numerically traces its Schwarzschild rays on the GPU for every rendered frame | Real-time single-hole Schwarzschild visualization with an idealized disk |
 | Stationary Schwarzschild/Kerr workbench | Implemented | Plays authenticated fixed-camera analytic vacuum maps and exposes record-level diagnostics | Stationary analytic calibration, delivery validation, and regression oracle |
-| Interactive strong-field binary renderer | Planned, not implemented | Would retrace rays after every camera or timeline change through a declared strong-field approximate metric on WebGPU | Approximate strong-field fast-light only, unless stronger evidence is supplied |
+| WebGL2 binary compatibility path | Implemented | Runs the previous two-centre weak-field shader when WebGPU is unavailable or forced off | Explicit weak-field preview; no physical-parity claim with WebGPU |
 | High-fidelity offline renderer | Planned, not implemented | Would trace ray bundles through a pinned four-dimensional NR spacetime and optionally perform physical radiative transfer | No current repository output qualifies |
 
 The stationary references are not intermediate frames from the root binary scene.
@@ -37,20 +37,35 @@ sky / declared emission model
 HDR or SDR display transform
 ```
 
-The root binary scene and the explicit `?scene=schwarzschild` scene already
-recompute their GPU ray paths for each rendered frame; they do not look up a
-fixed-camera transfer map. The legacy `?scene=binary-approx` URL remains an
-alias for the root binary scene. Their physics are different:
+The root binary scene and the explicit `?scene=schwarzschild` scene recompute
+their GPU ray paths for each rendered frame; they do not look up a fixed-camera
+transfer map. The legacy `?scene=binary-approx` URL remains an alias for the
+root binary scene. Their physics are different:
 
 - the Schwarzschild scene integrates a reduced null-geodesic equation;
-- the binary scene freezes the two body positions for each ray and applies a
-  weak-field two-centre deflection, followed by a spherical visual remnant.
+- the WebGPU binary scene freezes a declared boosted-superposed Kerr-Schild
+  spacetime for each ray, evaluates its lapse, shift, spatial metric, and
+  analytic spatial derivatives, and integrates a reduced 3+1 null Hamiltonian;
+- the WebGL2 binary fallback remains the old two-centre weak-field deflection
+  and is labelled as a distinct model.
 
-The next interactive physics step is intended to be an isolated WebGPU
-strong-field scene with a horizon-penetrating approximate binary metric and a
-GPU null-geodesic integrator. That work is not present today. It must preserve
-the current scenes and must continue to identify its metric, capture surfaces,
-integration error, and unresolved rays.
+The WebGPU path uses a local ADM-orthonormal camera tetrad, explicit
+captured/escaped/unresolved outcomes, a C² transition to the analytic Kerr
+remnant, and a weak-field analytic continuation from its finite escape sphere.
+It stores the future-directed covector of the photon arriving at the camera and
+integrates the Hamiltonian flow with negative coordinate-time steps, so the
+traced boundary-value path is past-directed. It retains its approximate metric,
+isolated-Kerr excision surfaces, null residual, and unresolved rays as visible
+scientific boundaries.
+
+The M3 Pro scheduler also exposes a numerical hierarchy rather than pretending
+all frames have the same convergence. Deadline-oriented `emergency`, `survival`,
+and `interactive` tiers use larger declared capture padding, longer far-zone
+steps, and smaller budgets. A paused view may progress through `balanced` to
+`fine`, the strictest settled tier. These are latency/convergence policies
+inside the same approximate fast-light model, not different physical
+spacetimes. See [`strong-field-performance.md`](./strong-field-performance.md)
+for the exact values and measured boundary.
 
 ### Fast light and slow light
 
@@ -66,10 +81,10 @@ time-dependent metric data, gauge-aware spacetime interpolation, moving horizon
 worldtubes, and a sufficiently long source-time interval. Substituting a
 heuristic retarded body position into a frozen metric is not equivalent.
 
-An interactive strong-field fast-light renderer would be a substantial
-improvement over the present weak-field binary shader, but it would still not
-be NR ray tracing. A superposed or matched analytic metric remains an
-approximation even if its geodesics are integrated accurately.
+The implemented interactive strong-field fast-light renderer is a substantial
+improvement over the retained WebGL2 weak-field shader, but it is still not NR
+ray tracing. A superposed analytic metric remains an approximation even if its
+geodesics are integrated accurately.
 
 ## Route B: high-fidelity offline rendering
 
@@ -148,14 +163,25 @@ properties. They do not establish any scientific claim in this table.
 
 The repository currently provides:
 
-- interactive per-frame weak-field fast-light recomputation for the root
-  binary scene, driven by pinned SXS dynamics and waveform diagnostics;
+- interactive per-frame WebGPU strong-field approximate fast-light tracing for
+  the root binary scene, with SXS waveform/event/remnant anchors and analytic
+  renderer coordinates that exclude gauge-dependent SXS centroids;
+- documented past-directed ray conventions, isolated-Kerr excision semantics,
+  independent analytic-limit oracles, and adaptive M3 Pro convergence tiers;
+- an explicit WebGL2 weak-field binary compatibility path;
 - interactive GPU ray recomputation for the explicit Schwarzschild scene;
 - deterministic stationary Schwarzschild and Kerr vacuum generators;
 - independent stationary physics verifiers;
 - authenticated v1 map playback, diagnostics, and record inspection.
 
-It does not currently provide an interactive strong-field binary metric,
-four-dimensional NR metric data, NR slow-light pixel rays, ray bundles or
-Jacobi fields, GRMHD matter data, spectral/polarized GR radiative transfer, or
-multilayer OpenEXR scientific masters.
+It does not currently provide four-dimensional NR metric data, NR slow-light
+pixel rays, ray bundles or Jacobi fields, GRMHD matter data,
+spectral/polarized GR radiative transfer, or multilayer OpenEXR scientific
+masters.
+
+The implemented metric and ray conventions are specified in
+[`strong-field-equations.md`](./strong-field-equations.md); scheduling and
+one-frame backpressure in
+[`strong-field-performance.md`](./strong-field-performance.md); and the
+independent CPU acceptance boundary in
+[`strong-field-ray-oracles.md`](./strong-field-ray-oracles.md).

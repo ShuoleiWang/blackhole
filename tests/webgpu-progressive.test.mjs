@@ -1,0 +1,486 @@
+import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
+import test from "node:test";
+
+import {
+  progressiveAccumulationFragmentWGSL,
+  progressiveFrameState,
+  progressiveHistorySignature,
+  webGLRecoveryUrl,
+  webGPUFallbackDescription,
+  WebGPUFrameSubmissionGate,
+  WebGPURenderer,
+} from "../src/webgpu-renderer.js";
+
+function frame(overrides = {}) {
+  return {
+    time: -10,
+    massSolar: 1,
+    accretion: 0,
+    exposure: 1,
+    mode: 0,
+    steps: 160,
+    cameraPos: [0, 0, 40],
+    cameraRadius: 40,
+    forward: [0, 0, -1],
+    fov: 0.7,
+    right: [1, 0, 0],
+    skyRotation: 0,
+    up: [0, 1, 0],
+    diskOuterRadius: 18,
+    renderScale: 1,
+    bloom: 0,
+    motion: 0,
+    frame: 99,
+    observerVelocity: [0, 0, 0],
+    observerBeta: 0,
+    sceneStrongFieldUniforms: new Float32Array(44),
+    sceneStrongIntegrator: [0.02, 0.75, 3.6, 0.08],
+    sceneStrongDomain: [96, 240, 0.035, 32],
+    sceneStrongDiagnostics: [4, 180, 0.22, 1],
+    strongFieldQuality: {
+      accumulationIndex: 0,
+      accumulationWeight: 1,
+      historyEpoch: 1,
+      historyReset: true,
+    },
+    ...overrides,
+  };
+}
+
+test("progressive accumulation shader averages linear HDR before post", () => {
+  assert.match(
+    progressiveAccumulationFragmentWGSL,
+    /textureLoad\(rawTrace/,
+  );
+  assert.match(
+    progressiveAccumulationFragmentWGSL,
+    /textureLoad\(previousFrame/,
+  );
+  assert.match(
+    progressiveAccumulationFragmentWGSL,
+    /return mix\(previous, raw, weight\)/,
+  );
+  assert.match(progressiveAccumulationFragmentWGSL, /if \(reset\)/);
+  assert.doesNotMatch(progressiveAccumulationFragmentWGSL, /tone|exposure/i);
+});
+
+test("progressive state requires an exact running-average weight", () => {
+  assert.deepEqual(progressiveFrameState(frame()), {
+    accumulationIndex: 0,
+    accumulationWeight: 1,
+    historyEpoch: 1,
+    historyReset: true,
+  });
+  assert.deepEqual(progressiveFrameState(frame({
+    strongFieldQuality: {
+      accumulationIndex: 3,
+      accumulationWeight: 0.25,
+      historyEpoch: 2,
+      historyReset: false,
+    },
+  })), {
+    accumulationIndex: 3,
+    accumulationWeight: 0.25,
+    historyEpoch: 2,
+    historyReset: false,
+  });
+  assert.throws(
+    () => progressiveFrameState(frame({
+      strongFieldQuality: {
+        accumulationIndex: 3,
+        accumulationWeight: 0.5,
+        historyEpoch: 2,
+        historyReset: false,
+      },
+    })),
+    /1\/\(sampleIndex\+1\)/,
+  );
+  assert.throws(
+    () => progressiveFrameState(frame({
+      strongFieldQuality: {
+        accumulationIndex: 1,
+        accumulationWeight: 0.5,
+        historyEpoch: 2,
+        historyReset: true,
+      },
+    })),
+    /restart at sample zero/,
+  );
+});
+
+test("history signature changes for every ray-domain input but not sample index", () => {
+  const base = frame();
+  const signature = progressiveHistorySignature(base);
+  for (const changed of [
+    frame({ time: -9 }),
+    frame({ cameraPos: [0.1, 0, 40] }),
+    frame({ fov: 0.71 }),
+    frame({ steps: 96 }),
+    frame({ sceneStrongIntegrator: [0.03, 1.1, 3.4, 0.1] }),
+    frame({
+      sceneStrongFieldUniforms: Float32Array.from(
+        { length: 44 },
+        (_, index) => index === 12 ? 1 : 0,
+      ),
+    }),
+  ]) {
+    assert.notEqual(progressiveHistorySignature(changed), signature);
+  }
+  assert.equal(
+    progressiveHistorySignature(frame({
+      frame: 7,
+      strongFieldQuality: {
+        accumulationIndex: 7,
+        accumulationWeight: 0.125,
+        historyEpoch: 1,
+        historyReset: false,
+      },
+    })),
+    signature,
+  );
+});
+
+test("renderer independently forces sample zero after a stale camera history", () => {
+  const renderer = Object.create(WebGPURenderer.prototype);
+  renderer.progressiveAccumulation = {
+    mode: "linear-hdr-running-average-v1",
+  };
+  renderer.progressiveHistoryValid = true;
+  renderer.progressiveHistorySignature = progressiveHistorySignature(frame());
+  renderer.progressiveHistoryEpoch = 1;
+
+  let prepared = renderer.prepareProgressiveFrame(frame({
+    strongFieldQuality: {
+      accumulationIndex: 1,
+      accumulationWeight: 0.5,
+      historyEpoch: 1,
+      historyReset: false,
+    },
+  }));
+  assert.equal(prepared.state.historyReset, false);
+  assert.equal(prepared.frame.frame, 1);
+
+  prepared = renderer.prepareProgressiveFrame(frame({
+    cameraPos: [1, 0, 40],
+    strongFieldQuality: {
+      accumulationIndex: 2,
+      accumulationWeight: 1 / 3,
+      historyEpoch: 1,
+      historyReset: false,
+    },
+  }));
+  assert.equal(prepared.state.historyReset, true);
+  assert.equal(prepared.state.accumulationIndex, 0);
+  assert.equal(prepared.state.accumulationWeight, 1);
+  assert.equal(prepared.frame.frame, 0);
+  assert.equal(prepared.frame.strongFieldQuality.historyReset, true);
+});
+
+test("motion always prevents cross-time history reuse", () => {
+  const renderer = Object.create(WebGPURenderer.prototype);
+  renderer.progressiveAccumulation = {
+    mode: "linear-hdr-running-average-v1",
+  };
+  const moving = frame({
+    motion: 1,
+    strongFieldQuality: {
+      accumulationIndex: 4,
+      accumulationWeight: 0.2,
+      historyEpoch: 5,
+      historyReset: false,
+    },
+  });
+  renderer.progressiveHistoryValid = true;
+  renderer.progressiveHistorySignature = progressiveHistorySignature(moving);
+  renderer.progressiveHistoryEpoch = 5;
+  const prepared = renderer.prepareProgressiveFrame(moving);
+  assert.equal(prepared.state.historyReset, true);
+  assert.equal(prepared.state.accumulationIndex, 0);
+});
+
+test("WebGPU submission gate permits exactly one in-flight frame", async () => {
+  let now = 100;
+  let resolveWork;
+  const workDone = new Promise((resolve) => {
+    resolveWork = resolve;
+  });
+  let submissions = 0;
+  const queue = {
+    submit(commandBuffers) {
+      submissions += 1;
+      assert.deepEqual(commandBuffers, ["frame-0"]);
+    },
+    onSubmittedWorkDone() {
+      return workDone;
+    },
+  };
+  const gate = new WebGPUFrameSubmissionGate(() => now);
+
+  assert.equal(gate.readyForFrame, true);
+  assert.equal(gate.submit(queue, ["frame-0"]), true);
+  assert.equal(gate.readyForFrame, false);
+  assert.equal(gate.canSubmitFrame(), false);
+  assert.equal(gate.submit(queue, ["frame-1"]), false);
+  assert.equal(submissions, 1);
+  assert.equal(gate.consumeCompletedFrameTimeMs(), null);
+
+  now = 143;
+  resolveWork();
+  await workDone;
+  await Promise.resolve();
+
+  assert.equal(gate.readyForFrame, true);
+  assert.equal(gate.lastQueueCompletionAtMs, 143);
+  assert.equal(gate.lastCompletedFrameTimeMs, 43);
+  assert.equal(gate.consumeCompletedFrameTimeMs(), 43);
+  assert.equal(gate.consumeCompletedFrameTimeMs(), null);
+});
+
+test("failed WebGPU work closes the gate without inventing a timing sample", async () => {
+  let rejectWork;
+  const workDone = new Promise((resolve, reject) => {
+    rejectWork = reject;
+  });
+  const expected = new Error("device lost");
+  const gate = new WebGPUFrameSubmissionGate(() => 10);
+  const failures = [];
+  gate.onFailure = (error) => failures.push(error);
+  const queue = {
+    submit() {},
+    onSubmittedWorkDone() {
+      return workDone;
+    },
+  };
+
+  assert.equal(gate.submit(queue, [{}]), true);
+  rejectWork(expected);
+  await assert.rejects(workDone, expected);
+  await Promise.resolve();
+
+  assert.equal(gate.readyForFrame, false);
+  assert.equal(gate.lastCompletionError, expected);
+  assert.deepEqual(failures, [expected]);
+  assert.equal(gate.consumeCompletedFrameTimeMs(), null);
+});
+
+test("closing a submission gate ignores a late queue completion", async () => {
+  let resolveWork;
+  const workDone = new Promise((resolve) => {
+    resolveWork = resolve;
+  });
+  let now = 20;
+  const gate = new WebGPUFrameSubmissionGate(() => now);
+  const queue = {
+    submit() {},
+    onSubmittedWorkDone() {
+      return workDone;
+    },
+  };
+
+  assert.equal(gate.submit(queue, [{}]), true);
+  gate.close();
+  now = 80;
+  resolveWork();
+  await workDone;
+  await Promise.resolve();
+
+  assert.equal(gate.readyForFrame, false);
+  assert.equal(gate.lastQueueCompletionAtMs, null);
+  assert.equal(gate.consumeCompletedFrameTimeMs(), null);
+});
+
+test("runtime recovery URL explicitly selects WebGL2 and records one bounded reason", () => {
+  const recovered = new URL(webGLRecoveryUrl(
+    "http://localhost:4173/?scene=binary-approx&renderer=webgpu#view",
+    "device-lost",
+  ));
+  assert.equal(recovered.searchParams.get("scene"), "binary-approx");
+  assert.equal(recovered.searchParams.get("renderer"), "webgl");
+  assert.equal(recovered.searchParams.get("fallback"), "webgpu-device-lost");
+  assert.equal(recovered.hash, "#view");
+  assert.equal(
+    webGPUFallbackDescription(recovered.searchParams.get("fallback")),
+    "WebGPU 设备连接丢失",
+  );
+  assert.equal(webGPUFallbackDescription("unknown"), "");
+  assert.throws(
+    () => webGLRecoveryUrl("http://localhost/", "arbitrary-message"),
+    /Unsupported WebGPU recovery reason/,
+  );
+});
+
+test("late sky upgrades are rejected after disposal or lifecycle change", () => {
+  for (const renderer of [
+    { disposed: true, lost: false, lifecycleGeneration: 2 },
+    { disposed: false, lost: true, lifecycleGeneration: 2 },
+    { disposed: false, lost: false, lifecycleGeneration: 3 },
+  ]) {
+    let destroyed = 0;
+    renderer.createTraceBindGroup = () => {
+      throw new Error("must not touch a dead GPU device");
+    };
+    const adopted = WebGPURenderer.prototype.adoptSkyTextureUpgrade.call(
+      renderer,
+      {
+        texture: { destroy: () => { destroyed += 1; } },
+        width: 16000,
+        height: 8000,
+        url: "ultra.png",
+      },
+      2,
+    );
+    assert.equal(adopted, false);
+    assert.equal(destroyed, 1);
+  }
+});
+
+test("sky upgrade publication is transactional and destroys the retired texture", () => {
+  let previousDestroyed = 0;
+  let nextDestroyed = 0;
+  let invalidations = 0;
+  let notifications = 0;
+  const nextTexture = { destroy: () => { nextDestroyed += 1; } };
+  const renderer = {
+    disposed: false,
+    lost: false,
+    lifecycleGeneration: 7,
+    skyTexture: { destroy: () => { previousDestroyed += 1; } },
+    createTraceBindGroup(texture) {
+      assert.equal(texture, nextTexture);
+      return { id: "new-bind-group" };
+    },
+    invalidateProgressiveHistory() {
+      invalidations += 1;
+    },
+    reportCapabilities() {},
+    onSkyChanged() {
+      notifications += 1;
+    },
+  };
+
+  assert.equal(
+    WebGPURenderer.prototype.adoptSkyTextureUpgrade.call(
+      renderer,
+      {
+        texture: nextTexture,
+        width: 16000,
+        height: 8000,
+        url: "gaia-edr3-16k.png",
+      },
+      7,
+    ),
+    true,
+  );
+  assert.equal(renderer.traceBindGroup.id, "new-bind-group");
+  assert.equal(renderer.skyTexture, nextTexture);
+  assert.equal(previousDestroyed, 1);
+  assert.equal(nextDestroyed, 0);
+  assert.equal(invalidations, 1);
+  assert.equal(notifications, 1);
+});
+
+test("a failed sky bind-group build destroys only the unpublished texture", () => {
+  let previousDestroyed = 0;
+  let nextDestroyed = 0;
+  const previousTexture = { destroy: () => { previousDestroyed += 1; } };
+  const renderer = {
+    disposed: false,
+    lost: false,
+    lifecycleGeneration: 1,
+    skyTexture: previousTexture,
+    createTraceBindGroup() {
+      throw new Error("device validation failed");
+    },
+  };
+  assert.throws(
+    () => WebGPURenderer.prototype.adoptSkyTextureUpgrade.call(
+      renderer,
+      {
+        texture: { destroy: () => { nextDestroyed += 1; } },
+        width: 16000,
+        height: 8000,
+        url: "ultra.png",
+      },
+      1,
+    ),
+    /device validation failed/,
+  );
+  assert.equal(renderer.skyTexture, previousTexture);
+  assert.equal(previousDestroyed, 0);
+  assert.equal(nextDestroyed, 1);
+});
+
+test("dispose cancels renderer-owned callbacks and is idempotent", () => {
+  const calls = [];
+  const lifecycle = { renderer: null };
+  const renderer = Object.assign(Object.create(WebGPURenderer.prototype), {
+    disposed: false,
+    lifecycleGeneration: 4,
+    cancelSkyUpgradeTask: () => calls.push("cancel-task"),
+    skyUpgradeController: { abort: () => calls.push("abort-upgrade") },
+    deviceLossLifecycle: lifecycle,
+    device: {
+      removeEventListener: () => calls.push("remove-listener"),
+      destroy: () => calls.push("destroy-device"),
+    },
+    handleUncapturedError() {},
+    submissionGate: { close: () => calls.push("close-gate") },
+    sceneResourceState: { dispose: () => calls.push("dispose-scene") },
+    destroyProgressiveTargets: () => calls.push("destroy-history"),
+    traceTexture: { destroy: () => calls.push("destroy-trace") },
+    skyTexture: { destroy: () => calls.push("destroy-sky") },
+    accumulationBuffer: { destroy: () => calls.push("destroy-accumulation") },
+    uniformBuffer: { destroy: () => calls.push("destroy-uniforms") },
+    context: { unconfigure: () => calls.push("unconfigure") },
+    onLost() {},
+    onError() {},
+    onSkyChanged() {},
+  });
+  lifecycle.renderer = renderer;
+
+  renderer.dispose();
+  renderer.dispose();
+
+  assert.equal(renderer.lifecycleGeneration, 5);
+  assert.equal(lifecycle.renderer, null);
+  assert.equal(renderer.onLost, null);
+  assert.equal(renderer.onError, null);
+  assert.equal(renderer.onSkyChanged, null);
+  assert.deepEqual(calls, [
+    "cancel-task",
+    "abort-upgrade",
+    "remove-listener",
+    "close-gate",
+    "dispose-scene",
+    "destroy-history",
+    "destroy-trace",
+    "destroy-sky",
+    "destroy-accumulation",
+    "destroy-uniforms",
+    "unconfigure",
+    "destroy-device",
+  ]);
+});
+
+test("main runtime routes WebGPU failures through recovery and always reschedules RAF", async () => {
+  const source = await readFile(
+    new URL("../src/main.js", import.meta.url),
+    "utf8",
+  );
+  assert.match(source, /webgpu\.onLost = \(info\) => \{/);
+  assert.match(source, /webgpu\.onError = \(error\) => \{/);
+  assert.match(
+    source,
+    /requestWebGLRendererRecovery\("render-error", error, webgpu\)/,
+  );
+  assert.match(source, /if \(webgpu\.lost\) \{/);
+  assert.match(
+    source,
+    /finally \{[\s\S]*requestAnimationFrame\(animate\);[\s\S]*\}/,
+  );
+  assert.doesNotMatch(
+    source,
+    /webgpu\.onLost[\s\S]{0,260}showFatalError/,
+  );
+});

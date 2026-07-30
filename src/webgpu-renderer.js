@@ -7,9 +7,327 @@ import {
 const HDR_FORMAT = "rgba16float";
 const UNIFORM_FLOATS = 40;
 const ULTRA_SKY_DIMENSION = 16000;
+const PROGRESSIVE_ACCUMULATION_MODE = "linear-hdr-running-average-v1";
+const WEBGPU_FALLBACK_REASONS = Object.freeze({
+  "device-lost": "WebGPU 设备连接丢失",
+  "render-error": "WebGPU 渲染异常",
+});
+
+export function webGLRecoveryUrl(href, reason) {
+  if (!Object.hasOwn(WEBGPU_FALLBACK_REASONS, reason)) {
+    throw new Error(`Unsupported WebGPU recovery reason ${JSON.stringify(reason)}`);
+  }
+  const url = new URL(href);
+  url.searchParams.set("renderer", "webgl");
+  url.searchParams.set("fallback", `webgpu-${reason}`);
+  return url.href;
+}
+
+export function webGPUFallbackDescription(token) {
+  const prefix = "webgpu-";
+  const reason = typeof token === "string" && token.startsWith(prefix)
+    ? token.slice(prefix.length)
+    : "";
+  return WEBGPU_FALLBACK_REASONS[reason] || "";
+}
+
+function monotonicNowMs() {
+  return globalThis.performance?.now?.() ?? Date.now();
+}
+
+/*
+ * WebGPU queue.submit() is intentionally asynchronous.  Without an explicit
+ * gate, requestAnimationFrame can enqueue many expensive ray-trace passes
+ * while Metal is still executing the first one.  Apart from input latency,
+ * that also makes RAF cadence a dangerously optimistic proxy for GPU time.
+ *
+ * This small queue-agnostic contract keeps exactly one submission in flight
+ * and exposes each completed wall-time sample once to the quality scheduler.
+ */
+export class WebGPUFrameSubmissionGate {
+  constructor(now = monotonicNowMs) {
+    if (typeof now !== "function") {
+      throw new TypeError("WebGPU submission gate clock must be a function");
+    }
+    this.now = now;
+    this.inFlight = false;
+    this.closed = false;
+    this.generation = 0;
+    this.submittedAtMs = null;
+    this.lastQueueCompletionAtMs = null;
+    this.lastCompletedFrameTimeMs = null;
+    this.pendingCompletedFrameTimeMs = null;
+    this.lastCompletionError = null;
+    this.onFailure = null;
+  }
+
+  get readyForFrame() {
+    return !this.closed && !this.inFlight;
+  }
+
+  canSubmitFrame() {
+    return this.readyForFrame;
+  }
+
+  submit(queue, commandBuffers) {
+    if (!this.readyForFrame) {
+      return false;
+    }
+    if (
+      !queue
+      || typeof queue.submit !== "function"
+      || typeof queue.onSubmittedWorkDone !== "function"
+    ) {
+      throw new TypeError(
+        "WebGPU submission gate requires submit() and onSubmittedWorkDone()",
+      );
+    }
+    if (!Array.isArray(commandBuffers) || commandBuffers.length === 0) {
+      throw new TypeError("WebGPU submission requires at least one command buffer");
+    }
+
+    const generation = ++this.generation;
+    const submittedAtMs = this.now();
+    this.inFlight = true;
+    this.submittedAtMs = submittedAtMs;
+    this.lastCompletionError = null;
+    try {
+      queue.submit(commandBuffers);
+    } catch (error) {
+      this.inFlight = false;
+      this.submittedAtMs = null;
+      throw error;
+    }
+
+    let completion;
+    try {
+      completion = queue.onSubmittedWorkDone();
+    } catch (error) {
+      // The work was already submitted, so remain closed to further frames
+      // rather than risk violating the one-in-flight invariant.
+      this.lastCompletionError = error;
+      this.closed = true;
+      throw error;
+    }
+    Promise.resolve(completion).then(
+      () => this.complete(generation, submittedAtMs),
+      (error) => this.fail(generation, error),
+    );
+    return true;
+  }
+
+  complete(generation, submittedAtMs) {
+    if (this.closed || generation !== this.generation) {
+      return;
+    }
+    const completedAtMs = this.now();
+    const elapsedMs = Math.max(completedAtMs - submittedAtMs, 0.001);
+    this.inFlight = false;
+    this.submittedAtMs = null;
+    this.lastQueueCompletionAtMs = completedAtMs;
+    this.lastCompletedFrameTimeMs = elapsedMs;
+    this.pendingCompletedFrameTimeMs = elapsedMs;
+  }
+
+  fail(generation, error) {
+    if (this.closed || generation !== this.generation) {
+      return;
+    }
+    this.inFlight = false;
+    this.closed = true;
+    this.submittedAtMs = null;
+    this.lastCompletionError = error;
+    try {
+      this.onFailure?.(error);
+    } catch (callbackError) {
+      console.error("WebGPU submission failure callback threw", callbackError);
+    }
+  }
+
+  consumeCompletedFrameTimeMs() {
+    const sample = this.pendingCompletedFrameTimeMs;
+    this.pendingCompletedFrameTimeMs = null;
+    return sample;
+  }
+
+  close() {
+    this.closed = true;
+    this.inFlight = false;
+    this.submittedAtMs = null;
+    this.generation += 1;
+    this.pendingCompletedFrameTimeMs = null;
+    this.onFailure = null;
+  }
+}
+
+export const progressiveAccumulationFragmentWGSL = /* wgsl */ `
+struct FragmentInput {
+  @builtin(position) position: vec4<f32>,
+  @location(0) uv: vec2<f32>,
+};
+
+struct AccumulationParams {
+  weightResetIndexEpoch: vec4<f32>,
+};
+
+@group(0) @binding(0) var previousFrame: texture_2d<f32>;
+@group(0) @binding(1) var rawTrace: texture_2d<f32>;
+@group(0) @binding(2) var<uniform> accumulation: AccumulationParams;
+
+@fragment
+fn fsMain(input: FragmentInput) -> @location(0) vec4<f32> {
+  let dimensions = textureDimensions(rawTrace);
+  let pixel = clamp(
+    vec2<i32>(input.position.xy),
+    vec2<i32>(0),
+    vec2<i32>(dimensions) - vec2<i32>(1)
+  );
+  let raw = textureLoad(rawTrace, pixel, 0);
+  let reset = accumulation.weightResetIndexEpoch.y > 0.5;
+  if (reset) {
+    return raw;
+  }
+  let previous = textureLoad(previousFrame, pixel, 0);
+  let weight = clamp(accumulation.weightResetIndexEpoch.x, 0.0, 1.0);
+  return mix(previous, raw, weight);
+}
+`;
 
 function shaderBundleFrom(options) {
   return options?.shaderBundle || {};
+}
+
+function progressiveAccumulationFrom(options, bundle) {
+  const declaration = options?.progressiveAccumulation ?? bundle.accumulation;
+  if (declaration == null && bundle.id !== "binary-strong-field-v1") {
+    return null;
+  }
+  const mode = declaration?.mode ?? (
+    bundle.id === "binary-strong-field-v1"
+      ? PROGRESSIVE_ACCUMULATION_MODE
+      : null
+  );
+  if (mode !== PROGRESSIVE_ACCUMULATION_MODE) {
+    throw new Error(
+      `Unsupported WebGPU progressive accumulation mode ${JSON.stringify(mode)}`,
+    );
+  }
+  return Object.freeze({ mode });
+}
+
+function finiteHistoryValue(value, name) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) {
+    throw new Error(`Progressive history ${name} must be finite`);
+  }
+  return number;
+}
+
+function appendHistoryValues(target, name, value) {
+  if (value == null) {
+    target.push(`${name}=null`);
+    return;
+  }
+  if (typeof value === "number") {
+    target.push(`${name}=${finiteHistoryValue(value, name)}`);
+    return;
+  }
+  if (Array.isArray(value) || ArrayBuffer.isView(value)) {
+    target.push(`${name}=[`);
+    for (let index = 0; index < value.length; index += 1) {
+      target.push(String(finiteHistoryValue(value[index], `${name}[${index}]`)));
+    }
+    target.push("]");
+    return;
+  }
+  throw new Error(`Progressive history ${name} has an unsupported value`);
+}
+
+export function progressiveHistorySignature(frame) {
+  if (!frame || typeof frame !== "object" || Array.isArray(frame)) {
+    throw new TypeError("Progressive history requires a frame object");
+  }
+  const values = [];
+  for (const name of [
+    "time",
+    "massSolar",
+    "accretion",
+    "exposure",
+    "mode",
+    "steps",
+    "cameraPos",
+    "cameraRadius",
+    "forward",
+    "fov",
+    "right",
+    "skyRotation",
+    "up",
+    "diskOuterRadius",
+    "renderScale",
+    "bloom",
+    "motion",
+    "observerVelocity",
+    "observerBeta",
+    "sceneStrongFieldUniforms",
+    "sceneStrongIntegrator",
+    "sceneStrongDomain",
+    "sceneStrongDiagnostics",
+    "sceneBinaryState",
+    "sceneBinaryMasses",
+  ]) {
+    appendHistoryValues(values, name, frame[name]);
+  }
+  return values.join("|");
+}
+
+export function progressiveFrameState(frame) {
+  const quality = frame?.strongFieldQuality;
+  if (quality == null) {
+    return Object.freeze({
+      accumulationIndex: 0,
+      accumulationWeight: 1,
+      historyEpoch: 0,
+      historyReset: true,
+    });
+  }
+  const accumulationIndex = finiteHistoryValue(
+    quality.accumulationIndex,
+    "accumulationIndex",
+  );
+  const accumulationWeight = finiteHistoryValue(
+    quality.accumulationWeight,
+    "accumulationWeight",
+  );
+  const historyEpoch = finiteHistoryValue(
+    quality.historyEpoch,
+    "historyEpoch",
+  );
+  if (
+    !Number.isInteger(accumulationIndex)
+    || accumulationIndex < 0
+    || !Number.isInteger(historyEpoch)
+    || historyEpoch < 0
+    || accumulationWeight <= 0
+    || accumulationWeight > 1
+  ) {
+    throw new Error("Progressive history state is outside its valid range");
+  }
+  const expectedWeight = 1 / (accumulationIndex + 1);
+  if (Math.abs(accumulationWeight - expectedWeight) > 1e-7) {
+    throw new Error(
+      "Progressive accumulation weight must equal 1/(sampleIndex+1)",
+    );
+  }
+  const historyReset = quality.historyReset === true;
+  if (historyReset && accumulationIndex !== 0) {
+    throw new Error("A progressive history reset must restart at sample zero");
+  }
+  return Object.freeze({
+    accumulationIndex,
+    accumulationWeight,
+    historyEpoch,
+    historyReset,
+  });
 }
 
 function uniformFloatCount(bundle) {
@@ -77,21 +395,89 @@ function skyCandidates(urls, maxTextureDimension, includeUltra = true) {
 }
 
 function scheduleBackgroundTask(callback) {
+  let active = true;
+  let handle;
+  const run = () => {
+    if (!active) {
+      return;
+    }
+    active = false;
+    callback();
+  };
   if (typeof requestIdleCallback === "function") {
-    requestIdleCallback(callback, { timeout: 2500 });
+    handle = requestIdleCallback(run, { timeout: 2500 });
+    return () => {
+      active = false;
+      globalThis.cancelIdleCallback?.(handle);
+    };
   } else {
-    setTimeout(callback, 1200);
+    handle = setTimeout(run, 1200);
+    return () => {
+      active = false;
+      clearTimeout(handle);
+    };
   }
 }
 
-async function loadBitmap(url) {
-  const response = await fetch(url);
+function abortError() {
+  return new DOMException("The sky-texture load was aborted", "AbortError");
+}
+
+function throwIfAborted(signal) {
+  if (signal?.aborted) {
+    throw signal.reason instanceof Error ? signal.reason : abortError();
+  }
+}
+
+function waitForAbort(promise, signal, disposeLateValue = undefined) {
+  if (!signal) {
+    return promise;
+  }
+  throwIfAborted(signal);
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    const onAbort = () => {
+      settled = true;
+      reject(signal.reason instanceof Error ? signal.reason : abortError());
+    };
+    signal.addEventListener("abort", onAbort, { once: true });
+    Promise.resolve(promise).then(
+      (value) => {
+        signal.removeEventListener("abort", onAbort);
+        if (settled) {
+          disposeLateValue?.(value);
+          return;
+        }
+        settled = true;
+        resolve(value);
+      },
+      (error) => {
+        signal.removeEventListener("abort", onAbort);
+        if (settled) {
+          return;
+        }
+        settled = true;
+        reject(error);
+      },
+    );
+  });
+}
+
+async function loadBitmap(url, signal = undefined) {
+  throwIfAborted(signal);
+  const response = await fetch(url, { signal });
   if (!response.ok) {
     throw new Error(`Sky texture request failed (${response.status})`);
   }
   const blob = await response.blob();
   try {
-    return await createImageBitmap(blob, { colorSpaceConversion: "none" });
+    const bitmap = await waitForAbort(
+      createImageBitmap(blob, { colorSpaceConversion: "none" }),
+      signal,
+      (lateBitmap) => lateBitmap.close?.(),
+    );
+    throwIfAborted(signal);
+    return bitmap;
   } catch (bitmapError) {
     // Chromium can reject very large PNGs in the ImageBitmap decoder even
     // when the GPU advertises a 16K texture limit.  HTMLImageElement uses the
@@ -102,10 +488,12 @@ async function loadBitmap(url) {
     image.decoding = "async";
     image.src = objectUrl;
     try {
-      await image.decode();
+      await waitForAbort(image.decode(), signal);
+      throwIfAborted(signal);
       image.close = () => URL.revokeObjectURL(objectUrl);
       return image;
     } catch (imageError) {
+      image.src = "";
       URL.revokeObjectURL(objectUrl);
       throw new AggregateError(
         [bitmapError, imageError],
@@ -149,21 +537,34 @@ async function uploadSkyTexture(device, bitmap, url) {
   return texture;
 }
 
-async function loadBestSkyTexture(device, urls, includeUltra = true) {
+async function loadBestSkyTexture(
+  device,
+  urls,
+  includeUltra = true,
+  signal = undefined,
+) {
   const maxTextureDimension = finiteLimit(device.limits.maxTextureDimension2D, 4096);
   let lastError;
   for (const url of skyCandidates(urls, maxTextureDimension, includeUltra)) {
     let bitmap;
     try {
-      bitmap = await loadBitmap(url);
+      throwIfAborted(signal);
+      bitmap = await loadBitmap(url, signal);
       if (bitmap.width > maxTextureDimension || bitmap.height > maxTextureDimension) {
         throw new Error(
           `${bitmap.width}×${bitmap.height} exceeds the device ${maxTextureDimension}px texture limit`,
         );
       }
       const texture = await uploadSkyTexture(device, bitmap, url);
+      if (signal?.aborted) {
+        texture.destroy();
+        throwIfAborted(signal);
+      }
       return { texture, width: bitmap.width, height: bitmap.height, url };
     } catch (error) {
+      if (signal?.aborted) {
+        throw error;
+      }
       lastError = error;
       console.info(`Sky candidate ${url} unavailable; trying the next size.`, error);
     } finally {
@@ -297,18 +698,55 @@ export class WebGPURenderer {
     this.skyDetail = "银河背景待载入";
     this.skyRadianceScale = 0.55;
     this.shaderBundle = shaderBundleFrom(options);
+    this.progressiveAccumulation = progressiveAccumulationFrom(
+      options,
+      this.shaderBundle,
+    );
     this.uniformData = new Float32Array(uniformFloatCount(this.shaderBundle));
     this.width = 1;
     this.height = 1;
     this.traceTexture = null;
     this.traceView = null;
     this.postBindGroup = null;
+    this.accumulationBuffer = null;
+    this.accumulationData = new Float32Array(4);
+    this.accumulationTextures = [];
+    this.accumulationViews = [];
+    this.accumulationBindGroups = [];
+    this.progressivePostBindGroups = [];
+    this.accumulationReadIndex = 0;
+    this.progressiveHistoryValid = false;
+    this.progressiveHistorySignature = null;
+    this.progressiveHistoryEpoch = null;
+    this.submissionGate = new WebGPUFrameSubmissionGate();
+    this.submissionGate.onFailure = (error) => {
+      if (!this.disposed && !this.lost) {
+        this.pendingRuntimeError = error;
+        this.onError?.(error);
+      }
+    };
+    this.disposed = false;
     this.lost = false;
+    this.deviceLossInfo = null;
+    this.pendingRuntimeError = null;
+    this.lifecycleGeneration = 0;
+    this.cancelSkyUpgradeTask = null;
+    this.skyUpgradeController = null;
     this.outputFallbackReason = "";
     this.resizeWasClamped = false;
-    device.addEventListener?.("uncapturederror", (event) => {
+    this.handleUncapturedError = (event) => {
       console.error("Uncaptured WebGPU validation error", event.error);
-    });
+      if (!this.disposed && !this.lost) {
+        const error = event.error || new Error("Uncaptured WebGPU validation error");
+        this.pendingRuntimeError = error;
+        try {
+          this.onError?.(error);
+        } catch (callbackError) {
+          console.error("WebGPU validation-error callback threw", callbackError);
+        }
+      }
+    };
+    device.addEventListener?.("uncapturederror", this.handleUncapturedError);
   }
 
   get hdrMode() {
@@ -318,6 +756,30 @@ export class WebGPURenderer {
         : "P3 扩展 · 屏幕 SDR";
     }
     return this.displayP3 ? "Display‑P3 · SDR" : "sRGB · SDR";
+  }
+
+  get readyForFrame() {
+    return (
+      !this.lost
+      && !this.disposed
+      && this.submissionGate.readyForFrame
+    );
+  }
+
+  canSubmitFrame() {
+    return this.readyForFrame;
+  }
+
+  consumeCompletedFrameTimeMs() {
+    return this.submissionGate.consumeCompletedFrameTimeMs();
+  }
+
+  get lastQueueCompletionAtMs() {
+    return this.submissionGate.lastQueueCompletionAtMs;
+  }
+
+  get lastCompletedFrameTimeMs() {
+    return this.submissionGate.lastCompletedFrameTimeMs;
   }
 
   configureOutput() {
@@ -413,7 +875,7 @@ export class WebGPURenderer {
       deviceMaxTextureDimension2D: this.maxRenderDimension,
       requestedUltraTextureLimit: this.requestedUltraLimit,
       limitFallbackReason: this.limitFallbackReason,
-      features,
+      features: Object.freeze(features),
       canvasFormat: this.format,
       canvasColorSpace: this.displayP3 ? "display-p3" : "srgb",
       canvasToneMapping: this.outputHDR ? "extended" : "standard",
@@ -423,6 +885,8 @@ export class WebGPURenderer {
         : "unavailable",
       skyUrl: this.skyUrl || "",
       outputFallbackReason: this.outputFallbackReason,
+      progressiveAccumulation: this.progressiveAccumulation?.mode || "disabled",
+      maxFramesInFlight: 1,
     });
     console.info("Black-hole renderer capabilities", this.capabilities);
   }
@@ -480,10 +944,19 @@ export class WebGPURenderer {
       label: "HDR telescope post-process",
       code: postFragmentWGSL,
     });
+    const accumulationModule = this.progressiveAccumulation
+      ? device.createShaderModule({
+        label: "Strong-field linear HDR progressive accumulation",
+        code: progressiveAccumulationFragmentWGSL,
+      })
+      : null;
 
     const compilation = await Promise.all([
       traceModule.getCompilationInfo(),
       postModule.getCompilationInfo(),
+      ...(accumulationModule
+        ? [accumulationModule.getCompilationInfo()]
+        : []),
     ]);
     const errors = compilation.flatMap((info) => info.messages.filter((message) => message.type === "error"));
     if (errors.length) {
@@ -513,14 +986,61 @@ export class WebGPURenderer {
       },
       primitive: { topology: "triangle-list" },
     });
+    if (accumulationModule) {
+      this.accumulationPipeline = await device.createRenderPipelineAsync({
+        label: "Strong-field progressive accumulation pipeline",
+        layout: "auto",
+        vertex: { module: vertexModule, entryPoint: "vsMain" },
+        fragment: {
+          module: accumulationModule,
+          entryPoint: "fsMain",
+          targets: [{ format: HDR_FORMAT }],
+        },
+        primitive: { topology: "triangle-list" },
+      });
+      this.accumulationBuffer = device.createBuffer({
+        label: "Strong-field progressive accumulation parameters",
+        size: this.accumulationData.byteLength,
+        usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+      });
+    }
 
     this.sceneResourceState = createSceneResources(this.shaderBundle, device);
     this.traceBindGroup = this.createTraceBindGroup(this.skyTexture);
 
-    device.lost.then((info) => {
-      this.lost = true;
-      this.onLost?.(info);
-    });
+    // GPUDevice.lost cannot be cancelled. Keep only this detachable lifecycle
+    // cell in the promise closure so dispose() releases the renderer and all
+    // user callbacks even if the browser never resolves the device promise.
+    const deviceLossLifecycle = { renderer: this };
+    this.deviceLossLifecycle = deviceLossLifecycle;
+    const handleDeviceLoss = (info) => {
+      const target = deviceLossLifecycle.renderer;
+      deviceLossLifecycle.renderer = null;
+      if (!target || target.disposed || target.lost) {
+        return;
+      }
+      target.lost = true;
+      target.deviceLossInfo = info;
+      target.lifecycleGeneration += 1;
+      target.cancelSkyUpgradeTask?.();
+      target.cancelSkyUpgradeTask = null;
+      target.skyUpgradeController?.abort(
+        new DOMException("WebGPU device lost", "AbortError"),
+      );
+      target.submissionGate.close();
+      try {
+        target.onLost?.(info);
+      } catch (error) {
+        console.error("WebGPU device-loss callback threw", error);
+      }
+    };
+    Promise.resolve(device.lost).then(
+      handleDeviceLoss,
+      (error) => handleDeviceLoss({
+        reason: "unknown",
+        message: error instanceof Error ? error.message : String(error),
+      }),
+    );
     this.reportCapabilities();
 
     const source = typeof skyUrl === "string" ? {} : skyUrl;
@@ -531,7 +1051,8 @@ export class WebGPURenderer {
       && source.ultra !== selectedSkyUrl
       && this.maxRenderDimension >= ULTRA_SKY_DIMENSION
     ) {
-      scheduleBackgroundTask(() => {
+      this.cancelSkyUpgradeTask = scheduleBackgroundTask(() => {
+        this.cancelSkyUpgradeTask = null;
         void this.upgradeSkyTexture(source.ultra);
       });
     }
@@ -551,26 +1072,65 @@ export class WebGPURenderer {
   }
 
   async upgradeSkyTexture(url) {
-    try {
-      const next = await loadBestSkyTexture(this.device, url, false);
-      if (this.lost) {
-        next.texture.destroy();
-        return;
-      }
-      const previousTexture = this.skyTexture;
-      this.skyTexture = next.texture;
-      this.skyTextureWidth = next.width;
-      this.skyTextureHeight = next.height;
-      this.skyUrl = next.url;
-      this.skyRadianceScale = /gaia-edr3/i.test(next.url) ? 0.16 : 0.55;
-      this.skyDetail = `${next.width}×${next.height} 原始全景 · 解析恒星层`;
-      this.traceBindGroup = this.createTraceBindGroup(next.texture);
-      previousTexture?.destroy();
-      this.reportCapabilities();
-      this.onSkyChanged?.();
-    } catch (error) {
-      console.info("The 16K sky upgrade was unavailable; keeping the responsive fallback.", error);
+    if (this.disposed || this.lost || this.skyUpgradeController) {
+      return false;
     }
+    const lifecycleGeneration = this.lifecycleGeneration;
+    const controller = new AbortController();
+    this.skyUpgradeController = controller;
+    try {
+      const next = await loadBestSkyTexture(
+        this.device,
+        url,
+        false,
+        controller.signal,
+      );
+      return this.adoptSkyTextureUpgrade(next, lifecycleGeneration);
+    } catch (error) {
+      if (!controller.signal.aborted && !this.disposed && !this.lost) {
+        console.info("The 16K sky upgrade was unavailable; keeping the responsive fallback.", error);
+      }
+      return false;
+    } finally {
+      if (this.skyUpgradeController === controller) {
+        this.skyUpgradeController = null;
+      }
+    }
+  }
+
+  adoptSkyTextureUpgrade(next, lifecycleGeneration) {
+    if (
+      this.disposed
+      || this.lost
+      || lifecycleGeneration !== this.lifecycleGeneration
+    ) {
+      next.texture.destroy();
+      return false;
+    }
+
+    let nextBindGroup;
+    try {
+      // Build every device-backed object before publishing the new texture.
+      // A validation failure therefore leaves the previous sky fully intact.
+      nextBindGroup = this.createTraceBindGroup(next.texture);
+    } catch (error) {
+      next.texture.destroy();
+      throw error;
+    }
+
+    const previousTexture = this.skyTexture;
+    this.skyTexture = next.texture;
+    this.skyTextureWidth = next.width;
+    this.skyTextureHeight = next.height;
+    this.skyUrl = next.url;
+    this.skyRadianceScale = /gaia-edr3/i.test(next.url) ? 0.16 : 0.55;
+    this.skyDetail = `${next.width}×${next.height} 原始全景 · 解析恒星层`;
+    this.traceBindGroup = nextBindGroup;
+    this.invalidateProgressiveHistory();
+    previousTexture?.destroy();
+    this.reportCapabilities();
+    this.onSkyChanged?.();
+    return true;
   }
 
   resize(width, height) {
@@ -607,15 +1167,75 @@ export class WebGPURenderer {
       usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING,
     });
     this.traceView = this.traceTexture.createView();
-    this.postBindGroup = this.device.createBindGroup({
-      label: "Post-process resources",
+    this.postBindGroup = this.createPostBindGroup(
+      this.traceView,
+      "Post-process resources",
+    );
+    this.recreateProgressiveTargets(nextWidth, nextHeight);
+  }
+
+  createPostBindGroup(textureView, label) {
+    return this.device.createBindGroup({
+      label,
       layout: this.postPipeline.getBindGroupLayout(0),
       entries: [
         { binding: 0, resource: { buffer: this.uniformBuffer } },
-        { binding: 1, resource: this.traceView },
+        { binding: 1, resource: textureView },
         { binding: 2, resource: this.postSampler },
       ],
     });
+  }
+
+  destroyProgressiveTargets() {
+    for (const texture of this.accumulationTextures) {
+      texture.destroy();
+    }
+    this.accumulationTextures = [];
+    this.accumulationViews = [];
+    this.accumulationBindGroups = [];
+    this.progressivePostBindGroups = [];
+  }
+
+  recreateProgressiveTargets(width, height) {
+    this.destroyProgressiveTargets();
+    this.invalidateProgressiveHistory();
+    if (!this.progressiveAccumulation) {
+      return;
+    }
+    for (let index = 0; index < 2; index += 1) {
+      const texture = this.device.createTexture({
+        label: `Strong-field accumulated HDR history ${index}`,
+        size: [width, height, 1],
+        format: HDR_FORMAT,
+        usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING,
+      });
+      this.accumulationTextures.push(texture);
+      this.accumulationViews.push(texture.createView());
+    }
+    this.accumulationBindGroups = this.accumulationViews.map(
+      (view, index) => this.device.createBindGroup({
+        label: `Strong-field accumulation read history ${index}`,
+        layout: this.accumulationPipeline.getBindGroupLayout(0),
+        entries: [
+          { binding: 0, resource: view },
+          { binding: 1, resource: this.traceView },
+          { binding: 2, resource: { buffer: this.accumulationBuffer } },
+        ],
+      }),
+    );
+    this.progressivePostBindGroups = this.accumulationViews.map(
+      (view, index) => this.createPostBindGroup(
+        view,
+        `Strong-field accumulated post-process ${index}`,
+      ),
+    );
+    this.accumulationReadIndex = 0;
+  }
+
+  invalidateProgressiveHistory() {
+    this.progressiveHistoryValid = false;
+    this.progressiveHistorySignature = null;
+    this.progressiveHistoryEpoch = null;
   }
 
   writeUniforms(frame) {
@@ -654,12 +1274,66 @@ export class WebGPURenderer {
     this.device.queue.writeBuffer(this.uniformBuffer, 0, data);
   }
 
+  prepareProgressiveFrame(frame) {
+    if (!this.progressiveAccumulation) {
+      return {
+        frame,
+        state: null,
+        signature: null,
+      };
+    }
+    const requested = progressiveFrameState(frame);
+    const signature = progressiveHistorySignature(frame);
+    const forcedReset = (
+      requested.historyReset
+      || !this.progressiveHistoryValid
+      || signature !== this.progressiveHistorySignature
+      || requested.historyEpoch !== this.progressiveHistoryEpoch
+      || Number(frame.motion) !== 0
+    );
+    const state = forcedReset
+      ? {
+        accumulationIndex: 0,
+        accumulationWeight: 1,
+        historyEpoch: requested.historyEpoch,
+        historyReset: true,
+      }
+      : requested;
+    return {
+      frame: {
+        ...frame,
+        // The trace shader uses the shared frame slot as its deterministic
+        // sub-pixel sample index. Dynamic/reset frames always restart at zero.
+        frame: state.accumulationIndex,
+        strongFieldQuality: {
+          ...(frame.strongFieldQuality || {}),
+          ...state,
+        },
+      },
+      state,
+      signature,
+    };
+  }
+
   render(frame) {
-    if (this.lost || !this.traceView || !this.postBindGroup) {
-      return;
+    const progressiveTargetsReady = (
+      !this.progressiveAccumulation
+      || (
+        this.accumulationViews.length === 2
+        && this.progressivePostBindGroups.length === 2
+      )
+    );
+    if (
+      !this.canSubmitFrame()
+      || !this.traceView
+      || !this.postBindGroup
+      || !progressiveTargetsReady
+    ) {
+      return false;
     }
 
-    this.writeUniforms(frame);
+    const progressive = this.prepareProgressiveFrame(frame);
+    this.writeUniforms(progressive.frame);
     const encoder = this.device.createCommandEncoder({ label: "Black-hole frame" });
     const tracePass = encoder.beginRenderPass({
       colorAttachments: [{
@@ -674,6 +1348,36 @@ export class WebGPURenderer {
     tracePass.draw(3);
     tracePass.end();
 
+    let postBindGroup = this.postBindGroup;
+    if (progressive.state) {
+      const writeIndex = 1 - this.accumulationReadIndex;
+      this.accumulationData[0] = progressive.state.accumulationWeight;
+      this.accumulationData[1] = progressive.state.historyReset ? 1 : 0;
+      this.accumulationData[2] = progressive.state.accumulationIndex;
+      this.accumulationData[3] = progressive.state.historyEpoch;
+      this.device.queue.writeBuffer(
+        this.accumulationBuffer,
+        0,
+        this.accumulationData,
+      );
+      const accumulationPass = encoder.beginRenderPass({
+        colorAttachments: [{
+          view: this.accumulationViews[writeIndex],
+          clearValue: { r: 0, g: 0, b: 0, a: 1 },
+          loadOp: "clear",
+          storeOp: "store",
+        }],
+      });
+      accumulationPass.setPipeline(this.accumulationPipeline);
+      accumulationPass.setBindGroup(
+        0,
+        this.accumulationBindGroups[this.accumulationReadIndex],
+      );
+      accumulationPass.draw(3);
+      accumulationPass.end();
+      postBindGroup = this.progressivePostBindGroups[writeIndex];
+    }
+
     const postPass = encoder.beginRenderPass({
       colorAttachments: [{
         view: this.context.getCurrentTexture().createView(),
@@ -683,17 +1387,59 @@ export class WebGPURenderer {
       }],
     });
     postPass.setPipeline(this.postPipeline);
-    postPass.setBindGroup(0, this.postBindGroup);
+    postPass.setBindGroup(0, postBindGroup);
     postPass.draw(3);
     postPass.end();
-    this.device.queue.submit([encoder.finish()]);
+    const submitted = this.submissionGate.submit(
+      this.device.queue,
+      [encoder.finish()],
+    );
+    if (!submitted) {
+      return false;
+    }
+    if (progressive.state) {
+      this.accumulationReadIndex = 1 - this.accumulationReadIndex;
+      this.progressiveHistoryValid = true;
+      this.progressiveHistorySignature = progressive.signature;
+      this.progressiveHistoryEpoch = progressive.state.historyEpoch;
+    }
+    return true;
   }
 
   dispose() {
+    if (this.disposed) {
+      return;
+    }
+    this.disposed = true;
+    this.lifecycleGeneration += 1;
+    this.cancelSkyUpgradeTask?.();
+    this.cancelSkyUpgradeTask = null;
+    this.skyUpgradeController?.abort(
+      new DOMException("WebGPU renderer disposed", "AbortError"),
+    );
+    this.skyUpgradeController = null;
+    if (this.deviceLossLifecycle) {
+      this.deviceLossLifecycle.renderer = null;
+      this.deviceLossLifecycle = null;
+    }
+    this.device.removeEventListener?.(
+      "uncapturederror",
+      this.handleUncapturedError,
+    );
+    this.onLost = null;
+    this.onError = null;
+    this.onSkyChanged = null;
+    this.deviceLossInfo = null;
+    this.pendingRuntimeError = null;
+    this.submissionGate.close();
     this.sceneResourceState?.dispose();
     this.sceneResourceState = null;
+    this.destroyProgressiveTargets();
     this.traceTexture?.destroy();
     this.skyTexture?.destroy();
+    this.accumulationBuffer?.destroy();
     this.uniformBuffer?.destroy();
+    this.context.unconfigure?.();
+    this.device.destroy?.();
   }
 }

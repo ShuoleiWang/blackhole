@@ -360,6 +360,18 @@ h1 {
   background: rgba(114, 28, 25, 0.19);
 }
 
+.scene-status.is-strong-field {
+  border-color: rgba(123, 203, 216, 0.38);
+  color: #cceaf0;
+  background: rgba(31, 104, 116, 0.13);
+}
+
+.scene-status.is-fallback {
+  border-color: rgba(239, 185, 95, 0.42);
+  color: #e2c78f;
+  background: rgba(123, 81, 26, 0.16);
+}
+
 .scene-recovery-actions {
   display: flex;
   flex-wrap: wrap;
@@ -441,6 +453,18 @@ h1 {
 
 .scene-transfer-map-reference .diagnostic-only {
   display: block;
+}
+
+.scene-binary-approx.renderer-webgpu .mode-switch {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.scene-binary-approx.renderer-webgpu .diagnostic-only {
+  display: block;
+}
+
+.scene-binary-approx.renderer-webgl2 .mode-switch {
+  grid-template-columns: 1fr;
 }
 
 .transfer-advanced-diagnostics {

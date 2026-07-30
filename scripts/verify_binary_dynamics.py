@@ -1135,7 +1135,10 @@ def main() -> int:
         f"{manifest['physicalSystem']['remnant']['massFraction']:.12f} / "
         f"{manifest['physicalSystem']['remnant']['dimensionlessSpin'][2]:.12f}"
     )
-    print("  rendering = unchanged weak-field fast-light shader")
+    print(
+        "  source-manifest renderer boundary = legacy weak-field fast-light; "
+        "the WebGPU strong-field layer is verified separately"
+    )
     return 0
 
 

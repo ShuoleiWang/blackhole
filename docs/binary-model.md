@@ -11,30 +11,34 @@ two development routes are defined in
 
 ## Status at a glance
 
-| Component | Phase 2 implementation | Scientific status |
+| Component | Current implementation | Scientific status |
 | --- | --- | --- |
 | Binary configuration | `SXS:BBH:0001` Lev5, equal mass, effectively non-spinning, quasi-circular | Pinned numerical-relativity source |
-| Orbital dynamics | Separation and phase from the actual A/B apparent-horizon inertial-coordinate centroids | NR-derived diagnostics, but coordinate- and gauge-dependent |
+| Renderer coordinates | Waveform-frequency-anchored quasi-circular PN/EOB-like relation with analytic center-of-mass positions and velocities | Declared analytic adapter; not a calibrated EOB Hamiltonian and never sourced from SXS centroids |
+| SXS horizon coordinates | Actual A/B apparent-horizon inertial-coordinate centroid separation and phase | Labelled NR-derived UI evidence only; coordinate- and gauge-dependent |
 | Waveform | CoM-corrected, extrapolated N=2 complex `(l,m) = (2,2)` strain mode | Real SXS far-zone waveform; not a near-zone metric |
-| Merger events and remnant | Published common-horizon time plus exact metadata remnant mass and spin | Source-backed events/metadata; the visual topology blend remains a presentation proxy |
+| Merger events and remnant | Published common-horizon time plus exact metadata remnant mass and spin | Source-backed anchors; C² metric removal remains an analytic transition rather than NR horizon evolution |
 | Playback | Scrubbing, shared pause/resume, end hold/loop, and optional merger slow motion | Deterministic presentation mapping; slow motion is not gravitational time dilation |
-| Light propagation | Existing real-time, frame-frozen multi-centre weak-field bending | **Not NR ray tracing** and invalid as precision strong-field imaging |
+| WebGPU light propagation | Real-time 3+1 null-Hamiltonian integration through a frame-frozen boosted-superposed Kerr-Schild metric and analytic Kerr remnant | Approximate strong-field fast-light; **not constraint-solved NR or slow-light** |
+| WebGL2 light propagation | Retained multi-centre weak-field shader | Explicit compatibility preview with no physical-parity claim |
 | Emission | Lensed all-sky background in vacuum | No accretion disks, plasma, GRMHD, or radiative transfer |
-| Display | WebGPU with WebGL2 fallback and the existing HDR pipeline | Display fidelity does not increase physical accuracy |
+| Display | One-frame WebGPU backpressure, adaptive M3 Pro tiers, stationary FP16 accumulation, HDR/SDR output | Display fidelity and accumulation do not increase metric accuracy |
 | Transfer-map interface | Versioned schema, synthetic fixture, fail-closed validators, plus fixed-camera stationary Schwarzschild and Kerr reference consumers | The consumer is proven with analytic data only; no NR-derived transfer map or binary slow-light playback |
 
-The precise classification is **NR-driven dynamics with weak-field fast-light
-rendering**. “NR-driven” applies to the orbital track, waveform, source events,
-and remnant metadata. It does not apply to light propagation. The scene does
-not consume an SXS near-zone metric, a four-dimensional numerical spacetime, or
-an NR-derived ray-transfer payload. The rendered image must not be described as
-NR ray tracing, a solved binary-spacetime image, or a quantitatively accurate
-merger shadow.
+The precise WebGPU classification is **SXS-anchored, approximate strong-field
+fast-light rendering**. “SXS-anchored” applies to the waveform, source events,
+and remnant metadata. Body positions come from the declared analytic adapter,
+not from gauge-dependent SXS horizon centroids. The scene does not consume an
+SXS near-zone metric, a four-dimensional numerical spacetime, or an NR-derived
+ray-transfer payload. The rendered image must not be described as NR ray
+tracing, a solved binary-spacetime image, or a quantitatively unique merger
+reconstruction.
 
-Mouse or touch input changes the camera, and every rendered frame rebuilds its
-camera rays and recomputes the GPU lens result. This makes the scene
-interactive; it does not strengthen the weak-field or fast-light physics
-classification.
+Mouse or touch input changes the camera, and every submitted frame rebuilds
+its camera rays and recomputes the GPU result. Exactly one WebGPU frame may be
+in flight; after an input, the next available submission uses the newest camera
+instead of queueing stale viewpoints. This makes the scene interactive; it
+does not strengthen the approximate fast-light physics classification.
 
 The runtime manifest is
 [`binary-sxs-bbh-0001-v2.json`](../assets/scenes/binary-sxs-bbh-0001-v2.json);
@@ -64,7 +68,8 @@ the longer `SXS:BBH:1132` simulation. Phase 2 intentionally pins the archived
 `0001/Lev5` bytes for a deterministic first integration; it never asks a client
 library to auto-supersede the source behind the manifest. Migrating the fixture
 to a pinned `SXS:BBH:1132` version and resolution is a data-source upgrade, not
-evidence that the current weak-field renderer has become NR ray tracing.
+evidence that the current approximate strong-field renderer has become NR ray
+tracing.
 
 The track uses geometric units,
 
@@ -124,10 +129,11 @@ M_f / M = 0.951609417715
 ```
 
 The manifest also records the last common-horizon diagnostic and checks that it
-agrees with the metadata mass and spin to better than `0.1%`. The render shader
-uses the mass fraction for its spherical remnant proxy but does not render the
-spin vector, Kerr geometry, frame dragging, recoil, or spin-dependent shadow
-shape.
+agrees with the metadata mass and spin to better than `0.1%`. The WebGPU
+provider uses the metadata mass and full mapped spin vector in its exact
+single-Kerr post-merger limit, including frame dragging. Recoil is not sourced
+or rendered. The WebGL2 compatibility shader retains its spherical visual
+remnant.
 
 ### Compact track and interpolation
 
@@ -152,6 +158,27 @@ smoothstep from the common-horizon event to the waveform peak removes the
 two-centre visual proxy. That `renderTopologyBlend` is explicitly a
 **presentation quantity, not a horizon observable**.
 
+The WebGPU runtime never uses `a_coord`, `φ_coord`, or
+`renderTopologyBlend` to place its black holes. `src/strong-field-orbit.js`
+instead unwraps the complex `h22` phase, rejects/bridges low-amplitude
+intervals, obtains a bounded positive orbital frequency, and applies
+
+```text
+Ω = |d arg(h22)/dt| / 2
+x = (MΩ)^(2/3)
+r/M = 1/x.
+```
+
+The same filtered frequency and radius generate positions and their
+derivatives in an asymptotically inertial Kerr-Schild center-of-mass frame.
+This is the leading PN quasi-circular relation and the exact circular
+Schwarzschild test-mass relation; it is **PN/EOB-like**, not a complete
+calibrated EOB Hamiltonian. A quintic Hermite interval from the common-horizon
+event to the waveform peak matches position, velocity, and acceleration while
+the individual metric terms are removed. Tests make the SXS centroid fields
+throw on access and independently mutate them, proving that the provider ABI
+does not depend on either channel.
+
 ## Scrubbing, pause, and merger slow motion
 
 The waveform panel exposes a real protocol-time range input, a local
@@ -170,66 +197,109 @@ protocol time. It does not alter sample values, retime the source data, or
 represent gravitational time dilation. The UI displays the actual effective
 rate to keep this distinction visible.
 
-## Light propagation remains weak-field fast-light
+## WebGPU strong-field fast-light propagation
 
-The interactive renderer cannot integrate null geodesics through a solved,
-time-dependent binary metric because no such four-dimensional metric is
-bundled. Instead, it approximates the weak-field gravitational potential as a
-sum of two frame-frozen monopoles whose positions change between display
-frames,
-
-```text
-Φ(x, t) = -Σ_i m_i / |x - x_i(t)|,
-```
-
-and bends a ray direction `n` along path length `s` using the transverse
-potential gradient,
+The production WebGPU path consumes
+`blackhole.strong-field-uniforms/v1`, an aligned 44-float packet containing
+explicit body/remnant positions, velocities, spins, companion attenuation,
+regularization controls, and a C² transition weight. At a provider time `t`
+and position `x`, it constructs each instantaneous Lorentz-boosted
+Kerr-Schild term
 
 ```text
-dn/ds ≈ -2 [∇Φ - n(n · ∇Φ)].
+g_μν = η_μν + 2 H l_μ l_ν
 ```
 
-The camera ray and two positions are reconstructed for every rendered frame.
-The positions are then frozen at the current timeline sample for the duration
-of each ray integration (the `fast-light` approximation). This is GPU
-re-tracing from the current camera, not fixed-camera transfer-map playback.
-The shader does not evaluate retarded positions or let one ray traverse a
-changing binary metric; it also omits velocity-dependent and gravitomagnetic
-terms.
+and superposes the binary contributions with a companion-neighborhood
+attenuation. The common-horizon-to-peak interval removes those terms and adds
+the SXS-anchored remnant with a quintic smootherstep. At unit transition weight
+the metric is exactly one analytic Kerr-Schild remnant.
 
-For one isolated mass and a large impact parameter this has the expected
-leading deflection scale `4M/b`. It is not a valid strong-field metric near
-either horizon, and the sum of two potentials is not a binary solution of
-Einstein's equations. Capture surfaces and the transition from two dark
-objects to one remnant are consequently visualization boundaries, not a
-computed event-horizon world tube.
+The shader decomposes the covariant metric into lapse `α`, shift `βⁱ`, and
+spatial metric `γᵢⱼ`. Dual-number metric jets provide analytic spatial
+derivatives in one provider evaluation. The view vector points from the camera
+into the scene; the shader stores the opposite future-directed covector of the
+photon arriving at the camera, then integrates the reduced null Hamiltonian
+with negative coordinate-time steps. The resulting traced path is explicitly
+past-directed:
 
-The metadata-backed remnant spin is retained in the data contract but is not
-rendered. Phase 2 continues to use the original spherical monopole and
-spherical `r = 2M` capture proxy, with no Kerr geometry, frame dragging, or
-spin-dependent shadow shape.
+```text
+q = sqrt(γⁱʲ pᵢ pⱼ)
+H(x,p) = αq - βⁱpᵢ = -pₜ
 
-The practical implications are important:
+dxⁱ/dt = α γⁱʲpⱼ/q - βⁱ
+dpᵢ/dt = -∂ᵢH.
+```
 
-- The broad distortion of the Milky Way and the qualitative tightening of the
-  binary can be interpreted as a physically motivated preview.
-- Fine photon rings, higher-order images, caustic magnifications, arrival-time
-  delays, and the shape or topology of a common horizon are not quantitatively
-  reliable.
-- A frame must not be used to infer masses, spins, orbital parameters, lensing
-  cross sections, or gravitational-wave observables.
-- HDR preserves highlight range and colour on supported displays; it does not
-  repair missing spacetime physics.
+The provider is frozen at the current display time for the complete ray. The
+metric therefore includes instantaneous boost and spin terms, but not the
+binary's evolution during photon flight. This is the explicit **fast-light**
+boundary. A finite escape sphere is followed by the closed-form outgoing
+weak-field monopole tail to infinity; the sky frequency factor uses the
+conserved asymptotic energy `-p_t`.
 
-The scene models a vacuum binary and intentionally does not place a bright
-accretion disk around each object. A physically defensible luminous merger
-would additionally require an initial gas configuration, general-relativistic
-magnetohydrodynamics (GRMHD), electron-temperature and emissivity prescriptions,
-and time-dependent polarized radiative transfer.
+Every ray ends as:
 
-In short: the motion and waveform are now NR-derived; the rendered rays are
-still weak-field fast-light. A source-backed orbit does not turn the shader
-into NR ray tracing.
+- `captured`, after reaching a declared isolated-Kerr excision proxy or a
+  narrowly bounded failure-only capture guard inside the relevant analytic
+  photon shell;
+- `escaped`, with an asymptotic sky direction and frequency factor; or
+- `unresolved`, after a metric-domain failure, regularization contact,
+  excessive null residual, or exhausted integration budget.
+
+Unresolved rays remain visibly distinct from both shadow and sky. The renderer
+never turns non-convergence into a plausible black pixel.
+
+The excision distance is a quality-tier parameter measured outward from the
+isolated Kerr radius: `0.30 M` (`emergency`), `0.24 M` (`survival`), `0.16 M` (`interactive`),
+`0.08 M` (`balanced`), and `0.04 M` (`fine`). If a coordinate-time energy
+projection fails, a separate conservative guard is allowed only within
+`0.95 M` of an individual non-spinning horizon, tapering to `0.25 M` for the
+pinned remnant. These are declared numerical surfaces, not computed binary
+apparent/event horizons. The low tiers exist to protect interaction latency;
+the paused `fine` tier has the smallest excision, smallest maximum step, and
+strictest residual threshold, but remains an approximate fast-light result.
+
+### Why it is still approximate
+
+The superposed metric is horizon-penetrating and strong-field, but it is not a
+constraint-satisfying binary solution. Its companion attenuation, analytic
+coordinate trajectory, frozen-time treatment, and individual capture surfaces
+are declared numerical/model prescriptions. It does not compute a common
+apparent/event-horizon worldtube or reproduce full time-dependent caustics and
+arrival-time effects. Accurate integration inside an approximate metric does
+not make the pixels NR ray tracing.
+
+The practical interpretation is:
+
+- broad strong-field lensing, multiple images, the Kerr remnant shadow, and
+  frame-dragging asymmetry are physically motivated outputs of the declared
+  approximate metric;
+- fine photon-ring positions, caustic magnifications, time delays, and horizon
+  topology are not precision NR predictions;
+- frames must not be inverted to infer unique masses, spins, orbital
+  parameters, lensing cross sections, or gravitational-wave observables;
+- HDR and stationary accumulation improve presentation/sampling, not the
+  underlying spacetime evidence.
+
+The source is a vacuum binary, so the scene intentionally has no bright
+accretion disks. A defensible luminous merger would additionally require gas
+initial data, GRMHD, electron/emissivity prescriptions, and time-dependent
+polarized radiative transfer.
+
+## Explicit WebGL2 weak-field fallback
+
+The previous multi-centre potential shader remains available only when WebGPU
+is unavailable or `?renderer=webgl` is requested. It uses
+
+```text
+Φ(x,t) = -Σ_i m_i / |x-x_i(t)|
+dn/ds ≈ -2 [∇Φ - n(n·∇Φ)]
+```
+
+with the legacy SXS separation/phase compatibility payload. The UI labels this
+as a weak-field fallback, and the project makes no physical-parity claim
+between it and the WebGPU strong-field path.
 
 ## Legacy PN regression asset
 
@@ -312,13 +382,17 @@ The validation suites have different meanings:
   and capture/escape behavior.
 - `python3 scripts/verify_binary_dynamics.py` checks the pinned SXS source,
   generated sidecar, events, remnant metadata, interpolation bounds, playback
-  declarations, and the explicit weak-field renderer boundary.
-- `node --test tests/binary-playback.test.mjs` checks source anchors,
-  interpolation, scrub/seek behavior, end hold/looping, slow motion, and
-  frame-rate independence.
+  declarations, and the source/renderer evidence boundary.
+- `python3 scripts/verify_strong_field.py` independently checks selected exact
+  Schwarzschild/Kerr-Schild limits, Kerr spin parity, the null Hamiltonian, and
+  fail-closed source/metric contracts.
+- `node --test tests/*.test.mjs` checks playback plus the strong-field orbit,
+  metric/provider ABI, shader contract, local camera tetrad, asymptotic tail,
+  ray oracles, quality scheduler, progressive history, and one-frame WebGPU
+  submission gate.
 - `python3 scripts/verify_binary_preview.py` retains the legacy PN and
-  weak-field shader convergence regression. It does **not** certify NR light
-  propagation or merger imaging.
+  WebGL2 weak-field shader convergence regression. It does **not** certify the
+  WebGPU metric, NR light propagation, or merger imaging.
 
 ## Two rendering routes and current phase
 
@@ -338,12 +412,13 @@ WebGPU/WebGL ray or lens integration
 sky composition and HDR/SDR display
 ```
 
-The implemented binary scene follows this route with weak-field, frame-frozen
-fast-light bending. The next intended physics layer is an isolated
-strong-field WebGPU geodesic tracer backed by a declared approximate binary
-metric. That layer is not implemented. Even when its numerical integration is
-accurate, a superposed or matched analytic metric must still be described as an
-approximate fast-light model rather than NR ray tracing.
+The implemented binary scene follows this route with a strong-field,
+frame-frozen WebGPU metric and 3+1 Hamiltonian tracer. The provider boundary
+already accepts `(t,x)`, but this release intentionally holds `t` fixed along a
+ray. Replacing that fast-light behavior with analytic or NR slow-light remains
+future work. Even when numerical integration is accurate, the present
+superposed analytic metric must still be described as approximate rather than
+NR ray tracing.
 
 ### High-fidelity offline route
 
@@ -383,10 +458,11 @@ The project status is deliberately reported by layer:
 | Layer | Status | Permitted claim |
 | --- | --- | --- |
 | Phase 1 transfer-map schema, fixture, validator, and tests | Implemented | `contract-conformant` ingestion boundary |
-| Phase 2 SXS orbital dynamics, waveform, events, and remnant metadata | Implemented | `NR-driven dynamics` |
-| Root interactive binary scene | Implemented | Per-frame GPU recomputation with weak-field fast-light pixels |
+| Phase 2 SXS horizon diagnostics, waveform, events, and remnant metadata | Implemented | Source-backed evidence; centroid coordinates remain gauge-dependent |
+| Waveform-anchored analytic renderer coordinates | Implemented | Quasi-circular PN/EOB-like adapter; not calibrated EOB or SXS centroid positions |
+| Root interactive WebGPU binary scene | Implemented | Per-frame approximate strong-field fast-light Hamiltonian rays with explicit outcomes |
+| Root WebGL2 compatibility scene | Implemented | Labelled legacy weak-field fast-light fallback |
 | Stationary Schwarzschild and Kerr reference maps and runtime consumer | Implemented | Analytic fixed-camera calibration, authenticated playback, diagnostics, and regression oracles; not NR |
-| Interactive strong-field WebGPU binary metric and geodesics | Not implemented | No strong-field binary claim |
 | Slow-light ray bundles through a time-dependent NR spacetime | Not implemented | No `NR-backed` pixel or image path |
 | GRMHD plasma and spectral/polarized GR radiative transfer | Not implemented | No physically modelled luminous merger |
 | Multilayer OpenEXR scientific master | Not implemented | No offline radiance master or associated convergence record |
@@ -395,9 +471,10 @@ The status words are not interchangeable:
 
 - **Contract-conformant** means only that a dataset satisfies the versioned
   structural, integrity, coordinate-frame, and record-consistency rules.
-- **NR-driven dynamics** means the displayed trajectories, waveform, events,
-  and remnant parameters are derived from the pinned SXS simulation. It makes
-  no claim about the pixel-generating light propagation.
+- **SXS-anchored approximate strong-field** means the waveform, events, and
+  remnant are source-backed while renderer coordinates and the superposed
+  metric remain declared analytic approximations. It makes no NR claim about
+  the pixel-generating light propagation.
 - **Stationary-analytic-validated** means a fixed analytic Schwarzschild or
   Kerr product passes its independent geodesic, capture, refinement, and
   delivery gates. It is not evidence for a binary spacetime.
@@ -553,6 +630,12 @@ at least the following gates:
 - M. Boyle et al., [The SXS Collaboration catalog of binary black hole
   simulations](https://doi.org/10.1088/1361-6382/ab34e2), *Classical and
   Quantum Gravity* 36, 195006 (2019).
+- L. Combi and S. M. Ressler, [A binary black hole metric approximation from
+  inspiral to merger](https://arxiv.org/abs/2403.13308), including the
+  boosted-superposed Kerr-Schild and remnant-transition construction used as
+  the model basis here.
+- L. Combi et al., [Superposed metric for spinning black hole binaries
+  approaching merger](https://arxiv.org/abs/2103.15707).
 - A. Bohn et al., [What does a binary black hole merger look
   like?](https://arxiv.org/abs/1410.7775), *Classical and Quantum Gravity* 32,
   065002 (2015). This work demonstrates ray tracing through a dynamical

@@ -7,21 +7,27 @@ The root URL opens the real-time binary scene; the legacy
 `?scene=binary-approx` URL remains compatible, and
 `?scene=schwarzschild` opens the interactive single-hole scene.
 
-The binary motion and waveform readout come from pinned `SXS:BBH:0001` Lev5
-numerical-relativity data: A/B apparent-horizon coordinate centroids provide
-separation and orbital phase, and the CoM-corrected
-`Extrapolated_N2.dir/Y_l2_m2.dat` mode provides the complex `h22` strip. Mouse
-or touch input changes the camera, and every rendered frame reconstructs its
-GPU rays for that camera.
+The root scene is a production-oriented **WebGPU strong-field binary ray
+tracer**. Each pixel follows a past-directed null Hamiltonian ray through a
+frame-frozen, boosted, superposed Kerr-Schild approximation and classifies the
+result as `captured`, `escaped`, or `unresolved`. The merger transitions
+smoothly to an analytic single-Kerr remnant. Mouse or touch input changes the
+camera; the next submitted frame contains only rays from that new camera and
+never reuses a fixed transfer map or queues stale viewpoints.
 
-That source upgrade applies to the **dynamics only**. Binary pixels still come
-from a frame-frozen, multi-centre **weak-field fast-light shader**. No SXS
-near-zone metric or ray-transfer product is consumed, so the image is **not NR
-ray tracing**, not a solved binary spacetime, and not a quantitatively accurate
-merger shadow. The planned next interactive physics layer is an isolated
-strong-field WebGPU ray tracer; it is not implemented yet.
-No implemented scene is a full-NR light-propagation, GRMHD, or
-high-precision radiative-transfer solver.
+Pinned `SXS:BBH:0001` Lev5 data anchors the complex `h22` waveform, source
+events, and final mass and spin. A declared quasi-circular PN/EOB-like adapter
+derives renderer coordinates from the waveform frequency. The
+gauge-dependent SXS apparent-horizon centroid separation and phase remain
+visible as labelled evidence, but **never become WebGPU black-hole
+positions**.
+
+This is a strong-field **approximate fast-light metric**, not a
+constraint-solved numerical-relativity spacetime. It does not consume an SXS
+near-zone metric, evolve the metric along each ray, or model luminous plasma.
+Accordingly, it is not full-NR slow-light ray tracing, GRMHD, or complete
+radiative transfer. WebGL2 deliberately falls back to the previous weak-field
+preview instead of limiting the WebGPU/Metal implementation to backend parity.
 
 The explicit Schwarzschild scene numerically integrates past-directed null
 geodesics on the GPU. A single ray path determines horizon capture, idealized
@@ -46,10 +52,10 @@ renderers.
 
 | Product layer | Status | Scientific boundary |
 | --- | --- | --- |
-| Root real-time binary scene | Implemented | SXS-driven dynamics with per-frame GPU recomputation, but weak-field fast-light pixels |
+| Root real-time binary scene | Implemented | WebGPU 3+1 Hamiltonian rays through a boosted, superposed Kerr-Schild fast-light approximation; SXS anchors waveform/events/remnant, not body coordinates |
 | `?scene=schwarzschild` | Implemented | Interactive single-hole Schwarzschild geodesics and an idealized disk |
 | Stationary Schwarzschild/Kerr workbench | Implemented | Fixed-camera analytic vacuum calibration, authenticated delivery, and regression oracles; not a merger renderer |
-| Interactive strong-field WebGPU binary tracing | Planned | Would still be an approximate fast-light model unless supplied with stronger spacetime evidence |
+| WebGL2 binary fallback | Implemented | Explicit legacy weak-field preview with no claim of physical parity with the WebGPU strong-field path |
 | Four-dimensional NR slow-light offline rendering | Planned | Requires ray bundles/Jacobi fields and, for luminous output, separately sourced GRMHD/GRRT, spectral, and polarization data |
 
 [`docs/rendering-modes.md`](./docs/rendering-modes.md) defines these two
@@ -63,18 +69,35 @@ rendering format.
 - **Unified ray-path composition** — A single traced ray handles capture, multiple disk-plane intersections, and the final sky escape direction, producing critical-curve arcs and higher-order images.
 - **Relativistic disk appearance** — Includes frequency shifts from Schwarzschild circular motion, the bolometric intensity transfer factor `g⁴`, approximate blackbody chromaticity, surface optical depth, and limb darkening.
 - **Real-time procedural disk structure** — Turbulence-inspired, finite-lifetime noise is advected at the local Keplerian angular velocity. This is a visual approximation, not an MHD simulation.
-- **SXS-driven binary dynamics** — The root scene lazy-loads a
+- **Source-anchored binary evolution** — The root scene lazy-loads a
   2,732-sample, approximately 198 KiB track derived from
   `SXS:BBH:0001/Lev5`: real A/B horizon-centroid coordinate separation and
   phase, CoM-corrected extrapolated `h22`, source events, and exact remnant
-  metadata.
+  metadata. Only the waveform, events, and remnant parameters anchor the
+  strong-field renderer; centroid channels remain labelled, gauge-dependent
+  diagnostics.
+- **Unified spacetime provider** — A 44-float aligned frame ABI supplies
+  explicit body/remnant positions, velocities, spins, attenuation, numerical
+  guards, and a C² binary-to-remnant transition. The CPU oracle and WGSL share
+  the same 3+1 contract.
+- **Strong-field WebGPU transport** — The production shader evaluates
+  arbitrary-spin boosted Kerr-Schild terms, analytic spatial metric
+  derivatives, lapse, shift, and inverse spatial metric before integrating the
+  reduced null Hamiltonian. The exact post-merger limit is a single Kerr
+  metric with the pinned SXS remnant mass and spin.
+- **Fail-closed ray outcomes** — Outside the declared isolated-Kerr excision
+  and narrowly bounded failure-only capture guard, metric-domain failures,
+  regularization contact, excessive null residual, and exhausted step budgets
+  remain visibly `unresolved`; they are never sampled as sky.
 - **Interactive binary transport** — The waveform timeline can be scrubbed,
   paused from either transport control, and replayed with an optional
   presentation-only `0.12×` slow-motion window around merger. Slow motion
   changes wall-clock playback only, never the source time or physics data.
-- **Explicit rendering boundary** — The binary scene retains the existing
-  WGSL/GLSL weak-field fast-light lens shader. NR-derived trajectories and a
-  real NR waveform do not make the pixels NR ray tracing.
+- **M3 Pro real-time scheduling** — One WebGPU frame may be in flight at a
+  time, preventing stale-camera queue buildup. Interaction, real-time,
+  refinement, and settled tiers combine per-tier pixel/step limits, 24/30 FPS
+  gates, analytic far-field handoff, and temporal HDR accumulation that resets
+  on every camera, time, transport, viewport, backend, or device change.
 - **Schwarzschild/Kerr calibration workbench** —
   `?scene=transfer-map-reference` authenticates one of two bundled 1024×576
   stationary maps before either backend consumes it. The Kerr reference
@@ -86,7 +109,10 @@ rendering format.
   outcomes, lookback time, frequency shift, null residual, or projection
   error. Clicking a texel exposes its decoded canonical 32-byte record.
 - **Isolated scene architecture** — Scene descriptors and shader bundles keep the root binary scene, explicit Schwarzschild scene, and fixed-camera scientific references from silently sharing physical assumptions.
-- **WebGPU first, WebGL2 fallback** — Chooses the rendering path from the GPU limits, texture dimensions, and framebuffer capabilities exposed at runtime, without chip-model-specific branches.
+- **WebGPU production, explicit WebGL2 fallback** — WebGPU/Metal runs the
+  strong-field binary model. WebGL2 remains a labelled weak-field
+  compatibility preview; the two backends are intentionally not presented as
+  physically equivalent.
 - **Progressive sky assets** — Ships with ESO 6K and 4K fallbacks and can optionally load the 16000×8000 ESA/Gaia all-sky map.
 - **Capability-negotiated HDR** — Requests Display-P3, FP16, and extended-range output where available, then falls back to P3 or sRGB SDR. WebGL2 is used when WebGPU initialization is unavailable or fails.
 
@@ -132,18 +158,23 @@ The script downloads the original asset from ESA and verifies a pinned SHA-256 d
 | `+` / `-` | Decrease / increase observer radius |
 | Space | Pause / resume simulation time |
 
-The neutral science color mode and the stylized Hubble palette alter only the display mapping and lightweight PSF. They do not change geodesics, disk occlusion, or frequency shifts.
+The single-hole scene retains its neutral science and stylized Hubble display
+transforms. In the root strong-field scene, the same mode area exposes the
+scientific sky plus ray outcome, frequency-shift, coordinate-lookback,
+Hamiltonian-residual, and integration-cost diagnostics.
 
 In the root binary scene, drag and zoom control the camera. Each rendered frame
-constructs fresh camera rays and recomputes the weak-field fast-light result;
-it does not sample the fixed-camera transfer maps. The transport
-button and Space pause or resume the same timeline; the range control scrubs
-protocol time, and **Merger slow motion** toggles a presentation-only `0.12×`
-rate from `t = -160 M` through `t = 70 M`. The waveform strip is the real,
-CoM-corrected SXS `Extrapolated_N2` `h22` mode, with peak amplitude at protocol
-`t = 0`. The accretion control is disabled because the source is a vacuum
-binary. None of these controls changes the weak-field fast-light rendering
-model.
+constructs fresh camera rays and recomputes the active backend model; it does
+not sample the fixed-camera transfer maps. WebGPU traces the strong-field
+approximation, while a forced or automatic WebGL2 fallback is labelled as the
+legacy weak-field preview. The transport button and Space pause or resume the
+same timeline; the range control scrubs protocol time, and **Merger slow
+motion** toggles a presentation-only `0.12×` rate from `t = -160 M` through
+`t = 70 M`. The waveform strip is the real, CoM-corrected SXS
+`Extrapolated_N2` `h22` mode, with peak amplitude at protocol `t = 0`.
+Pausing the timeline and camera allows WebGPU to refine and accumulate a
+sub-pixel-jittered linear-HDR result. The accretion control is disabled because
+the source is a vacuum binary.
 
 The transfer-map workbench has a fixed camera and projection, so drag, zoom,
 reset, motion, mass, accretion, and time controls are disabled. It can switch
@@ -157,11 +188,12 @@ inspector. Exposure and display quality remain presentation controls.
 
 | Parameter | Purpose |
 | --- | --- |
-| root URL | Open SXS-driven binary dynamics with per-frame weak-field fast-light GPU recomputation |
+| root URL | Open the interactive WebGPU strong-field approximate binary tracer |
 | `?scene=binary-approx` | Legacy-compatible alias for the root binary scene |
 | `?scene=schwarzschild` | Open the interactive single-hole Schwarzschild geodesic and idealized-disk scene |
 | `?scene=transfer-map-reference` | Open the fixed-camera stationary analytic Schwarzschild transfer-map reference; not NR and no accretion disk |
 | `?scene=transfer-map-reference&reference=kerr-remnant` | Open the stationary analytic Kerr remnant-spin reference; not NR and no accretion disk |
+| `&binaryTime=-16.8&paused=1` | Open the real-time binary scene at a reproducible protocol time in `M` and keep its timeline paused |
 | `&diagnostic=sky\|outcome\|lookback\|frequency-shift\|null-residual\|projection-error` | Select a stable transfer-map workbench view |
 | `?renderer=webgl` | Force the WebGL2 fallback path |
 | `?hdr=0` | Disable extended HDR and use stable SDR output |
@@ -185,20 +217,44 @@ The explicit Schwarzschild path:
 4. Accumulate disk emission and transmittance from near to far, then sample the all-sky background in the escaped direction.
 5. On WebGPU, ray trace into an FP16 intermediate target and select extended-range or SDR canvas output from the capabilities the browser preserves. WebGL2 provides an sRGB/SDR fallback.
 
-The root binary path lazy-loads and integrity-checks a versioned Phase 2
-manifest plus its compact sample asset. The runtime linearly interpolates SXS
-A/B apparent-horizon centroid separation and unwrapped coordinate phase, the
-CoM-corrected extrapolated complex `h22`, and a separately labelled render-only
-topology blend. It then supplies separation, phase, and blend to the existing
-binary trace shader on both backends.
+The root binary path lazy-loads and integrity-checks a versioned SXS manifest
+plus its compact sample asset. It unwraps the CoM-corrected complex `h22`
+phase, obtains a bounded orbital frequency, applies the declared
+`r/M=(MΩ)^(-2/3)` quasi-circular relation, and constructs center-of-mass body
+positions and boost velocities. A quintic Hermite join preserves value, first
+derivative, and second derivative from the common-horizon event to the
+waveform peak. Gauge-dependent SXS centroid separation and phase are retained
+only for labelled UI evidence and regression.
 
-For every rendered frame, that shader reconstructs rays from the current
-camera, applies a fast-light, frame-frozen two-centre weak-field deflection,
-and blends to one spherical visual remnant before reusing the shared sky,
-post-processing, and HDR stages. It does **not** load the SXS near-zone
-spacetime, integrate null geodesics through an NR metric, render remnant spin,
-or compute either capture surface as an apparent/event horizon. The camera
-also does not reuse the single-hole circular-observer Lorentz boost.
+On WebGPU, each pixel first builds its camera direction in an ADM-orthonormal
+local tetrad. It stores the opposite, future-directed momentum of the photon
+arriving at the camera, then advances the Hamiltonian flow with negative
+coordinate-time steps so the traced path is past-directed. The shader
+evaluates a frozen boosted-superposed Kerr-Schild metric, decomposes it into
+lapse, shift, and spatial metric, and integrates
+
+```text
+H(x,p) = α sqrt(γⁱʲ pᵢ pⱼ) - βⁱpᵢ = -pₜ
+```
+
+with adaptive steps and analytic spatial derivatives. Rays terminate as
+captured, escaped, or unresolved. Escaped rays receive a closed-form
+weak-field monopole continuation from the finite escape sphere to infinity;
+their frequency factor uses the conserved asymptotic energy. During merger,
+the approximate binary metric makes a C² transition to the analytic Kerr
+remnant. The image is then accumulated in linear FP16 HDR only while every
+physical and camera revision is stationary, before the shared display
+transform.
+
+This pipeline is not a solved SXS near-zone spacetime: body locations come
+from the declared analytic adapter, the metric is frozen along a ray, and the
+isolated-Kerr capture surfaces are excision proxies rather than computed
+apparent or event horizons. Deadline-oriented `emergency`, `survival`, and `interactive`
+tiers use explicitly larger capture padding and looser integration budgets;
+the paused `fine` tier is the strictest settled configuration. These policies
+trade numerical resolution for latency and do not change the model's
+scientific classification. On WebGL2, the scene intentionally supplies the
+old separation/phase compatibility payload to the labelled weak-field shader.
 
 The reference path completes a separate fail-closed chain: select a reference
 from a hard-coded trust registry; authenticate the exact manifest bytes,
@@ -225,12 +281,28 @@ the meaning of the v1 32-byte vacuum ABI.
 
 Primary implementation files:
 
-- [`src/main.js`](./src/main.js) — Scene selection, camera orbit, physical parameters, interaction, and adaptive quality
+- [`src/main.js`](./src/main.js) — Scene selection, camera revisions,
+  single-frame GPU backpressure, interaction, and adaptive quality orchestration
 - [`src/shaders.js`](./src/shaders.js) — Explicit-scene WGSL/GLSL Schwarzschild geodesics, disk emission, sky sampling, and post-processing
-- [`src/scenes/binary-approx-scene.js`](./src/scenes/binary-approx-scene.js) — Root binary-scene lifecycle, SXS-driven timeline, transport UI, and frame parameters
+- [`src/scenes/binary-approx-scene.js`](./src/scenes/binary-approx-scene.js) —
+  Root binary-scene lifecycle, evidence-labelled SXS timeline, backend policy,
+  and strong-field frame parameters
 - [`src/scenes/binary-dynamics-adapter.js`](./src/scenes/binary-dynamics-adapter.js) — Fail-closed browser loader, integrity checks, and deterministic dynamics interpolation
 - [`src/scenes/binary-playback-clock.js`](./src/scenes/binary-playback-clock.js) — Scrubbing, frame-rate-independent playback, end hold, looping, and presentation-only slow motion
-- [`src/binary-shaders.js`](./src/binary-shaders.js) — Matching WebGPU/WebGL2 weak-field binary trace shaders and scene-uniform adapter
+- [`src/strong-field-orbit.js`](./src/strong-field-orbit.js) — Waveform-phase
+  unwrapping, frequency-radius orbit adapter, C² merger kinematics, and
+  provider-frame production
+- [`src/strong-field-spacetime.js`](./src/strong-field-spacetime.js) — CPU
+  Kerr-Schild/3+1 physics oracle, provider ABI, Hamiltonian, and fail-closed
+  domain checks
+- [`src/strong-field-shaders.js`](./src/strong-field-shaders.js) — Production
+  WebGPU metric jets, local camera tetrad, Hamiltonian tracer, outcomes,
+  diagnostics, asymptotic handoff, and the explicit WebGL2 fallback declaration
+- [`src/strong-field-quality.js`](./src/strong-field-quality.js) — M3 Pro
+  interaction/refinement scheduler, resolution/step hysteresis, revision
+  invalidation, and accumulation policy
+- [`src/binary-shaders.js`](./src/binary-shaders.js) — Legacy weak-field binary
+  tracer retained for the explicit WebGL2 fallback
 - [`src/scenes/transfer-map-reference-scene.js`](./src/scenes/transfer-map-reference-scene.js) — Fixed-camera reference lifecycle and fail-closed loading UI
 - [`src/transfer-map-loader.js`](./src/transfer-map-loader.js) — Browser-side manifest, sidecar, chunk, ABI, outcome, and accuracy validation
 - [`src/transfer-map-shaders.js`](./src/transfer-map-shaders.js) — Matching nearest-texel WebGPU/WebGL2 consumers
@@ -248,7 +320,18 @@ Primary implementation files:
 - [`tests/binary-playback.test.mjs`](./tests/binary-playback.test.mjs) — Node tests for source anchors, interpolation, scrubbing, slow motion, end hold, and frame-rate independence
 - [`assets/scenes/binary-pn-equal-mass-v1.json`](./assets/scenes/binary-pn-equal-mass-v1.json) — Legacy v1 PN/phenomenological asset, retained only for regression
 - [`scripts/verify_binary_preview.py`](./scripts/verify_binary_preview.py) — Legacy PN contract and unchanged weak-field shader convergence regression
-- [`docs/binary-model.md`](./docs/binary-model.md) — Binary scientific boundary, current weak-field model, and future interactive/offline architecture
+- [`docs/binary-model.md`](./docs/binary-model.md) — Binary scientific
+  boundary, current real-time strong-field model, explicit WebGL2 fallback, and
+  offline architecture
+- [`docs/strong-field-equations.md`](./docs/strong-field-equations.md) —
+  Boosted Kerr-Schild provider, past-directed Hamiltonian convention,
+  excision semantics, and GPU frame ABI
+- [`docs/strong-field-performance.md`](./docs/strong-field-performance.md) —
+  M3 Pro quality tiers, one-frame backpressure, declared numerical tradeoffs,
+  and progressive convergence
+- [`docs/strong-field-ray-oracles.md`](./docs/strong-field-ray-oracles.md) —
+  Independent CPU analytic-limit, capture/escape, spin-parity, and fail-closed
+  acceptance gates
 - [`docs/rendering-modes.md`](./docs/rendering-modes.md) — Implemented product
   layers, real-time strong-field route, offline NR/GRRT route, and claim ladder
 - [`docs/nr-transfer-map-v1.md`](./docs/nr-transfer-map-v1.md) — Normative
@@ -259,7 +342,9 @@ Primary implementation files:
 - [`scripts/generate_nr_contract_fixture.py`](./scripts/generate_nr_contract_fixture.py) — Deterministically regenerate the conformance fixture
 - [`scripts/verify_nr_contract.py`](./scripts/verify_nr_contract.py) — Fail-closed manifest, sidecar, coordinate-frame, and per-ray record validator
 - [`tests/test_nr_contract.py`](./tests/test_nr_contract.py) — Positive and adversarial protocol regression tests
-- [`src/webgpu-renderer.js`](./src/webgpu-renderer.js) — Two-stage WebGPU renderer and HDR/P3 configuration negotiation
+- [`src/webgpu-renderer.js`](./src/webgpu-renderer.js) — WebGPU renderer,
+  one-frame submission gate, FP16 ping-pong progressive accumulation, and
+  HDR/P3 configuration negotiation
 - [`src/webgl-renderer.js`](./src/webgl-renderer.js) — WebGL2 fallback and half-float framebuffer probing
 
 ## Model scope and limitations
@@ -268,40 +353,63 @@ Primary implementation files:
 | --- | --- | --- |
 | Explicit single black hole | Non-rotating Schwarzschild spacetime and numerical GPU null-geodesic integration | No Kerr spin or frame dragging; the narrowest critical-curve features remain sampling-limited |
 | Explicit Schwarzschild accretion disk | Idealized zero-thickness surface from `r = 6M` to `18M`, frequency shifts, approximate emission, and turbulence-inspired structure | No finite scale height, GRMHD, complete spectrum, polarization, or self-consistent radiative transfer |
-| Binary orbital dynamics | SXS:BBH:0001 Lev5 A/B apparent-horizon inertial-coordinate centroid separation and unwrapped phase from relaxation through the last paired A/B sample | Real NR diagnostics, but coordinate- and gauge-dependent; after individual horizons end, the renderer holds their last separation/phase rather than inventing trajectories |
+| Binary coordinate dynamics | Waveform-frequency-anchored quasi-circular PN/EOB-like relation with analytic center-of-mass positions and velocities | Not a calibrated EOB Hamiltonian; SXS centroid separation/phase are gauge-dependent UI evidence and never renderer coordinates |
 | Binary waveform | CoM-corrected `Extrapolated_N2` complex `h22`, aligned so its maximum amplitude is protocol `t = 0` | A far-zone waveform is not a near-zone metric and cannot determine camera-ray propagation |
-| Binary merger/remnant data | Common apparent horizon at `t = -6.072285 M`; exact metadata remnant mass `0.951609417715 M` and spin vector `(-7.29520687012e-10, 7.40468371215e-10, 0.686461676493)` | The topology blend from the common-horizon event to waveform peak is a presentation proxy; the shader does not render horizon geometry, recoil, Kerr spin, or frame dragging |
-| Binary lensing | Fast-light bending from two frame-frozen weak-field monopoles, followed by one spherical remnant proxy | Not strong-field geodesic integration; remnant spin/frame dragging are not rendered, and fine photon rings, caustics, delays, and horizon topology are not quantitatively reliable |
+| Binary merger/remnant data | Common apparent horizon at `t = -6.072285 M`; exact metadata remnant mass `0.951609417715 M` and spin vector `(-7.29520687012e-10, 7.40468371215e-10, 0.686461676493)` | The C² metric removal is an analytic transition, not reconstructed NR horizon geometry or recoil |
+| Binary lensing | Per-pixel 3+1 null-Hamiltonian integration through boosted superposed Kerr-Schild terms; exact single-Kerr post-merger limit includes frame dragging | Strong-field but approximate, frame-frozen, and not constraint-solved NR; the capture surfaces remain isolated-Kerr excision proxies |
 | Binary emission | Vacuum sky lensing with no accretion disk | Adding luminous plasma would require physical gas initial data, GRMHD, and radiative transfer |
 | Stationary Schwarzschild reference | Fixed 1024×576 analytic vacuum map, authenticated chunks, nearest-texel WebGPU/WebGL2 playback | Fixed camera; no disk, NR source, time interpolation, or binary slow-light rays |
 | Stationary Kerr remnant reference | Numerically integrated vacuum geodesics of the exact analytic Kerr metric at `a/M = 0.686461676493`, finite BL-ZAMO camera, oblate Kerr-r capture surface, authenticated playback and diagnostics | Uses only the SXS remnant spin parameter; no SXS near-zone metric, binary time dependence, emission, or NR-derived pixels |
 | NR transfer-map protocol | Versioned schema, deterministic synthetic fixture, fail-closed validators, reference consumer, and regression tests | The runtime is proven with analytic data only; no NR-derived transfer map is bundled |
-| Shared renderer | WebGPU primary path with WebGL2 fallback | HDR, P3, FP16, and 16K textures depend on runtime capabilities; HDR does not improve model accuracy |
+| Shared renderer | WebGPU strong-field production path with one in-flight frame and stationary FP16 accumulation; WebGL2 weak-field fallback | HDR, P3, FP16, and 16K textures depend on runtime capabilities; HDR and accumulation do not improve the underlying metric model |
 
 See [`docs/rendering-modes.md`](./docs/rendering-modes.md) for the product
 layers and two development routes,
 [`docs/physics-notes.md`](./docs/physics-notes.md) (currently in Simplified
 Chinese) for the real-time Schwarzschild model,
 [`docs/kerr-reference.md`](./docs/kerr-reference.md) for the stationary Kerr
-product, and [`docs/binary-model.md`](./docs/binary-model.md) for the binary
-model boundary and future offline NR architecture.
+product, [`docs/binary-model.md`](./docs/binary-model.md) for the binary model
+boundary, and the
+[`strong-field equations`](./docs/strong-field-equations.md),
+[`M3 Pro scheduler`](./docs/strong-field-performance.md), and
+[`independent ray oracles`](./docs/strong-field-ray-oracles.md) notes for the
+implemented real-time path.
 
 ## M3 Pro compatibility and HDR
 
-The current hardware target is **M3 Pro**. It has been manually exercised with
-WebGPU/Metal, WebGL2/ANGLE-on-Metal fallback, Display-P3 FP16 output, SDR
-fallback, and the 16K background upgrade. Texture limits, canvas formats,
-half-float framebuffer completeness, and display range are negotiated at
-runtime; this document makes no separate M4 compatibility claim.
+The current hardware target is **M3 Pro**. Texture limits, canvas formats,
+half-float framebuffer completeness, display range, and the optional 16K sky
+asset are negotiated at runtime; this document makes no separate M4
+compatibility claim and does not treat the optional 16K path as part of the
+current manual acceptance result.
 
-The upper-right status bar reports the active backend, available adapter label, output mode, FPS, and internal render resolution. Adaptive quality adjusts ordinary-ray step counts and resolution within the user-selected ceiling, while rays near the critical impact parameter retain a larger integration budget.
+The upper-right status bar reports the active backend, available adapter label,
+output mode, completed-frame throughput, and internal render resolution. The
+strong-field scheduler targets 30 FPS, treats 24 FPS as a hard downgrade gate,
+and prevents WebGPU work from queueing behind one in-flight Metal frame.
+Dragging is capped near the 960×540–1280×720 class on a Retina viewport;
+paused, stationary views progressively increase the pixel/step budget and
+accumulate up to the declared sample cap. Actual tiers remain runtime- and
+scene-dependent rather than chip-name branches.
+
+One local M3 Pro run at a 1280×720 CSS viewport used the `survival` tier at an
+internal 961×540 resolution and reported a WebGPU queue-time EMA of
+approximately 31.8–33.7 ms, or roughly 29–31 completed FPS. This is one
+measurement, not a performance guarantee; source time, camera, browser state,
+display scale, temperature, and background load can change the selected tier
+and throughput.
 
 ## Validation
+
+The renderer itself has no build step. The validation suite additionally
+requires a current Node.js executable on `PATH`; set `NODE_BINARY` when only
+`verify_strong_field.py` needs an explicit executable path.
 
 ```bash
 python3 scripts/verify_physics.py
 python3 scripts/verify_binary_dynamics.py
-node --test tests/binary-playback.test.mjs
+python3 scripts/verify_strong_field.py
+node --test tests/*.test.mjs
 python3 scripts/verify_binary_preview.py
 PYTHONDONTWRITEBYTECODE=1 python3 scripts/verify_nr_contract.py
 PYTHONDONTWRITEBYTECODE=1 python3 -m unittest tests/test_nr_contract.py
@@ -338,13 +446,21 @@ orbital-phase interpolation residual is `6.442e-4 rad`. The Node tests exercise
 event anchors, finite interpolation, scrub clamping, presentation-only slow
 motion, deterministic looping/end hold, and frame-rate independence.
 
-The legacy binary regression still checks the old PN manifest and a
-representative 90×45 CPU ray grid against the unchanged shader equations. Its
-fixed 512-step production budget must leave no unresolved rays in representative
-wide-binary, transition, and remnant views. Together these checks validate
-source integrity, dynamics playback, and declared real-time convergence gates;
-they do **not** validate NR light propagation, a solved binary spacetime,
-strong-field lensing, or a quantitatively accurate merger image.
+The strong-field suite independently checks the Minkowski and exact
+single-Schwarzschild Kerr-Schild limits, Kerr spin parity/frame-dragging sign,
+wide-separation monopole limit, companion attenuation, Lorentz-covector boost,
+C² remnant transition, 3+1 null construction, Hamiltonian derivatives,
+regularization, fail-closed outcomes, the packed GPU ABI, local ADM camera
+tetrad, finite-sphere asymptotic continuation, revision-safe accumulation, and
+single-frame WebGPU submission gate. Separate tests prove that changing or
+making the SXS centroid separation/phase unreadable cannot change the
+strong-field body coordinates.
+
+The legacy binary regression remains for the WebGL2 compatibility shader. It
+does not validate the WebGPU strong-field model. Conversely, passing the new
+oracle and browser tests validates declared analytic and numerical properties,
+not NR light propagation, a constraint-solved binary spacetime, slow-light, or
+a quantitatively unique reconstruction of the merger.
 
 The NR contract checks strict JSON/schema conformance, immutable sidecar
 hashes and sizes, portable artifact-location rules, contiguous ordered chunks,
