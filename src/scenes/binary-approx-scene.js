@@ -1,4 +1,5 @@
-import { binaryApproxShaderBundle } from "../binary-shaders.js";
+import { createStrongFieldOrbitRuntime } from "../strong-field-orbit.js";
+import { strongFieldBinaryShaderBundle } from "../strong-field-shaders.js";
 import { loadBinaryDynamics } from "./binary-dynamics-adapter.js";
 import { createPlaybackClock } from "./binary-playback-clock.js";
 
@@ -8,6 +9,50 @@ const MANIFEST_URL = new URL(
 );
 const DEG = 180 / Math.PI;
 const WAVEFORM_WIDTH = 280;
+const MAX_STRONG_FIELD_STEPS = 320;
+const STRONG_FIELD_ACCUMULATION_MODE = "linear-hdr-running-average-v1";
+const STRONG_FIELD_TIER_POLICY = Object.freeze({
+  emergency: Object.freeze({
+    integrator: Object.freeze([0.065, 4.40, 2.7, 0.34]),
+    escapeRadiusM: 56,
+    maximumLookbackM: 164,
+    maximumCriticalBonus: 268,
+    stepCurveExponent: 0.50,
+    capturePaddingM: 0.30,
+  }),
+  survival: Object.freeze({
+    integrator: Object.freeze([0.050, 3.50, 3.0, 0.25]),
+    escapeRadiusM: 60,
+    maximumLookbackM: 180,
+    maximumCriticalBonus: 256,
+    stepCurveExponent: 0.65,
+    capturePaddingM: 0.24,
+  }),
+  interactive: Object.freeze({
+    integrator: Object.freeze([0.035, 3.00, 3.3, 0.18]),
+    escapeRadiusM: 64,
+    maximumLookbackM: 200,
+    maximumCriticalBonus: 224,
+    stepCurveExponent: 0.80,
+    capturePaddingM: 0.16,
+  }),
+  balanced: Object.freeze({
+    integrator: Object.freeze([0.018, 1.10, 3.6, 0.10]),
+    escapeRadiusM: 80,
+    maximumLookbackM: 220,
+    maximumCriticalBonus: 160,
+    stepCurveExponent: 1.50,
+    capturePaddingM: 0.08,
+  }),
+  fine: Object.freeze({
+    integrator: Object.freeze([0.010, 0.58, 4.0, 0.05]),
+    escapeRadiusM: 96,
+    maximumLookbackM: 240,
+    maximumCriticalBonus: 64,
+    stepCurveExponent: 1.90,
+    capturePaddingM: 0.04,
+  }),
+});
 const SCRUB_KEYS = new Set([
   "ArrowLeft",
   "ArrowRight",
@@ -99,6 +144,7 @@ function snapshotElement(element, { content = true } = {}) {
     ),
     innerHTML: content ? element.innerHTML : null,
     value: "value" in element ? element.value : null,
+    hidden: "hidden" in element ? element.hidden : null,
   };
 }
 
@@ -114,6 +160,9 @@ function restoreElement(element, snapshot) {
   }
   if (snapshot.value !== null) {
     element.value = snapshot.value;
+  }
+  if (snapshot.hidden !== null) {
+    element.hidden = snapshot.hidden;
   }
 }
 
@@ -135,8 +184,22 @@ export async function createBinaryApproxScene({
   const track = await loadBinaryDynamics(MANIFEST_URL);
   const manifest = track.manifest;
   const evaluate = track.sampleAt;
+  const strongFieldRuntime = createStrongFieldOrbitRuntime({ track });
   const firstTime = track.firstTimeM;
   const finalTime = track.finalTimeM;
+  const sceneQuery = new URLSearchParams(
+    documentRef.defaultView?.location?.search || "",
+  );
+  const requestedInitialTime = sceneQuery.get("binaryTime");
+  const parsedInitialTime = Number(requestedInitialTime);
+  const initialTime = (
+    requestedInitialTime !== null
+    && requestedInitialTime !== ""
+    && Number.isFinite(parsedInitialTime)
+  )
+    ? clamp(parsedInitialTime, firstTime, finalTime)
+    : firstTime;
+  const startsRunning = sceneQuery.get("paused") !== "1";
   const durationM = finalTime - firstTime;
   const defaults = manifest.rendererDefaults;
   const initialViewLatitude = (
@@ -175,6 +238,16 @@ export async function createBinaryApproxScene({
     exposureValue: ui.exposureValue,
     timeScaleValue: ui.timeScaleValue,
     qualityValue: ui.qualityValue,
+    modeScience: requiredElement(documentRef, "modeScience"),
+    modeOutcome: requiredElement(documentRef, "modeHubble"),
+    modeFrequency: requiredElement(documentRef, "modeFrequency"),
+    modeLookback: requiredElement(documentRef, "modeLookback"),
+    modeNull: requiredElement(documentRef, "modeNull"),
+    modeCost: requiredElement(documentRef, "modeError"),
+    advancedDiagnostics: requiredElement(
+      documentRef,
+      "transferAdvancedDiagnostics",
+    ),
     physicsNote: requiredElement(documentRef, "physicsNote"),
     sceneStatus: requiredElement(documentRef, "sceneStatus"),
     binaryTimeline: requiredElement(documentRef, "binaryTimeline"),
@@ -231,6 +304,50 @@ export async function createBinaryApproxScene({
   let playbackHolding = false;
   let rateAwaitingAdvance = false;
   let actualRateMPerSecond = 0;
+  let transportRevision = 0;
+  let transportSignature = null;
+
+  const diagnosticElements = Object.freeze([
+    elements.modeOutcome,
+    elements.modeFrequency,
+    elements.modeLookback,
+    elements.modeNull,
+    elements.modeCost,
+    elements.advancedDiagnostics,
+  ]);
+
+  function bumpTransportRevision() {
+    transportRevision = (transportRevision + 1) % Number.MAX_SAFE_INTEGER;
+  }
+
+  function revisionVector(value) {
+    if (value == null) {
+      return "default";
+    }
+    return Array.from(value, Number).join(",");
+  }
+
+  function updateTransportRevision(frame) {
+    // These controls affect a traced pixel without changing the physical
+    // provider frame.  Keep the token numeric for the quality scheduler while
+    // comparing the full exact signature locally.
+    const signature = [
+      frame.mode,
+      frame.exposure,
+      frame.steps,
+      frame.skyRotation,
+      frame.accretion,
+      frame.diskOuterRadius,
+      revisionVector(frame.sceneStrongIntegrator),
+      revisionVector(frame.sceneStrongDomain),
+      revisionVector(frame.sceneStrongDiagnostics),
+    ].join("|");
+    if (signature !== transportSignature) {
+      transportSignature = signature;
+      bumpTransportRevision();
+    }
+    return transportRevision;
+  }
 
   function updateMotionButton(running) {
     const action = running
@@ -243,6 +360,66 @@ export async function createBinaryApproxScene({
     if (mark) {
       mark.textContent = running ? "Ⅱ" : "▶";
     }
+  }
+
+  function configureDiagnosticControls(strongWebGPU) {
+    elements.modeScience.textContent = strongWebGPU
+      ? "天空成像"
+      : "弱场预览";
+    elements.modeOutcome.textContent = "光线结果";
+    elements.modeOutcome.setAttribute(
+      "title",
+      "蓝色为捕获，绿色为逃逸，洋红为未收敛；分类来自当前 WebGPU 光线积分",
+    );
+    elements.modeFrequency.textContent = "频移因子 g";
+    elements.modeFrequency.setAttribute(
+      "title",
+      "观测频率与无穷远频率之比 g；仅对已逃逸光线有物理意义",
+    );
+    elements.modeLookback.textContent = "坐标回溯时间";
+    elements.modeLookback.setAttribute(
+      "title",
+      "沿 fast-light 切片积分的坐标时间，不是可观测的相对到达时延",
+    );
+    elements.modeNull.textContent = "零性 / H 残差";
+    elements.modeNull.setAttribute(
+      "title",
+      "沿光线记录的最大归一化零 Hamiltonian 残差",
+    );
+    elements.modeCost.textContent = "积分步数成本";
+    elements.modeCost.setAttribute(
+      "title",
+      "已执行积分步数相对 320 步编译上限的比例；这是计算成本，不是物理量",
+    );
+    for (const element of diagnosticElements) {
+      element.hidden = !strongWebGPU;
+    }
+  }
+
+  function setRendererStatus(strongWebGPU, capabilities, rendererView) {
+    elements.sceneStatus.classList.remove(
+      "is-strong-field",
+      "is-fallback",
+    );
+    if (strongWebGPU) {
+      elements.sceneStatus.classList.add("is-strong-field");
+      elements.sceneStatus.textContent = [
+        rendererView?.backend || capabilities.backend || "WebGPU",
+        "实时 3+1 Hamiltonian 强场光追",
+        "boosted superposed Kerr–Schild",
+        "fast-light 近似 · 非完整 NR",
+        "诊断：光线结果 / 回溯时间 / g / 零性残差 / 积分成本",
+      ].join(" · ");
+      return;
+    }
+    elements.sceneStatus.classList.add("is-fallback");
+    elements.sceneStatus.textContent = [
+      rendererView?.backend || capabilities.backend || "WebGL2",
+      "兼容性回退",
+      "旧 two-centre weak-field 预览",
+      "不具备 WebGPU 强场物理等价性",
+      "强场 outcome / lookback / g / null residual / cost 诊断已隐藏",
+    ].join(" · ");
   }
 
   function updateTransport(sample) {
@@ -280,8 +457,8 @@ export async function createBinaryApproxScene({
     ) % 360;
     if (sample.individualHorizonsValid) {
       ui.observerValue.innerHTML = [
-        `a<sub>coord</sub> ${sample.separationM.toFixed(2)} M`,
-        `φ ${phaseDegrees.toFixed(0)}°`,
+        `a<sub>coord,SXS</sub> ${sample.separationM.toFixed(2)} M`,
+        `φ<sub>coord,SXS</sub> ${phaseDegrees.toFixed(0)}°`,
       ].join(" · ");
     } else if (sample.regime === "nr-horizon-gap") {
       ui.observerValue.textContent = (
@@ -310,6 +487,7 @@ export async function createBinaryApproxScene({
     playbackHolding = false;
     rateAwaitingAdvance = true;
     actualRateMPerSecond = 0;
+    bumpTransportRevision();
     updateDynamicReadouts(evaluate(state.time));
     controls.requestRender();
   }
@@ -322,6 +500,7 @@ export async function createBinaryApproxScene({
     resumeAfterScrub = state.running;
     rateAwaitingAdvance = true;
     actualRateMPerSecond = 0;
+    bumpTransportRevision();
     controls.setRunning(false);
   }
 
@@ -330,6 +509,7 @@ export async function createBinaryApproxScene({
       return;
     }
     scrubbing = false;
+    bumpTransportRevision();
     const shouldResume = resumeAfterScrub;
     resumeAfterScrub = false;
     if (shouldResume) {
@@ -346,6 +526,7 @@ export async function createBinaryApproxScene({
     }, options);
     elements.slowMotion.addEventListener("click", () => {
       slowMotionEnabled = !slowMotionEnabled;
+      bumpTransportRevision();
       if (
         state.running
         && !scrubbing
@@ -389,14 +570,56 @@ export async function createBinaryApproxScene({
 
   return Object.freeze({
     id: "binary-approx",
+    qualityPolicy: Object.freeze({
+      id: "m3-pro-strong-field-v1",
+    }),
+    cameraDistanceLimits: Object.freeze({
+      min: 34,
+      max: 70,
+    }),
     motionLabels: Object.freeze({
       pause: "暂停双黑洞时间线",
       resume: "继续双黑洞时间线",
     }),
+    startsRunning,
     rendererOptions: Object.freeze({
-      shaderBundle: binaryApproxShaderBundle,
+      shaderBundle: strongFieldBinaryShaderBundle,
     }),
     manifest,
+
+    onRendererReady(capabilities, rendererView) {
+      if (
+        !capabilities
+        || typeof capabilities !== "object"
+        || !["webgpu", "webgl2"].includes(capabilities.api)
+      ) {
+        throw new Error(
+          "Binary scene requires explicit WebGPU or WebGL2 capabilities",
+        );
+      }
+      if (
+        rendererView?.capabilities
+        && rendererView.capabilities !== capabilities
+      ) {
+        throw new Error("Binary renderer capability views must be identical");
+      }
+      const strongWebGPU = capabilities.api === "webgpu";
+      if (
+        strongWebGPU
+        && capabilities.progressiveAccumulation
+          !== STRONG_FIELD_ACCUMULATION_MODE
+      ) {
+        throw new Error(
+          "Binary WebGPU strong-field path requires linear-HDR accumulation",
+        );
+      }
+      configureDiagnosticControls(strongWebGPU);
+      setRendererStatus(
+        strongWebGPU,
+        capabilities,
+        rendererView,
+      );
+    },
 
     initialize() {
       if (initialized) {
@@ -408,9 +631,11 @@ export async function createBinaryApproxScene({
       slowMotionEnabled = manifest.playback.slowMotion.enabledByDefault;
       playbackHolding = false;
       rateAwaitingAdvance = false;
+      transportSignature = null;
+      bumpTransportRevision();
       documentRef.documentElement.classList.add("scene-binary-approx");
       documentRef.title = "实时双黑洞 · 深空观测台";
-      state.time = playbackClock.seek(firstTime);
+      state.time = playbackClock.seek(initialTime);
       state.distance = defaults.observerRadiusM;
       state.phase = 0.58;
       state.orbitTilt = initialViewLatitude;
@@ -428,18 +653,19 @@ export async function createBinaryApproxScene({
         )
       );
 
-      elements.eyebrow.textContent = "SXS 动力学 · GPU 实时 fast-light";
+      elements.eyebrow.textContent = "实时强场光追 · SXS 锚定";
       elements.title.textContent = "实时双黑洞";
-      elements.observerLabel.textContent = "SXS 轨道状态";
+      elements.observerLabel.textContent = "SXS 坐标证据（不驱动光追）";
       elements.radiusLabel.textContent = "1 M（GM/c²）";
       elements.shadowLabel.textContent = "数据区段";
       elements.massLabel.textContent = "系统总质量";
       elements.sceneStatus.hidden = false;
       elements.sceneStatus.textContent = [
-        "交互式近似",
-        "SXS:BBH:0001 Lev5 动力学",
-        "弱场 fast-light 透镜",
-        "不是 NR 光追",
+        "WebGPU 强场生产路径",
+        "boosted superposed Kerr–Schild",
+        "SXS h₂₂ / 合并事件锚定",
+        "fast-light 近似 · 非完整 NR",
+        "WebGL2 回退为旧弱场",
       ].join(" · ");
       elements.binaryTimeline.hidden = false;
       elements.waveformLabel.innerHTML = (
@@ -457,11 +683,12 @@ export async function createBinaryApproxScene({
         "拖动观察 · 滚轮缩放 · 拖动时间轴 · 空格暂停"
       );
       elements.physicsNote.innerHTML = [
-        "轨道坐标分离、相位与应变来自 ",
+        "波形、共同视界时刻和余留体参数锚定到 ",
         '<a href="https://doi.org/10.5281/zenodo.3273935" target="_blank" rel="noreferrer">SXS:BBH:0001 Lev5</a>',
-        "。视界质心分离是<strong>依赖规范的坐标代理</strong>；",
-        "当前画面仍使用 weak-field fast-light 多中心 shader，",
-        "<strong>不是 NR 时空中的光线追踪</strong>。合并慢放只改变播放墙钟速度。",
+        "。右侧显示的视界质心分离/相位是<strong>依赖规范的坐标证据，绝不进入 WebGPU 黑洞位置</strong>；",
+        "实时轨道由 h₂₂ 频率与 PN/EOB-like 准圆关系生成，光线在 boosted superposed Kerr–Schild 3+1 度规中积分。",
+        "这是<strong>强场 fast-light 近似，不是约束求解后的完整 NR 时空，也不是 slow-light</strong>；",
+        "WebGL2 会明确退回旧 weak-field 预览。合并慢放只改变播放墙钟速度。",
       ].join("");
       elements.accretionControl.setAttribute("aria-hidden", "true");
       ui.accretion.disabled = true;
@@ -471,6 +698,7 @@ export async function createBinaryApproxScene({
     },
 
     onMotionChanged(running) {
+      bumpTransportRevision();
       updateMotionButton(running);
       updateTransport(evaluate(state.time));
     },
@@ -479,6 +707,7 @@ export async function createBinaryApproxScene({
       state.distance = defaults.observerRadiusM;
       state.phase = 0.58;
       state.orbitTilt = initialViewLatitude;
+      bumpTransportRevision();
       updateDynamicReadouts(evaluate(state.time));
     },
 
@@ -542,15 +771,19 @@ export async function createBinaryApproxScene({
 
     extendFrame(baseFrame) {
       const sample = evaluate(state.time);
+      const strongFieldFrame = strongFieldRuntime.frameAt(sample.tM);
       updateDynamicReadouts(sample);
       return {
         ...baseFrame,
         accretion: 0,
         fov: Math.max(baseFrame.fov, defaults.fieldOfViewDeg / DEG),
         diskOuterRadius: 0,
-        steps: defaults.raySteps,
         observerVelocity: [0, 0, 0],
         observerBeta: 0,
+        sceneStrongFieldUniforms: strongFieldFrame.uniforms,
+        // Deliberate WebGL2-only compatibility payload.  The WebGPU strong
+        // tracer consumes sceneStrongFieldUniforms above and never reads these
+        // gauge-dependent SXS centroid proxies.
         sceneBinaryState: [
           sample.separationM,
           sample.orbitalPhaseRad,
@@ -559,6 +792,76 @@ export async function createBinaryApproxScene({
         ],
         sceneBinaryMasses: binaryMasses,
       };
+    },
+
+    applyStrongFieldQuality(frame, decision) {
+      const tierId = (
+        decision?.qualityTierId
+        ?? frame?.strongFieldQuality?.tierId
+        ?? "balanced"
+      );
+      const tier = (
+        STRONG_FIELD_TIER_POLICY[tierId]
+        ?? STRONG_FIELD_TIER_POLICY.balanced
+      );
+      const baseBudget = clamp(
+        Math.trunc(Number(frame?.steps) || 0),
+        0,
+        MAX_STRONG_FIELD_STEPS,
+      );
+      const criticalBonus = Math.max(
+        0,
+        Math.min(
+          tier.maximumCriticalBonus,
+          MAX_STRONG_FIELD_STEPS - baseBudget,
+        ),
+      );
+      const cameraRadius = Number(frame?.cameraRadius);
+      if (!Number.isFinite(cameraRadius) || cameraRadius <= 0) {
+        throw new Error(
+          "Binary strong-field quality requires a positive camera radius",
+        );
+      }
+      const escapeRadius = Math.max(
+        tier.escapeRadiusM,
+        cameraRadius + 8,
+      );
+      const maximumLookback = Math.max(
+        tier.maximumLookbackM,
+        2 * escapeRadius + 32,
+      );
+      return {
+        ...frame,
+        // Coarser settled/far-field steps let interaction rays leave the
+        // tier-specific finite domain within their smaller budget. The escape
+        // sphere always remains at least 8M outside the current observer.
+        // Horizon/photon-region
+        // accuracy tightens monotonically through the fine tier.
+        sceneStrongIntegrator: tier.integrator,
+        sceneStrongDomain: Object.freeze([
+          escapeRadius,
+          maximumLookback,
+          tier.capturePaddingM,
+          criticalBonus,
+        ]),
+        sceneStrongDiagnostics: Object.freeze([
+          4,
+          180,
+          0.22,
+          tier.stepCurveExponent,
+        ]),
+      };
+    },
+
+    renderRevision(frame) {
+      const physics = Number(frame?.time ?? state.time);
+      if (!Number.isFinite(physics)) {
+        throw new Error("Binary strong-field physics revision must be finite");
+      }
+      return Object.freeze({
+        physics,
+        transport: updateTransportRevision(frame ?? {}),
+      });
     },
 
     dispose() {
@@ -571,6 +874,12 @@ export async function createBinaryApproxScene({
       playbackHolding = false;
       rateAwaitingAdvance = false;
       actualRateMPerSecond = 0;
+      transportSignature = null;
+      bumpTransportRevision();
+      elements.sceneStatus.classList.remove(
+        "is-strong-field",
+        "is-fallback",
+      );
       if (!original.rootHadClass) {
         documentRef.documentElement.classList.remove("scene-binary-approx");
       }
