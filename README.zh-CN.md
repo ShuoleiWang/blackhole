@@ -74,10 +74,10 @@ escape-transfer ABI，而不是完整辐射渲染格式。
 - **可交互时间控制**：可拖动波形时间轴、从两个播放按钮暂停/继续，并可
   开关合并阶段 `0.12×` 慢放。慢放只改变墙钟播放速度，不修改 source time
   或任何物理数据。
-- **M3 Pro 实时调度**：WebGPU 同时只允许一个 frame in flight，阻止旧相机
-  画面排队；交互、实时、细化和静止档结合逐档像素/步数上限、24/30 FPS
-  门槛、解析远场接续，以及会在任意相机/时间/参数/viewport/backend/device
-  变化后清空的线性 HDR 累积。
+- **M3 Pro 画质锁定调度**：WebGPU 同时只允许一个 frame in flight，阻止旧
+  相机画面排队。运动与拖动在 12 MP 上限内始终保留 Retina 原生 backing
+  raster，并使用 72 步基础预算；耗时变长只降低吞吐，不再静默降低空间
+  分辨率。暂停时保持同一 raster，并从 160 步细化到 288 步。
 - **Schwarzschild / Kerr 校准工作台**：
   `?scene=transfer-map-reference` 会先认证两个内置 1024×576 stationary
   map 之一，再交给任一后端消费。Kerr 参考在精确解析 Kerr 度规中数值积分
@@ -89,7 +89,9 @@ escape-transfer ABI，而不是完整辐射渲染格式。
 - **隔离的场景架构**：scene descriptor 与 shader bundle 隔离根双黑洞、显式 Schwarzschild 和固定相机科学参考，避免不同物理假设被静默混用。
 - **WebGPU 生产路径、WebGL2 明确回退**：WebGPU/Metal 运行强场双黑洞；
   WebGL2 保留带标签的 weak-field 兼容预览，两者不冒充物理等价。
-- **渐进式天空资源**：仓库内置 ESO 6K 与 4K 回退；可选加载 ESA/Gaia 16000×8000 全天图。
+- **严格原尺寸天空资源**：ESO 摄影图固定以原始 6000×3000 上传，可选
+  ESA/Gaia 全天图固定为 16000×8000；显式选择后不降采样，也不静默替换
+  为更小贴图。
 - **能力检测与 HDR 降级**：尝试请求 Display-P3、FP16 与扩展范围输出，并检查浏览器是否保留配置；否则依次退回 P3 SDR、sRGB SDR 或 WebGL2。
 
 ## 快速开始
@@ -118,6 +120,10 @@ stationary Kerr 余留体参考。所有路径彼此隔离。
 ```
 
 下载脚本会从 ESA 官方地址获取原图，并在安装前校验固定 SHA-256；该大文件不会提交到 Git。
+观测参数面板现在提供醒目的“天空素材”选择器，可在 ESO 6000×3000 摄影图
+与可选 Gaia 16000×8000 科学全天图之间切换，并保留当前场景、时间与渲染器
+参数。两种选择都严格校验原尺寸；资源缺失、解码尺寸错误或硬件不支持时会
+明确失败，不再加载低分辨率回退。
 
 ## 交互
 
@@ -164,8 +170,8 @@ outcome、回溯时间、频移、null residual 或投影误差。点击画面�
 | `&diagnostic=sky\|outcome\|lookback\|frequency-shift\|null-residual\|projection-error` | 选择稳定的 transfer-map 诊断视图 |
 | `?renderer=webgl` | 强制使用 WebGL2 回退路径 |
 | `?hdr=0` | 关闭扩展 HDR，使用稳定的 SDR 输出 |
-| `?sky=high` | 固定使用仓库内的 ESO 6K 银河背景 |
-| `?sky=ultra` | 启动时阻塞尝试本地 Gaia 16K 背景 |
+| `?sky=high` | 要求仓库内 ESO 全景图保持原始 6000×3000 |
+| `?sky=ultra` | 要求本地 Gaia 全景图保持原始 16000×8000 |
 | `?presentation=1` | 隐藏控制面板与状态栏，适合展示和截图 |
 
 参数可以组合，例如：
@@ -315,21 +321,17 @@ bundles 与独立版本的辐射产品，而不会扩张 v1 32-byte vacuum ABI �
 
 ## M3 Pro 兼容性与 HDR
 
-当前硬件目标是 **M3 Pro**。程序会在运行时协商纹理上限、canvas format、
-半浮点 framebuffer、显示动态范围和可选 16K 天空素材；本文不再作单独的
-M4 兼容承诺，也不把可选 16K 路径纳入本轮人工验收结论。
+当前硬件目标是 **M3 Pro**。程序会在运行时检查纹理上限、canvas format、
+半浮点 framebuffer、显示动态范围和两种原尺寸天空素材；本文不再作单独的
+M4 兼容承诺。ESO 6000×3000 与 Gaia 16000×8000 路径均纳入人工验收。
 
 右上角状态栏显示实际后端、GPU、输出模式、已完成 frame 吞吐与内部渲染
-分辨率。强场调度目标为 30 FPS，低于 24 FPS 会立即降档，并禁止超过一个
-WebGPU frame 在 Metal 中排队。Retina 屏拖动档约限制在
-960×540–1280×720 级别；暂停且完全静止后才逐步提高像素/步数预算并执行
-有限样本累积。具体档位由运行时能力与实测耗时决定，而不是按芯片名硬编码。
-
-一次 M3 Pro 本地实测采用 1280×720 CSS viewport，调度器选择 `survival`
-档，内部渲染分辨率为 961×540；WebGPU queue-time EMA 约
-31.8–33.7 ms，对应约 29–31 个 completed FPS。这只是一次实测，不是性能
-保证；source time、相机、浏览器状态、显示缩放、温度与后台负载都会改变档位
-和吞吐。
+分辨率。调度器仍禁止超过一个 WebGPU frame 在 Metal 中排队，但不再用降低
+分辨率换取帧率。运动与拖动在 12 MP 上限内使用原生 device-pixel ratio 和
+72 步基础预算；暂停时在相同 raster 上依次使用 160、288 步。例如
+1280×720 CSS viewport 在 2× Retina 上渲染为 2560×1440，1836×1376 则为
+3672×2752。该模式允许明显卡顿；completed-frame 计时只作遥测，不再拥有
+降采样权限。
 
 ## 验证
 

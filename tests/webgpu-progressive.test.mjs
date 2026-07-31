@@ -237,6 +237,72 @@ test("WebGPU submission gate permits exactly one in-flight frame", async () => {
   assert.equal(gate.consumeCompletedFrameTimeMs(), null);
 });
 
+test("external queue work cannot inflate the next rendered-frame timing", async () => {
+  let now = 100;
+  let resolveFrame;
+  const frameDone = new Promise((resolve) => {
+    resolveFrame = resolve;
+  });
+  const queue = {
+    submit() {},
+    onSubmittedWorkDone() {
+      return frameDone;
+    },
+  };
+  const gate = new WebGPUFrameSubmissionGate(() => now);
+
+  const finishUpload = gate.beginExternalQueueWork();
+  assert.equal(gate.readyForFrame, false);
+  assert.equal(gate.submit(queue, ["blocked-by-upload"]), false);
+
+  // Hundreds of milliseconds spent decoding/copying a large sky texture are
+  // outside the render sample. The first frame starts only after that queue
+  // boundary has completed.
+  now = 620;
+  finishUpload();
+  finishUpload();
+  assert.equal(gate.readyForFrame, true);
+  assert.equal(gate.submit(queue, ["first-clean-frame"]), true);
+
+  now = 641;
+  resolveFrame();
+  await frameDone;
+  await Promise.resolve();
+
+  assert.equal(gate.lastCompletedFrameTimeMs, 21);
+  assert.equal(gate.consumeCompletedFrameTimeMs(), 21);
+});
+
+test("a later resource upload does not overwrite an in-flight frame sample", async () => {
+  let now = 40;
+  let resolveFrame;
+  const frameDone = new Promise((resolve) => {
+    resolveFrame = resolve;
+  });
+  const queue = {
+    submit() {},
+    onSubmittedWorkDone() {
+      return frameDone;
+    },
+  };
+  const gate = new WebGPUFrameSubmissionGate(() => now);
+
+  assert.equal(gate.submit(queue, ["frame"]), true);
+  now = 45;
+  const finishUpload = gate.beginExternalQueueWork();
+  now = 72;
+  resolveFrame();
+  await frameDone;
+  await Promise.resolve();
+
+  assert.equal(gate.lastCompletedFrameTimeMs, 32);
+  assert.equal(gate.readyForFrame, false);
+  now = 900;
+  finishUpload();
+  assert.equal(gate.readyForFrame, true);
+  assert.equal(gate.consumeCompletedFrameTimeMs(), 32);
+});
+
 test("failed WebGPU work closes the gate without inventing a timing sample", async () => {
   let rejectWork;
   const workDone = new Promise((resolve, reject) => {
@@ -307,6 +373,107 @@ test("runtime recovery URL explicitly selects WebGL2 and records one bounded rea
   assert.throws(
     () => webGLRecoveryUrl("http://localhost/", "arbitrary-message"),
     /Unsupported WebGPU recovery reason/,
+  );
+});
+
+test("sky uploads enter a non-frame queue scope around the GPU copy", async () => {
+  const source = await readFile(
+    new URL("../src/webgpu-renderer.js", import.meta.url),
+    "utf8",
+  );
+  assert.match(
+    source,
+    /finishExternalQueueWork = beginExternalQueueWork\?\.\(\)[\s\S]*copyExternalImageToTexture[\s\S]*await device\.queue\.onSubmittedWorkDone\(\)[\s\S]*finally \{[\s\S]*finishExternalQueueWork\?\.\(\)/,
+  );
+  assert.match(
+    source,
+    /loadBestSkyTexture\([\s\S]*\(\) => this\.beginResourceQueueWork\(\)/,
+  );
+});
+
+test("the 16K sky is loaded only for an explicit ultra request", async () => {
+  const [source, webGLSource] = await Promise.all([
+    readFile(new URL("../src/webgpu-renderer.js", import.meta.url), "utf8"),
+    readFile(new URL("../src/webgl-renderer.js", import.meta.url), "utf8"),
+  ]);
+  assert.match(
+    source,
+    /const blockForUltra = skyMode === "ultra"/,
+  );
+  assert.match(
+    source,
+    /loadBestSkyTexture\([\s\S]*skyUrl,[\s\S]*blockForUltra/,
+  );
+  assert.doesNotMatch(source, /scheduleBackgroundTask/);
+  assert.doesNotMatch(source, /upgradeSkyTexture\(source\.ultra\)/);
+  assert.doesNotMatch(webGLSource, /scheduleBackgroundTask/);
+  assert.doesNotMatch(webGLSource, /upgradeSkyTexture\(source\.ultra\)/);
+});
+
+test("ESO 6K and Gaia 16K upload at their decoded original dimensions without fallback", async () => {
+  const [webGPU, webGL, main] = await Promise.all([
+    readFile(new URL("../src/webgpu-renderer.js", import.meta.url), "utf8"),
+    readFile(new URL("../src/webgl-renderer.js", import.meta.url), "utf8"),
+    readFile(new URL("../src/main.js", import.meta.url), "utf8"),
+  ]);
+
+  assert.match(main, /ultra: "\.\/assets\/gaia-edr3-16k\.png"/);
+  assert.match(main, /high: "\.\/assets\/milky-way-360-6k\.jpg"/);
+  for (const source of [webGPU, webGL]) {
+    assert.match(
+      source,
+      /token: "gaia-edr3-16k", width: 16000, height: 8000/,
+    );
+    assert.match(
+      source,
+      /token: "milky-way-360-6k", width: 6000, height: 3000/,
+    );
+    assert.match(source, /const selected = requireUltra \? source\.ultra : source\.high/);
+    const candidates = source.match(/function skyCandidates\([\s\S]*?\n}/)?.[0] || "";
+    assert.doesNotMatch(candidates, /fallback/);
+    assert.match(
+      source,
+      /assertOriginalSkyDimensions\(url, width, height\)/,
+    );
+    assert.doesNotMatch(source, /resizeWidth|resizeHeight/);
+  }
+
+  assert.match(
+    webGPU,
+    /createImageBitmap\(blob, \{ colorSpaceConversion: "none" \}\)/,
+  );
+  assert.match(
+    webGPU,
+    /assertOriginalSkyDimensions\(url, bitmap\.width, bitmap\.height\)[\s\S]*size: \[bitmap\.width, bitmap\.height, 1\][\s\S]*\[bitmap\.width, bitmap\.height\]/,
+  );
+  assert.match(webGL, /new THREE\.TextureLoader\(\)\.load\(url, resolve, undefined, reject\)/);
+  assert.match(
+    webGL,
+    /assertOriginalSkyDimensions\(url, width, height\)[\s\S]*this\.renderer\.initTexture\(texture\)/,
+  );
+});
+
+test("the visible sky selector preserves the URL and exposes the 16K memory cost", async () => {
+  const [html, main] = await Promise.all([
+    readFile(new URL("../index.html", import.meta.url), "utf8"),
+    readFile(new URL("../src/main.js", import.meta.url), "utf8"),
+  ]);
+  assert.match(html, /<label class="control-name" for="skySource">天空素材<\/label>/);
+  assert.match(html, /<select id="skySource"[^>]*aria-describedby="skySourceHint"/);
+  assert.match(html, /<option value="high">ESO 原始 6000×3000（锁定）<\/option>/);
+  assert.match(html, /<option value="ultra">Gaia 原始 16000×8000（锁定）<\/option>/);
+  assert.match(html, /始终按原始尺寸上传，不降采样或静默回退[\s\S]*236 MB[\s\S]*488 MiB/);
+  assert.match(
+    main,
+    /const requestedSkyMode = query\.get\("sky"\) === "ultra" \? "ultra" : "high"/,
+  );
+  assert.match(
+    main,
+    /const skySourceSelect = document\.getElementById\("skySource"\)[\s\S]*skySourceSelect\.value = requestedSkyMode/,
+  );
+  assert.match(
+    main,
+    /skySourceSelect\?\.addEventListener\("change"[\s\S]*new URL\(window\.location\.href\)[\s\S]*searchParams\.set\("sky", selectedSkyMode\)[\s\S]*window\.location\.assign\(nextUrl\.href\)/,
   );
 });
 
@@ -417,7 +584,6 @@ test("dispose cancels renderer-owned callbacks and is idempotent", () => {
   const renderer = Object.assign(Object.create(WebGPURenderer.prototype), {
     disposed: false,
     lifecycleGeneration: 4,
-    cancelSkyUpgradeTask: () => calls.push("cancel-task"),
     skyUpgradeController: { abort: () => calls.push("abort-upgrade") },
     deviceLossLifecycle: lifecycle,
     device: {
@@ -448,7 +614,6 @@ test("dispose cancels renderer-owned callbacks and is idempotent", () => {
   assert.equal(renderer.onError, null);
   assert.equal(renderer.onSkyChanged, null);
   assert.deepEqual(calls, [
-    "cancel-task",
     "abort-upgrade",
     "remove-listener",
     "close-gate",

@@ -39,6 +39,11 @@ import { STRONG_FIELD_UNIFORM_ABI } from "./strong-field-spacetime.js";
 
 export const STRONG_FIELD_UNIFORM_FLOATS = 96;
 export const STRONG_FIELD_UNIFORM_TAIL_FLOATS = 60;
+// A single symplectic-Euler kick above 3.5 M is not yet safe near the
+// overlapping binary strong field. Keep the shader-side ceiling explicit and
+// align every host tier with it until segment event localisation or an
+// embedded error estimate can accept larger steps.
+export const STRONG_FIELD_MAXIMUM_STEP_M = 3.5;
 
 export const STRONG_FIELD_UNIFORM_LAYOUT = Object.freeze({
   shared: Object.freeze({ offset: 0, floats: 36 }),
@@ -1214,7 +1219,7 @@ fn traceStrongField(screen: vec2<f32>, tanHalfFov: f32) -> RayResult {
   let maximumStep = clamp(
     params.sceneStrongIntegrator.y,
     minimumStep,
-    3.5
+    ${STRONG_FIELD_MAXIMUM_STEP_M.toFixed(1)}
   );
   let criticalDistance = max(params.sceneStrongIntegrator.z, 0.2);
   let residualFail = clamp(params.sceneStrongIntegrator.w, 0.002, 0.5);
@@ -1474,6 +1479,23 @@ fn rotateAroundY(direction: vec3<f32>, angle: f32) -> vec3<f32> {
   );
 }
 
+fn skyQualityPressure() -> f32 {
+  let baseBudget = clamp(
+    params.renderControls.w,
+    24.0,
+    f32(MAX_STRONG_STEPS)
+  );
+  // The step budget is fixed by the selected quality tier.  Do not derive
+  // reconstruction weights from per-ray iteration counts or closest-horizon
+  // state: those values move at sub-pixel boundaries and made bright stars
+  // shimmer even while the camera and tier were otherwise unchanged.
+  return 1.0 - smoothstep(
+    64.0,
+    160.0,
+    baseBudget
+  );
+}
+
 fn sampleEnvironment(direction: vec3<f32>) -> vec3<f32> {
   let d = safeNormalize(
     rotateAroundY(direction, params.cameraRightSkyRotation.w)
@@ -1484,8 +1506,77 @@ fn sampleEnvironment(direction: vec3<f32>) -> vec3<f32> {
     fract(longitude / TWO_PI + 0.5),
     clamp(0.5 - latitude / PI, 0.00001, 0.99999)
   );
+  let dimensions = vec2<f32>(textureDimensions(tSky));
+  let texel = vec2<f32>(1.0) / dimensions;
+  let resolution = max(
+    params.resolutionTimeMass.xy,
+    vec2<f32>(1.0)
+  );
+  let aspect = resolution.x / resolution.y;
+  let horizontalFov = 2.0 * atan(
+    tan(0.5 * clamp(params.cameraForwardFov.w, 0.02, 2.8))
+      * aspect
+  );
+  let sourceFootprint = max(
+    dimensions.x * horizontalFov
+      / (TWO_PI * resolution.x),
+    0.0
+  );
+  let qualityPressure = skyQualityPressure();
+  let footprintPressure = smoothstep(0.62, 1.35, sourceFootprint);
+  let radius = clamp(
+    sourceFootprint * mix(0.72, 1.08, qualityPressure),
+    0.50,
+    3.0
+  );
+  let centre = textureSampleLevel(
+    tSky,
+    skySampler,
+    uv,
+    0.0
+  ).rgb;
+  let filterWeight = clamp(
+    footprintPressure * mix(0.32, 0.46, qualityPressure),
+    0.0,
+    0.46
+  );
+  var panorama = centre;
+  // Four stable axis taps band-limit the photographic panorama before a
+  // low-resolution ray is enlarged by the browser.  Their positions and
+  // weights depend only on the screen-to-panorama pixel footprint and the
+  // fixed quality tier. Native-resolution pixels below the footprint threshold
+  // retain the sharp single-sample path for the 6K source.
+  if (filterWeight > 0.01) {
+    let filtered = 0.25 * (
+      textureSampleLevel(
+        tSky,
+        skySampler,
+        uv + vec2<f32>(radius * texel.x, 0.0),
+        0.0
+      ).rgb
+      + textureSampleLevel(
+        tSky,
+        skySampler,
+        uv - vec2<f32>(radius * texel.x, 0.0),
+        0.0
+      ).rgb
+      + textureSampleLevel(
+        tSky,
+        skySampler,
+        uv + vec2<f32>(0.0, radius * texel.y),
+        0.0
+      ).rgb
+      + textureSampleLevel(
+        tSky,
+        skySampler,
+        uv - vec2<f32>(0.0, radius * texel.y),
+        0.0
+      ).rgb
+    );
+    panorama = mix(centre, filtered, filterWeight);
+  }
   return max(
-    textureSampleLevel(tSky, skySampler, uv, 0.0).rgb - vec3<f32>(0.0015),
+    panorama - vec3<f32>(0.0015),
     vec3<f32>(0.0)
   ) * max(params.displayOutput.w, 0.01);
 }
@@ -1558,14 +1649,21 @@ fn shadeResult(result: RayResult, pixel: vec2<f32>) -> vec3<f32> {
     return vec3<f32>(0.0);
   }
   if (result.outcome == RAY_UNRESOLVED) {
-    // A stable magenta hatch is deliberately unlike both shadow and sky.
+    // Keep the failure mask visible without leaking a saturated diagnostic
+    // colour into the photographic sky mode. Outcome mode above retains the
+    // bright reason-coded palette for numerical inspection.
     let hatch = select(
-      0.58,
+      0.55,
       1.0,
       ((i32(pixel.x) + i32(pixel.y)) & 7) < 3
     );
-    return vec3<f32>(0.72, 0.04, 0.44)
-      * max(params.sceneStrongDiagnostics.z, 0.08) * hatch;
+    let unresolvedLevel = clamp(
+      params.sceneStrongDiagnostics.z,
+      0.02,
+      0.25
+    );
+    return vec3<f32>(0.050, 0.036, 0.024)
+      * unresolvedLevel * hatch;
   }
   let shiftRadiance = pow(
     clamp(result.frequencyShift, 0.20, 2.5),
@@ -1591,7 +1689,9 @@ fn radicalInverse(indexInput: u32, base: u32) -> f32 {
 
 fn accumulationJitter() -> vec2<f32> {
   // Reset frames are unjittered: every pixel then belongs exclusively to the
-  // latest camera.  Settled samples use a decorrelated Halton(2,3) sequence.
+  // latest camera. Settled samples use a deterministic, bounded Halton(2,3)
+  // prefix. History epochs deliberately do not scramble the sequence: the
+  // same static camera/time therefore refines through the same sample set.
   if (params.sceneStrongQuality.w > 0.5) {
     return vec2<f32>(0.0);
   }
@@ -1600,13 +1700,15 @@ fn accumulationJitter() -> vec2<f32> {
     1.0,
     1048575.0
   ));
-  let epoch = u32(clamp(
-    params.sceneStrongQuality.z,
-    0.0,
-    4095.0
-  ));
-  let sequenceIndex = sampleIndex + epoch * 257u;
-  return vec2<f32>(
+  let sequenceIndex = sampleIndex;
+  // The first refinement sample stays close to the centre ray; later samples
+  // open gradually to at most +/-0.29 pixel instead of jumping by +/-0.5.
+  let jitterAmplitude = mix(
+    0.20,
+    0.58,
+    smoothstep(1.0, 8.0, f32(sampleIndex))
+  );
+  return jitterAmplitude * vec2<f32>(
     radicalInverse(sequenceIndex, 2u) - 0.5,
     radicalInverse(sequenceIndex, 3u) - 0.5
   );
@@ -1647,7 +1749,7 @@ export const strongFieldBinaryShaderBundle = Object.freeze({
     mode: "linear-hdr-running-average-v1",
     sampleIndexField: "strongFieldQuality.accumulationIndex",
     resetField: "strongFieldQuality.historyReset",
-    jitter: "halton-2-3",
+    jitter: "deterministic-bounded-halton-2-3",
   }),
   wgsl: Object.freeze({
     trace: strongFieldBinaryTraceFragmentWGSL,

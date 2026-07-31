@@ -13,7 +13,7 @@ const MAX_STRONG_FIELD_STEPS = 320;
 const STRONG_FIELD_ACCUMULATION_MODE = "linear-hdr-running-average-v1";
 const STRONG_FIELD_TIER_POLICY = Object.freeze({
   emergency: Object.freeze({
-    integrator: Object.freeze([0.065, 4.40, 2.7, 0.34]),
+    integrator: Object.freeze([0.065, 3.50, 2.7, 0.34]),
     escapeRadiusM: 56,
     maximumLookbackM: 164,
     maximumCriticalBonus: 268,
@@ -45,9 +45,9 @@ const STRONG_FIELD_TIER_POLICY = Object.freeze({
     capturePaddingM: 0.08,
   }),
   fine: Object.freeze({
-    integrator: Object.freeze([0.010, 0.58, 4.0, 0.05]),
-    escapeRadiusM: 96,
-    maximumLookbackM: 240,
+    integrator: Object.freeze([0.010, 0.85, 4.0, 0.05]),
+    escapeRadiusM: 80,
+    maximumLookbackM: 220,
     maximumCriticalBonus: 64,
     stepCurveExponent: 1.90,
     capturePaddingM: 0.04,
@@ -334,7 +334,6 @@ export async function createBinaryApproxScene({
     const signature = [
       frame.mode,
       frame.exposure,
-      frame.steps,
       frame.skyRotation,
       frame.accretion,
       frame.diskOuterRadius,
@@ -847,7 +846,11 @@ export async function createBinaryApproxScene({
         sceneStrongDiagnostics: Object.freeze([
           4,
           180,
-          0.22,
+          // Keep numerical failures inspectable in the photographic view
+          // without leaking a conspicuous magenta diagnostic overlay into
+          // the default image.  The outcome mode remains the authoritative,
+          // high-contrast classification view.
+          0.055,
           tier.stepCurveExponent,
         ]),
       };

@@ -10,6 +10,7 @@ import {
 } from "../src/strong-field-spacetime.js";
 import {
   STRONG_FIELD_DIAGNOSTIC_MODES,
+  STRONG_FIELD_MAXIMUM_STEP_M,
   STRONG_FIELD_OUTCOMES,
   STRONG_FIELD_UNIFORM_FLOATS,
   STRONG_FIELD_UNIFORM_LAYOUT,
@@ -293,7 +294,10 @@ test("WGSL exposes the strong-field provider and complete ray-result contract", 
   );
   assert.match(
     strongFieldBinaryTraceFragmentWGSL,
-    /params\.sceneStrongIntegrator\.y,[\s\S]*?3\.5/,
+    new RegExp(
+      String.raw`params\.sceneStrongIntegrator\.y,[\s\S]*?`
+        + STRONG_FIELD_MAXIMUM_STEP_M.toFixed(1).replace(".", String.raw`\.`),
+    ),
   );
   assert.match(
     strongFieldBinaryTraceFragmentWGSL,
@@ -326,6 +330,100 @@ test("WGSL exposes the strong-field provider and complete ray-result contract", 
   assert.match(
     strongFieldBinaryTraceFragmentWGSL,
     /dot\(position, -rhs\.velocity\) > 0\.0/,
+  );
+});
+
+test("photographic sky sampling uses a path-independent stable four-tap footprint", () => {
+  const qualityStart = strongFieldBinaryTraceFragmentWGSL.indexOf(
+    "fn skyQualityPressure()",
+  );
+  const start = strongFieldBinaryTraceFragmentWGSL.indexOf(
+    "fn sampleEnvironment(",
+  );
+  const end = strongFieldBinaryTraceFragmentWGSL.indexOf(
+    "\n}\n\nfn viridis(",
+    start,
+  );
+  assert.ok(qualityStart >= 0 && start > qualityStart && end > start);
+  const reconstruction = strongFieldBinaryTraceFragmentWGSL.slice(
+    qualityStart,
+    end,
+  );
+  const environment = strongFieldBinaryTraceFragmentWGSL.slice(start, end);
+  assert.equal(
+    (environment.match(/textureSampleLevel\(/g) || []).length,
+    5,
+    "one centre sample plus four footprint taps are required",
+  );
+  assert.match(environment, /sourceFootprint/);
+  assert.match(environment, /horizontalFov/);
+  assert.match(environment, /footprintPressure/);
+  assert.match(environment, /sourceFootprint \* mix\(0\.72, 1\.08, qualityPressure\)/);
+  assert.match(environment, /uv \+ vec2<f32>\(radius \* texel\.x, 0\.0\)/);
+  assert.match(environment, /uv - vec2<f32>\(0\.0, radius \* texel\.y\)/);
+  assert.match(environment, /mix\(centre, filtered, filterWeight\)/);
+  assert.match(reconstruction, /params\.renderControls\.w/);
+  assert.doesNotMatch(reconstruction, /result\.iterations/);
+  assert.doesNotMatch(reconstruction, /result\.minimumHorizonDistance/);
+  assert.doesNotMatch(reconstruction, /result\.lookback/);
+  assert.doesNotMatch(reconstruction, /result\.terminationReason/);
+  assert.match(
+    environment,
+    /smoothstep\(0\.62, 1\.35, sourceFootprint\)/,
+  );
+});
+
+test("photographic sky keeps unresolved rays subtle while outcome mode stays vivid", () => {
+  const start = strongFieldBinaryTraceFragmentWGSL.indexOf(
+    "if (result.outcome == RAY_UNRESOLVED) {",
+  );
+  const end = strongFieldBinaryTraceFragmentWGSL.indexOf(
+    "\n  let shiftRadiance",
+    start,
+  );
+  assert.ok(start >= 0 && end > start);
+  const skyUnresolved = strongFieldBinaryTraceFragmentWGSL.slice(start, end);
+  assert.match(
+    skyUnresolved,
+    /vec3<f32>\(0\.050, 0\.036, 0\.024\)/,
+  );
+  assert.doesNotMatch(
+    skyUnresolved,
+    /vec3<f32>\(0\.72, 0\.04, 0\.44\)/,
+  );
+  assert.match(
+    strongFieldBinaryTraceFragmentWGSL,
+    /vec3<f32>\(0\.95, 0\.19, 0\.62\)/,
+    "outcome diagnostics must retain a conspicuous failure colour",
+  );
+});
+
+test("progressive jitter is deterministic across epochs and bounded near the centre", () => {
+  const start = strongFieldBinaryTraceFragmentWGSL.indexOf(
+    "fn accumulationJitter()",
+  );
+  const end = strongFieldBinaryTraceFragmentWGSL.indexOf(
+    "\n}\n\n@fragment",
+    start,
+  );
+  assert.ok(start >= 0 && end > start);
+  const jitter = strongFieldBinaryTraceFragmentWGSL.slice(start, end);
+  assert.match(jitter, /let sequenceIndex = sampleIndex;/);
+  assert.match(jitter, /let jitterAmplitude = mix\(/);
+  assert.match(jitter, /0\.20,\s*0\.58,/);
+  assert.doesNotMatch(jitter, /sceneStrongQuality\.z|epoch \*|257u/);
+  assert.equal(
+    strongFieldBinaryShaderBundle.accumulation.jitter,
+    "deterministic-bounded-halton-2-3",
+  );
+});
+
+test("far-zone step ceiling deliberately rejects the unsafe 4.40 M emergency request", () => {
+  assert.equal(STRONG_FIELD_MAXIMUM_STEP_M, 3.5);
+  assert.ok(STRONG_FIELD_MAXIMUM_STEP_M < 4.4);
+  assert.match(
+    strongFieldBinaryTraceFragmentWGSL,
+    /params\.sceneStrongIntegrator\.y,[\s\S]*?3\.5/,
   );
 });
 

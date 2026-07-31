@@ -93,11 +93,11 @@ rendering format.
   paused from either transport control, and replayed with an optional
   presentation-only `0.12×` slow-motion window around merger. Slow motion
   changes wall-clock playback only, never the source time or physics data.
-- **M3 Pro real-time scheduling** — One WebGPU frame may be in flight at a
-  time, preventing stale-camera queue buildup. Interaction, real-time,
-  refinement, and settled tiers combine per-tier pixel/step limits, 24/30 FPS
-  gates, analytic far-field handoff, and temporal HDR accumulation that resets
-  on every camera, time, transport, viewport, backend, or device change.
+- **M3 Pro quality-locked scheduling** — One WebGPU frame may be in flight at
+  a time, preventing stale-camera queue buildup. Motion and dragging retain the
+  full Retina backing raster up to 12 MP with a 72-step base budget; slow frame
+  timing may reduce throughput but cannot silently lower spatial resolution.
+  Paused views retain the same raster and refine from 160 to 288 base steps.
 - **Schwarzschild/Kerr calibration workbench** —
   `?scene=transfer-map-reference` authenticates one of two bundled 1024×576
   stationary maps before either backend consumes it. The Kerr reference
@@ -113,7 +113,9 @@ rendering format.
   strong-field binary model. WebGL2 remains a labelled weak-field
   compatibility preview; the two backends are intentionally not presented as
   physically equivalent.
-- **Progressive sky assets** — Ships with ESO 6K and 4K fallbacks and can optionally load the 16000×8000 ESA/Gaia all-sky map.
+- **Strict full-resolution sky assets** — The ESO photograph is uploaded at its
+  original 6000×3000 pixels and the optional ESA/Gaia map at 16000×8000.
+  Explicit selection never downsamples or silently substitutes a smaller map.
 - **Capability-negotiated HDR** — Requests Display-P3, FP16, and extended-range output where available, then falls back to P3 or sRGB SDR. WebGL2 is used when WebGPU initialization is unavailable or fails.
 
 ## Quick start
@@ -145,6 +147,12 @@ The bundled 6K Milky Way background works immediately. To install the optional, 
 ```
 
 The script downloads the original asset from ESA and verifies a pinned SHA-256 digest before installation. The large source file is intentionally excluded from Git.
+The visible **天空素材 / Sky source** selector in the observation panel switches
+between the ESO 6000×3000 photograph and the optional Gaia 16000×8000
+scientific all-sky map while preserving the current scene, time, and renderer
+parameters. Both selections are strict: a missing, incorrectly decoded, or
+unsupported original asset fails visibly instead of loading a lower-resolution
+fallback.
 
 ## Controls
 
@@ -197,8 +205,8 @@ inspector. Exposure and display quality remain presentation controls.
 | `&diagnostic=sky\|outcome\|lookback\|frequency-shift\|null-residual\|projection-error` | Select a stable transfer-map workbench view |
 | `?renderer=webgl` | Force the WebGL2 fallback path |
 | `?hdr=0` | Disable extended HDR and use stable SDR output |
-| `?sky=high` | Force the bundled ESO 6K Milky Way background |
-| `?sky=ultra` | Block at startup while attempting to load the local Gaia 16K map |
+| `?sky=high` | Require the bundled ESO panorama at its original 6000×3000 size |
+| `?sky=ultra` | Require the local Gaia panorama at its original 16000×8000 size |
 | `?presentation=1` | Hide controls and status readouts for presentation or capture |
 
 Parameters can be combined:
@@ -378,26 +386,20 @@ implemented real-time path.
 ## M3 Pro compatibility and HDR
 
 The current hardware target is **M3 Pro**. Texture limits, canvas formats,
-half-float framebuffer completeness, display range, and the optional 16K sky
-asset are negotiated at runtime; this document makes no separate M4
-compatibility claim and does not treat the optional 16K path as part of the
-current manual acceptance result.
+half-float framebuffer completeness, display range, and both original-size sky
+assets are checked at runtime; this document makes no separate M4 compatibility
+claim. The ESO 6000×3000 and Gaia 16000×8000 paths are both part of manual
+acceptance.
 
 The upper-right status bar reports the active backend, available adapter label,
 output mode, completed-frame throughput, and internal render resolution. The
-strong-field scheduler targets 30 FPS, treats 24 FPS as a hard downgrade gate,
-and prevents WebGPU work from queueing behind one in-flight Metal frame.
-Dragging is capped near the 960×540–1280×720 class on a Retina viewport;
-paused, stationary views progressively increase the pixel/step budget and
-accumulate up to the declared sample cap. Actual tiers remain runtime- and
-scene-dependent rather than chip-name branches.
-
-One local M3 Pro run at a 1280×720 CSS viewport used the `survival` tier at an
-internal 961×540 resolution and reported a WebGPU queue-time EMA of
-approximately 31.8–33.7 ms, or roughly 29–31 completed FPS. This is one
-measurement, not a performance guarantee; source time, camera, browser state,
-display scale, temperature, and background load can change the selected tier
-and throughput.
+strong-field scheduler prevents WebGPU work from queueing behind one in-flight
+Metal frame, but it no longer trades resolution for frame rate. Motion and
+dragging use the native device-pixel ratio up to the 12 MP M3 Pro ceiling with
+72 base steps; paused refinement uses 160 and then 288 steps at the same raster.
+For example, a 1280×720 CSS viewport renders at 2560×1440 on a 2× Retina display,
+and a 1836×1376 viewport renders at 3672×2752. These settings can stutter by
+design; completed-frame timing is telemetry rather than authority to downscale.
 
 ## Validation
 

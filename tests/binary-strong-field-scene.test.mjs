@@ -265,14 +265,14 @@ test("binary scene wires the strong-field runtime without losing legacy fallback
 
     const expectedTiers = {
       emergency: {
-        integrator: [0.065, 4.4, 2.7, 0.34],
+        integrator: [0.065, 3.5, 2.7, 0.34],
         steps: 52,
         domain: [58, 164, 0.30, 268],
         stepCurveExponent: 0.50,
       },
       survival: {
         integrator: [0.050, 3.5, 3.0, 0.25],
-        steps: 64,
+        steps: 60,
         domain: [60, 180, 0.24, 256],
         stepCurveExponent: 0.65,
       },
@@ -289,9 +289,9 @@ test("binary scene wires the strong-field runtime without losing legacy fallback
         stepCurveExponent: 1.50,
       },
       fine: {
-        integrator: [0.010, 0.58, 4.0, 0.05],
+        integrator: [0.010, 0.85, 4.0, 0.05],
         steps: 288,
-        domain: [96, 240, 0.04, 32],
+        domain: [80, 220, 0.04, 32],
         stepCurveExponent: 1.90,
       },
     };
@@ -311,7 +311,7 @@ test("binary scene wires the strong-field runtime without losing legacy fallback
       assert.deepEqual(qualityFrame.sceneStrongDomain, expected.domain);
       assert.deepEqual(
         qualityFrame.sceneStrongDiagnostics,
-        [4, 180, 0.22, expected.stepCurveExponent],
+        [4, 180, 0.055, expected.stepCurveExponent],
       );
       assert.ok(
         Math.min(qualityFrame.steps, 320)
@@ -364,6 +364,16 @@ test("binary scene wires the strong-field runtime without losing legacy fallback
     assert.equal(firstRevision.transport, repeatedRevision.transport);
     const changedRevision = scene.renderRevision({ ...frame, mode: 4 });
     assert.ok(changedRevision.transport > repeatedRevision.transport);
+    const legacyStepRevision = scene.renderRevision({
+      ...frame,
+      mode: 4,
+      steps: frame.steps - 32,
+    });
+    assert.equal(
+      legacyStepRevision.transport,
+      changedRevision.transport,
+      "legacy pre-scheduler step budgets must not invalidate strong-field history",
+    );
 
     scene.dispose();
   } finally {

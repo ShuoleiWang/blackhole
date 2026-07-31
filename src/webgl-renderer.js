@@ -5,7 +5,10 @@ import {
   postFragmentGLSL,
 } from "./shaders.js";
 
-const ULTRA_SKY_DIMENSION = 16000;
+const ORIGINAL_SKY_DIMENSIONS = Object.freeze([
+  Object.freeze({ token: "gaia-edr3-16k", width: 16000, height: 8000 }),
+  Object.freeze({ token: "milky-way-360-6k", width: 6000, height: 3000 }),
+]);
 
 function shaderBundleFrom(options) {
   return options?.shaderBundle || {};
@@ -50,21 +53,28 @@ function finiteLimit(value, fallback) {
   return Number.isFinite(number) && number > 0 ? Math.floor(number) : fallback;
 }
 
-function skyCandidates(urls, maxTextureDimension, includeUltra = true) {
-  const source = typeof urls === "string" ? { high: urls, fallback: urls } : urls;
-  const candidates = includeUltra && maxTextureDimension >= ULTRA_SKY_DIMENSION
-    ? [source.ultra, source.high, source.fallback]
-    : maxTextureDimension >= 6000
-      ? [source.high, source.fallback]
-      : [source.fallback];
-  return [...new Set(candidates.filter(Boolean))];
+function skyCandidates(urls, requireUltra = false) {
+  const source = typeof urls === "string" ? { high: urls } : urls;
+  const selected = requireUltra ? source.ultra : source.high;
+  if (!selected) {
+    throw new Error(
+      requireUltra
+        ? "The explicit Gaia 16K sky source is unavailable"
+        : "The required ESO 6K sky source is unavailable",
+    );
+  }
+  return [selected];
 }
 
-function scheduleBackgroundTask(callback) {
-  if (typeof requestIdleCallback === "function") {
-    requestIdleCallback(callback, { timeout: 2500 });
-  } else {
-    setTimeout(callback, 1200);
+function assertOriginalSkyDimensions(url, width, height) {
+  const normalizedUrl = String(url).toLowerCase();
+  const expected = ORIGINAL_SKY_DIMENSIONS.find(({ token }) => (
+    normalizedUrl.includes(token)
+  ));
+  if (expected && (width !== expected.width || height !== expected.height)) {
+    throw new Error(
+      `${url} decoded at ${width}×${height}; expected the original ${expected.width}×${expected.height} pixels`,
+    );
   }
 }
 
@@ -237,11 +247,7 @@ export class WebGLRenderer {
     const skyMode = new URLSearchParams(location.search).get("sky");
     const blockForUltra = skyMode === "ultra";
     let lastSkyError;
-    for (const url of skyCandidates(
-      skyUrl,
-      this.glCapabilities.maxTextureSize,
-      blockForUltra,
-    )) {
+    for (const url of skyCandidates(skyUrl, blockForUltra)) {
       let texture;
       try {
         texture = await loadTexture(url);
@@ -381,18 +387,6 @@ export class WebGLRenderer {
     this.validatePipeline();
     console.info("Black-hole renderer capabilities", this.capabilities);
 
-    const source = typeof skyUrl === "string" ? {} : skyUrl;
-    if (
-      skyMode !== "high"
-      && !blockForUltra
-      && source.ultra
-      && source.ultra !== this.skyUrl
-      && this.glCapabilities.maxTextureSize >= ULTRA_SKY_DIMENSION
-    ) {
-      scheduleBackgroundTask(() => {
-        void this.upgradeSkyTexture(source.ultra);
-      });
-    }
   }
 
   validatePipeline() {
@@ -438,50 +432,15 @@ export class WebGLRenderer {
   }
 
   uploadSkyTexture(texture, url) {
+    const image = texture.image;
+    const width = image.naturalWidth || image.width;
+    const height = image.naturalHeight || image.height;
+    assertOriginalSkyDimensions(url, width, height);
     clearErrors(this.context);
     this.renderer.initTexture(texture);
     const error = this.context.getError();
     if (error !== this.context.NO_ERROR) {
       throw new Error(`WebGL rejected sky texture ${url} (error 0x${error.toString(16)})`);
-    }
-  }
-
-  async upgradeSkyTexture(url) {
-    let texture;
-    try {
-      texture = await loadTexture(url);
-      const image = texture.image;
-      const width = image.naturalWidth || image.width;
-      const height = image.naturalHeight || image.height;
-      if (
-        width > this.glCapabilities.maxTextureSize
-        || height > this.glCapabilities.maxTextureSize
-      ) {
-        throw new Error(
-          `${width}×${height} exceeds the WebGL ${this.glCapabilities.maxTextureSize}px texture limit`,
-        );
-      }
-      configureSkyTexture(texture);
-      this.uploadSkyTexture(texture, url);
-
-      const previousTexture = this.skyTexture;
-      this.skyTexture = texture;
-      this.skyUrl = url;
-      this.skyRadianceScale = /gaia-edr3/i.test(url) ? 0.16 : 0.55;
-      this.skyDetail = `${width}×${height} 原始全景 · 解析恒星层`;
-      this.traceUniforms.tSky.value = texture;
-      this.traceUniforms.uSkyRadianceScale.value = this.skyRadianceScale;
-      this.capabilities = Object.freeze({
-        ...this.capabilities,
-        skyTexture: `${width}×${height}`,
-        skyUrl: url,
-      });
-      previousTexture?.dispose();
-      console.info("Black-hole renderer capabilities", this.capabilities);
-      this.onSkyChanged?.();
-    } catch (error) {
-      texture?.dispose();
-      console.info("The 16K sky upgrade was unavailable; keeping the responsive fallback.", error);
     }
   }
 

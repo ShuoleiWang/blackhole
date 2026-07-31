@@ -10,6 +10,7 @@ import {
 } from "./strong-field-quality.js";
 
 const query = new URLSearchParams(window.location.search);
+const requestedSkyMode = query.get("sky") === "ultra" ? "ultra" : "high";
 if (query.get("presentation") === "1") {
   document.documentElement.classList.add("is-presentation");
 }
@@ -68,6 +69,14 @@ for (const [id, element] of Object.entries(ui)) {
   if (!element) {
     throw new Error(`Missing required interface element #${id}`);
   }
+}
+
+// Keep startup tolerant of a briefly stale cached index.html. A new module can
+// otherwise arrive before the matching markup and prevent the renderer from
+// initializing at all.
+const skySourceSelect = document.getElementById("skySource");
+if (skySourceSelect) {
+  skySourceSelect.value = requestedSkyMode;
 }
 
 const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
@@ -854,7 +863,10 @@ function frameParameters() {
     up: camera.up,
     diskOuterRadius: 18,
     renderScale: state.renderScale,
-    bloom: state.mode === 1 ? 0.06 : 0,
+    // In the strong-field scene mode 1 is the categorical ray-outcome view,
+    // not the legacy Hubble display look.  Diagnostic masks must never pass
+    // through a photographic bloom transform.
+    bloom: state.mode === 1 && !usesStrongFieldQuality(activeScene) ? 0.06 : 0,
     motion: state.running ? 1 : 0,
     frame: state.frame,
     observerVelocity: camera.observerVelocity,
@@ -991,6 +1003,14 @@ function bindUi() {
     updateReadouts();
     state.dynamicScale = 1;
     state.resizePending = true;
+  });
+  skySourceSelect?.addEventListener("change", () => {
+    const selectedSkyMode = skySourceSelect.value === "ultra" ? "ultra" : "high";
+    if (selectedSkyMode !== requestedSkyMode) {
+      const nextUrl = new URL(window.location.href);
+      nextUrl.searchParams.set("sky", selectedSkyMode);
+      window.location.assign(nextUrl.href);
+    }
   });
   [
     ui.modeScience,

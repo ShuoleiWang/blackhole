@@ -26,32 +26,35 @@ history before the next submitted frame.
 The host must use monotonic primitive revision tokens. Object identity or
 rounded visual values are not sufficient for camera or physical time.
 
-## M3 Pro policy
+## M3 Pro quality-locked policy
 
-The default policy targets 30 FPS and treats 24 FPS as a hard floor:
+The production policy now treats spatial resolution as an invariant and frame
+rate as the variable. A slow frame may reduce completed-frame throughput, but
+it cannot select a smaller raster:
 
 | Tier | Resolution multiplier | Pixel ceiling | Base steps | Purpose |
 | --- | ---: | ---: | ---: | --- |
-| `emergency` | 0.38 | 0.28 MP | 52 | Last-resort HDR/deadline floor below 24 FPS |
-| `survival` | 0.50 | 0.52 MP | 64 | Deadline floor after a severe miss |
-| `interactive` | 0.65 | 0.92 MP | 96 | Pointer drag and moving timeline |
-| `balanced` | 0.82 | 2.0 MP | 160 | First settled refinement |
-| `fine` | 1.00 | 5.0 MP | 288 | Paused, strictest settled convergence |
+| `emergency` | 0.38 | 0.28 MP | 52 | Retained only for explicit fallback/custom profiles |
+| `survival` | 0.50 | 0.46 MP | 52 | Retained only for explicit fallback/custom profiles |
+| `interactive` | 1.00 | 12.0 MP | 72 | Production motion and dragging floor |
+| `balanced` | 1.00 | 12.0 MP | 160 | First settled refinement |
+| `fine` | 1.00 | 12.0 MP | 288 | Paused, strictest settled convergence |
 
 The scene's corresponding numerical policy is explicit rather than hidden in
 the shader:
 
 | Tier | Minimum / maximum step | Residual gate | Capture padding | Critical-zone bonus | Escape / lookback floor |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| `emergency` | 0.065 / 4.40 M | 0.34 | 0.30 M | 268 | 56 / 164 M |
+| `emergency` | 0.065 / 3.50 M | 0.34 | 0.30 M | 268 | 56 / 164 M |
 | `survival` | 0.050 / 3.50 M | 0.25 | 0.24 M | 256 | 60 / 180 M |
 | `interactive` | 0.035 / 3.00 M | 0.18 | 0.16 M | 224 | 64 / 200 M |
 | `balanced` | 0.018 / 1.10 M | 0.10 | 0.08 M | 160 | 80 / 220 M |
-| `fine` | 0.010 / 0.58 M | 0.05 | 0.04 M | 64 | 96 / 240 M |
+| `fine` | 0.010 / 0.85 M | 0.05 | 0.04 M | 64 | 80 / 220 M |
 
-The scheduler applies both the tier ceiling and the global five-million-pixel
-ceiling, and limits device pixel ratio to 2×. Interactive Retina rendering
-therefore cannot accidentally expand to several million pixels. All base step
+The scheduler applies both the tier ceiling and the global twelve-million-pixel
+ceiling, and limits device pixel ratio to 2×. A 1280×720 CSS viewport therefore
+renders at 2560×1440 on a 2× Retina display; the reported 1836×1376 case renders
+at 3672×2752 (about 10.1 MP), without the former 1.43× clamp. All base step
 budgets stay below the shader's 320-step compile-time maximum; a scene-owned
 critical-zone bonus must also clamp the combined budget to that maximum.
 The scene uses `max(tier floor, camera radius + 8 M)` for its finite escape
@@ -75,27 +78,21 @@ These are M3 Pro policy values, not general physics-accuracy claims;
 shader-specific acceptance must still prove each declared convergence
 boundary.
 
-Completed GPU submission time uses an exponential moving average. Falling
-below 24 FPS lowers the performance ceiling immediately. Repeated misses below
-the 30 FPS target lower it after a streak. An upgrade requires sustained
-headroom above 36 FPS, a cooldown, a paused timeline, a settled camera, WebGPU,
-and a visible document. The gap between downgrade and upgrade thresholds
-prevents tier oscillation.
+Completed ray-trace submission time still uses an exponential moving average,
+but it is telemetry rather than authority to downsample. Resource uploads enter
+a separate queue scope and cannot be counted as rendered frames. Both the hard
+and sustained-miss paths clamp at the native-resolution `interactive` tier;
+even a 250 ms frame cannot select `survival` or `emergency`. Timing is reset at
+each tier boundary, and the first completion after a raster/tier switch is
+excluded because it includes allocation and resize work rather than steady
+tracing cost.
 
-In one local M3 Pro run at a 1280×720 CSS viewport, the scheduler selected
-`survival` at an internal 961×540 resolution. The completed WebGPU queue-time
-EMA was approximately 31.8–33.7 ms, corresponding to roughly 29–31 FPS. This
-is one observation, not a guarantee or a cross-scene benchmark.
-
-Startup is deliberately deadline-safe: the initial performance ceiling is
-`balanced`, while a moving timeline and pointer interaction both request the
-`interactive` tier. The renderer therefore does not put an unprofiled
-five-million-pixel fine frame in front of the user's first input. A paused view
-can climb from balanced to fine only after eight completed GPU submissions
-above the headroom threshold. Eight is below the 32-sample accumulation cap, so
-the renderer cannot become `steady` before it has had an opportunity to prove
-that the next tier is affordable. A tier change starts a fresh accumulation
-epoch.
+Startup begins at `balanced`; a moving M3 Pro timeline and active dragging use
+the 12 MP `interactive` raster with 72 base steps. Once paused, the static
+controller starts at `balanced`, then enters `fine` at the same spatial raster.
+Accumulation starts with an explicit
+unjittered sample zero; the first jittered sample is index one with weight one
+half. A tier change starts a fresh accumulation epoch.
 
 ### Submission backpressure
 

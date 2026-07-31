@@ -7,6 +7,10 @@ import {
 const HDR_FORMAT = "rgba16float";
 const UNIFORM_FLOATS = 40;
 const ULTRA_SKY_DIMENSION = 16000;
+const ORIGINAL_SKY_DIMENSIONS = Object.freeze([
+  Object.freeze({ token: "gaia-edr3-16k", width: 16000, height: 8000 }),
+  Object.freeze({ token: "milky-way-360-6k", width: 6000, height: 3000 }),
+]);
 const PROGRESSIVE_ACCUMULATION_MODE = "linear-hdr-running-average-v1";
 const WEBGPU_FALLBACK_REASONS = Object.freeze({
   "device-lost": "WebGPU 设备连接丢失",
@@ -59,10 +63,15 @@ export class WebGPUFrameSubmissionGate {
     this.pendingCompletedFrameTimeMs = null;
     this.lastCompletionError = null;
     this.onFailure = null;
+    this.externalWorkDepth = 0;
   }
 
   get readyForFrame() {
-    return !this.closed && !this.inFlight;
+    return (
+      !this.closed
+      && !this.inFlight
+      && this.externalWorkDepth === 0
+    );
   }
 
   canSubmitFrame() {
@@ -150,9 +159,36 @@ export class WebGPUFrameSubmissionGate {
     return sample;
   }
 
+  /*
+   * copyExternalImageToTexture() and similar resource uploads share the same
+   * GPUQueue as traced frames. A frame submitted behind a large sky upload
+   * would otherwise report upload + render wall time to the quality governor.
+   * External scopes pause new frame submissions until their own
+   * onSubmittedWorkDone() boundary has completed. A frame that was already in
+   * flight remains independently timed because its completion promise was
+   * registered before the later upload.
+   */
+  beginExternalQueueWork() {
+    if (this.closed) {
+      return () => {};
+    }
+    this.externalWorkDepth += 1;
+    let active = true;
+    return () => {
+      if (!active) {
+        return;
+      }
+      active = false;
+      if (this.externalWorkDepth > 0) {
+        this.externalWorkDepth -= 1;
+      }
+    };
+  }
+
   close() {
     this.closed = true;
     this.inFlight = false;
+    this.externalWorkDepth = 0;
     this.submittedAtMs = null;
     this.generation += 1;
     this.pendingCompletedFrameTimeMs = null;
@@ -384,38 +420,28 @@ function finiteLimit(value, fallback) {
   return Number.isFinite(number) && number > 0 ? Math.floor(number) : fallback;
 }
 
-function skyCandidates(urls, maxTextureDimension, includeUltra = true) {
-  const source = typeof urls === "string" ? { high: urls, fallback: urls } : urls;
-  const candidates = includeUltra && maxTextureDimension >= ULTRA_SKY_DIMENSION
-    ? [source.ultra, source.high, source.fallback]
-    : maxTextureDimension >= 6000
-      ? [source.high, source.fallback]
-      : [source.fallback];
-  return [...new Set(candidates.filter(Boolean))];
+function skyCandidates(urls, requireUltra = false) {
+  const source = typeof urls === "string" ? { high: urls } : urls;
+  const selected = requireUltra ? source.ultra : source.high;
+  if (!selected) {
+    throw new Error(
+      requireUltra
+        ? "The explicit Gaia 16K sky source is unavailable"
+        : "The required ESO 6K sky source is unavailable",
+    );
+  }
+  return [selected];
 }
 
-function scheduleBackgroundTask(callback) {
-  let active = true;
-  let handle;
-  const run = () => {
-    if (!active) {
-      return;
-    }
-    active = false;
-    callback();
-  };
-  if (typeof requestIdleCallback === "function") {
-    handle = requestIdleCallback(run, { timeout: 2500 });
-    return () => {
-      active = false;
-      globalThis.cancelIdleCallback?.(handle);
-    };
-  } else {
-    handle = setTimeout(run, 1200);
-    return () => {
-      active = false;
-      clearTimeout(handle);
-    };
+function assertOriginalSkyDimensions(url, width, height) {
+  const normalizedUrl = String(url).toLowerCase();
+  const expected = ORIGINAL_SKY_DIMENSIONS.find(({ token }) => (
+    normalizedUrl.includes(token)
+  ));
+  if (expected && (width !== expected.width || height !== expected.height)) {
+    throw new Error(
+      `${url} decoded at ${width}×${height}; expected the original ${expected.width}×${expected.height} pixels`,
+    );
   }
 }
 
@@ -503,11 +529,18 @@ async function loadBitmap(url, signal = undefined) {
   }
 }
 
-async function uploadSkyTexture(device, bitmap, url) {
+async function uploadSkyTexture(
+  device,
+  bitmap,
+  url,
+  beginExternalQueueWork = undefined,
+) {
+  assertOriginalSkyDimensions(url, bitmap.width, bitmap.height);
   device.pushErrorScope("out-of-memory");
   device.pushErrorScope("validation");
   let texture;
   let thrownError;
+  let finishExternalQueueWork = null;
   try {
     texture = device.createTexture({
       label: `Celestial sphere · ${url}`,
@@ -518,6 +551,7 @@ async function uploadSkyTexture(device, bitmap, url) {
         | GPUTextureUsage.COPY_DST
         | GPUTextureUsage.RENDER_ATTACHMENT,
     });
+    finishExternalQueueWork = beginExternalQueueWork?.() ?? null;
     device.queue.copyExternalImageToTexture(
       { source: bitmap },
       { texture },
@@ -526,6 +560,8 @@ async function uploadSkyTexture(device, bitmap, url) {
     await device.queue.onSubmittedWorkDone();
   } catch (error) {
     thrownError = error;
+  } finally {
+    finishExternalQueueWork?.();
   }
   const validationError = await device.popErrorScope();
   const memoryError = await device.popErrorScope();
@@ -540,12 +576,13 @@ async function uploadSkyTexture(device, bitmap, url) {
 async function loadBestSkyTexture(
   device,
   urls,
-  includeUltra = true,
+  requireUltra = false,
   signal = undefined,
+  beginExternalQueueWork = undefined,
 ) {
   const maxTextureDimension = finiteLimit(device.limits.maxTextureDimension2D, 4096);
   let lastError;
-  for (const url of skyCandidates(urls, maxTextureDimension, includeUltra)) {
+  for (const url of skyCandidates(urls, requireUltra)) {
     let bitmap;
     try {
       throwIfAborted(signal);
@@ -555,7 +592,12 @@ async function loadBestSkyTexture(
           `${bitmap.width}×${bitmap.height} exceeds the device ${maxTextureDimension}px texture limit`,
         );
       }
-      const texture = await uploadSkyTexture(device, bitmap, url);
+      const texture = await uploadSkyTexture(
+        device,
+        bitmap,
+        url,
+        beginExternalQueueWork,
+      );
       if (signal?.aborted) {
         texture.destroy();
         throwIfAborted(signal);
@@ -730,7 +772,6 @@ export class WebGPURenderer {
     this.deviceLossInfo = null;
     this.pendingRuntimeError = null;
     this.lifecycleGeneration = 0;
-    this.cancelSkyUpgradeTask = null;
     this.skyUpgradeController = null;
     this.outputFallbackReason = "";
     this.resizeWasClamped = false;
@@ -772,6 +813,10 @@ export class WebGPURenderer {
 
   consumeCompletedFrameTimeMs() {
     return this.submissionGate.consumeCompletedFrameTimeMs();
+  }
+
+  beginResourceQueueWork() {
+    return this.submissionGate.beginExternalQueueWork();
   }
 
   get lastQueueCompletionAtMs() {
@@ -924,7 +969,13 @@ export class WebGPURenderer {
       width: skyTextureWidth,
       height: skyTextureHeight,
       url: selectedSkyUrl,
-    } = await loadBestSkyTexture(device, skyUrl, blockForUltra);
+    } = await loadBestSkyTexture(
+      device,
+      skyUrl,
+      blockForUltra,
+      undefined,
+      () => this.beginResourceQueueWork(),
+    );
     this.skyRadianceScale = /gaia-edr3/i.test(selectedSkyUrl) ? 0.16 : 0.55;
     this.skyTexture = texture;
     this.skyTextureWidth = skyTextureWidth;
@@ -1022,8 +1073,6 @@ export class WebGPURenderer {
       target.lost = true;
       target.deviceLossInfo = info;
       target.lifecycleGeneration += 1;
-      target.cancelSkyUpgradeTask?.();
-      target.cancelSkyUpgradeTask = null;
       target.skyUpgradeController?.abort(
         new DOMException("WebGPU device lost", "AbortError"),
       );
@@ -1042,20 +1091,6 @@ export class WebGPURenderer {
       }),
     );
     this.reportCapabilities();
-
-    const source = typeof skyUrl === "string" ? {} : skyUrl;
-    if (
-      skyMode !== "high"
-      && !blockForUltra
-      && source.ultra
-      && source.ultra !== selectedSkyUrl
-      && this.maxRenderDimension >= ULTRA_SKY_DIMENSION
-    ) {
-      this.cancelSkyUpgradeTask = scheduleBackgroundTask(() => {
-        this.cancelSkyUpgradeTask = null;
-        void this.upgradeSkyTexture(source.ultra);
-      });
-    }
   }
 
   createTraceBindGroup(texture) {
@@ -1084,6 +1119,7 @@ export class WebGPURenderer {
         url,
         false,
         controller.signal,
+        () => this.beginResourceQueueWork(),
       );
       return this.adoptSkyTextureUpgrade(next, lifecycleGeneration);
     } catch (error) {
@@ -1412,8 +1448,6 @@ export class WebGPURenderer {
     }
     this.disposed = true;
     this.lifecycleGeneration += 1;
-    this.cancelSkyUpgradeTask?.();
-    this.cancelSkyUpgradeTask = null;
     this.skyUpgradeController?.abort(
       new DOMException("WebGPU renderer disposed", "AbortError"),
     );

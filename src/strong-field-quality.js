@@ -1,5 +1,5 @@
 /*
- * M3 Pro quality scheduler for a future real-time strong-field renderer.
+ * M3 Pro quality scheduler for the real-time strong-field renderer.
  *
  * This module is deliberately independent of the DOM and WebGPU.  The host
  * supplies monotonic camera/physics revisions and timing samples; the returned
@@ -19,27 +19,31 @@ const BASE_TIERS = Object.freeze([
   }),
   Object.freeze({
     id: "survival",
+    // Retained for explicit low-end/fallback profiles. Production M3 Pro
+    // motion is hard-locked above this low-resolution tier.
     resolutionScale: 0.50,
-    stepBudget: 64,
-    maxPixels: 520_000,
+    stepBudget: 52,
+    maxPixels: 460_000,
   }),
   Object.freeze({
     id: "interactive",
-    resolutionScale: 0.65,
-    stepBudget: 96,
-    maxPixels: 921_600,
+    // Dynamic WebGPU frames preserve the native Retina raster. Performance
+    // headroom is recovered from integration depth, never spatial resolution.
+    resolutionScale: 1.00,
+    stepBudget: 72,
+    maxPixels: 12_000_000,
   }),
   Object.freeze({
     id: "balanced",
-    resolutionScale: 0.82,
+    resolutionScale: 1.00,
     stepBudget: 160,
-    maxPixels: 2_000_000,
+    maxPixels: 12_000_000,
   }),
   Object.freeze({
     id: "fine",
     resolutionScale: 1.00,
     stepBudget: 288,
-    maxPixels: 5_000_000,
+    maxPixels: 12_000_000,
   }),
 ]);
 
@@ -55,14 +59,20 @@ export const M3_PRO_STRONG_FIELD_PROFILE = Object.freeze({
   refineDelayMs: 720,
   maxAccumulationSamples: 32,
   maxDevicePixelRatio: 2,
-  maxRenderPixels: 5_000_000,
-  // Do not make the first Metal submission an unprofiled fine-quality frame.
-  // The scheduler starts with a balanced performance ceiling, traces moving
-  // frames at the interactive tier, and unlocks fine quality only after real
-  // completed-queue timings demonstrate sustained headroom.
+  // 1836x1376 CSS at Retina 2x is 10.1 MP. Keep enough headroom to preserve
+  // the panel-sized native raster instead of silently reporting ~1.43x.
+  maxRenderPixels: 12_000_000,
+  // Moving frames are governed by completed-queue timings. Once motion stops,
+  // deterministic static refinement uses its own balanced -> fine ladder so a
+  // transient real-time miss cannot permanently strand a paused view at the
+  // emergency tier.
   initialTier: 3,
   interactionTier: 2,
   realtimeTier: 2,
+  // Dynamic tracing may lower integration depth only as far as the native-
+  // resolution interactive tier. Even catastrophic frame misses cannot select
+  // emergency/survival and silently replace detail with an upscaled raster.
+  realtimeHardFloorTier: 2,
   fallbackMaxTier: 2,
   tiers: BASE_TIERS,
 });
@@ -195,6 +205,7 @@ function makeProfile(overrides = {}) {
     "initialTier",
     "interactionTier",
     "realtimeTier",
+    "realtimeHardFloorTier",
     "fallbackMaxTier",
   ]) {
     profile[name] = tierIndex(profile[name], tiers, name);
@@ -256,9 +267,11 @@ class StrongFieldQualityScheduler {
     this.pendingInput = false;
     this.historyEpoch = 0;
     this.accumulationSamples = 0;
+    this.accumulationAllowedLastFrame = false;
     this.frameTimeEmaMs = null;
     this.fpsEma = null;
     this.timingSamples = 0;
+    this.timingWarmupSamples = 0;
     this.targetMissStreak = 0;
     this.upgradeStreak = 0;
     this.lastTierChangeMs = -Infinity;
@@ -269,6 +282,7 @@ class StrongFieldQualityScheduler {
     this.cameraRevision = null;
     this.physicsRevision = null;
     this.transportRevision = null;
+    this.realtimePerformanceActive = null;
     this.lastDecision = null;
   }
 
@@ -282,6 +296,7 @@ class StrongFieldQualityScheduler {
     this.deviceState = "lost";
     this.deviceReason = String(reason);
     this.accumulationSamples = 0;
+    this.accumulationAllowedLastFrame = false;
     this.pendingReasons.add("device-lost");
   }
 
@@ -312,6 +327,7 @@ class StrongFieldQualityScheduler {
     this.backendReason = String(reason);
     this.selectedTier = null;
     this.accumulationSamples = 0;
+    this.accumulationAllowedLastFrame = false;
     this.pendingReasons.add("backend-change");
     this.pendingInput = true;
     if (backend === "webgl2") {
@@ -330,11 +346,23 @@ class StrongFieldQualityScheduler {
     this.upgradeStreak = 0;
   }
 
-  updateTiming(frameTimeMs, nowMs, allowUpgrade) {
+  updateTiming(
+    frameTimeMs,
+    nowMs,
+    upgradeCeiling = null,
+    downgradeFloor = 0,
+  ) {
     if (frameTimeMs === undefined || frameTimeMs === null) {
       return;
     }
     positiveFinite(frameTimeMs, "frameTimeMs");
+    if (this.timingWarmupSamples > 0) {
+      // The first completion after a raster/tier switch includes texture
+      // allocation and pipeline-domain resize work. It is not representative
+      // of steady tracing cost and previously caused emergency/survival flaps.
+      this.timingWarmupSamples -= 1;
+      return;
+    }
     // A background-tab pause is not a useful GPU sample.  The host should
     // normally omit it; the clamp is a final guard against poisoning the EMA.
     const sample = Math.min(frameTimeMs, 250);
@@ -351,7 +379,7 @@ class StrongFieldQualityScheduler {
       const severe = this.fpsEma < this.profile.hardMinimumFps * 0.70;
       const decrement = severe ? 2 : 1;
       this.changePerformanceTier(
-        Math.max(0, this.performanceTier - decrement),
+        Math.max(downgradeFloor, this.performanceTier - decrement),
         nowMs,
         "hard-fps-gate",
       );
@@ -360,7 +388,13 @@ class StrongFieldQualityScheduler {
       return;
     }
 
-    if (this.fpsEma < this.profile.targetFps) {
+    // The declared real-time operating tier is allowed to use the 24-30 FPS
+    // envelope. `emergency` is a hard-deadline fallback, not the steady state
+    // merely because the M3 Pro lands a little below the aspirational 30 FPS.
+    if (
+      this.fpsEma < this.profile.targetFps
+      && this.performanceTier > downgradeFloor
+    ) {
       this.targetMissStreak += 1;
     } else {
       this.targetMissStreak = 0;
@@ -370,7 +404,7 @@ class StrongFieldQualityScheduler {
       && nowMs - this.lastTierChangeMs >= this.profile.qualityCooldownMs
     ) {
       this.changePerformanceTier(
-        Math.max(0, this.performanceTier - 1),
+        Math.max(downgradeFloor, this.performanceTier - 1),
         nowMs,
         "target-fps-miss",
       );
@@ -379,7 +413,11 @@ class StrongFieldQualityScheduler {
       return;
     }
 
-    if (allowUpgrade && this.fpsEma >= this.profile.upgradeFps) {
+    const canUpgrade = (
+      Number.isInteger(upgradeCeiling)
+      && this.performanceTier < upgradeCeiling
+    );
+    if (canUpgrade && this.fpsEma >= this.profile.upgradeFps) {
       this.upgradeStreak += 1;
     } else {
       this.upgradeStreak = 0;
@@ -390,7 +428,7 @@ class StrongFieldQualityScheduler {
     ) {
       this.changePerformanceTier(
         Math.min(
-          this.profile.tiers.length - 1,
+          upgradeCeiling,
           this.performanceTier + 1,
         ),
         nowMs,
@@ -472,6 +510,18 @@ class StrongFieldQualityScheduler {
     const revisionsChanged = this.checkRevisions(input, nowMs);
     const interactionActive = input.interactionActive === true;
     const timelineRunning = input.timelineRunning === true;
+    const realtimePerformanceActive = interactionActive || timelineRunning;
+    const performanceModeChanged = (
+      this.realtimePerformanceActive !== null
+      && realtimePerformanceActive !== this.realtimePerformanceActive
+    );
+    if (performanceModeChanged) {
+      // The completion sample supplied with this decision belongs to the
+      // preceding mode. A static fine frame must never poison the real-time
+      // controller, and a real-time miss must not cap paused refinement.
+      this.resetTiming();
+    }
+    this.realtimePerformanceActive = realtimePerformanceActive;
     if (this.stableSinceMs === null) {
       this.stableSinceMs = nowMs;
     }
@@ -494,47 +544,91 @@ class StrongFieldQualityScheduler {
       && !revisionsChanged
     );
     const stableElapsedMs = Math.max(0, nowMs - this.stableSinceMs);
-    const allowUpgrade = (
-      fullyStatic
-      && stableElapsedMs >= this.profile.settleDelayMs
-      && this.deviceState === "ready"
-      && this.backendName === "webgpu"
+    if (
+      realtimePerformanceActive
       && this.visible
-    );
-    if (this.visible && this.deviceState === "ready") {
-      this.updateTiming(input.frameTimeMs, nowMs, allowUpgrade);
+      && this.deviceState === "ready"
+    ) {
+      const downgradeFloor = this.backendName === "webgl2"
+        ? Math.min(
+          this.profile.realtimeHardFloorTier,
+          this.profile.fallbackMaxTier,
+        )
+        : this.profile.realtimeHardFloorTier;
+      if (this.performanceTier < downgradeFloor) {
+        this.changePerformanceTier(
+          downgradeFloor,
+          nowMs,
+          "realtime-resolution-floor",
+        );
+      }
+      const upgradeCeiling = (
+        timelineRunning
+        && !interactionActive
+        && this.backendName === "webgpu"
+      )
+        ? this.profile.realtimeTier
+        : null;
+      this.updateTiming(
+        performanceModeChanged ? null : input.frameTimeMs,
+        nowMs,
+        upgradeCeiling,
+        downgradeFloor,
+      );
     }
 
     let convergencePhase;
     let desiredTier;
+    const finestTier = this.profile.tiers.length - 1;
+    const refinementTier = Math.min(
+      finestTier,
+      Math.max(
+        this.profile.realtimeTier,
+        this.profile.interactionTier + 1,
+      ),
+    );
     if (interactionActive) {
       convergencePhase = "interactive";
       desiredTier = this.profile.interactionTier;
-    } else if (timelineRunning || revisionsChanged) {
+    } else if (timelineRunning) {
       convergencePhase = "realtime";
       desiredTier = this.profile.realtimeTier;
     } else if (stableElapsedMs < this.profile.settleDelayMs) {
       convergencePhase = "settling";
-      desiredTier = this.profile.interactionTier;
+      desiredTier = refinementTier;
     } else if (stableElapsedMs < this.profile.refineDelayMs) {
       convergencePhase = "refining";
-      desiredTier = this.profile.realtimeTier;
+      desiredTier = refinementTier;
     } else {
       convergencePhase = "accumulating";
-      desiredTier = this.profile.tiers.length - 1;
+      desiredTier = finestTier;
     }
 
     const backendCeiling = this.backendName === "webgl2"
       ? this.profile.fallbackMaxTier
-      : this.profile.tiers.length - 1;
+      : finestTier;
+    const staticRefinement = !interactionActive && !timelineRunning;
+    const performanceCeiling = staticRefinement
+      ? finestTier
+      : this.performanceTier;
     const selectedTier = Math.min(
       desiredTier,
-      this.performanceTier,
+      performanceCeiling,
       backendCeiling,
     );
     if (selectedTier !== this.selectedTier) {
+      const previousSelectedTier = this.selectedTier;
       this.selectedTier = selectedTier;
       this.pendingReasons.add("quality-tier-change");
+      if (previousSelectedTier !== null) {
+        // Queue timings from different resolutions and integration budgets are
+        // incomparable. Start a fresh EMA before making another tier decision
+        // so one expensive frame cannot cascade through several cheaper tiers.
+        // Ignore the first completion of the new raster because it contains
+        // allocation/resize work rather than steady-state ray tracing alone.
+        this.resetTiming();
+        this.timingWarmupSamples = 1;
+      }
     }
     const tier = this.profile.tiers[selectedTier];
     const resolution = renderDimensions(this.profile, tier, input);
@@ -558,6 +652,19 @@ class StrongFieldQualityScheduler {
       && backendAvailable
     );
     const dynamic = interactionActive || timelineRunning || revisionsChanged;
+    const accumulationAllowed = (
+      canRender
+      && fullyStatic
+      && stableElapsedMs >= this.profile.settleDelayMs
+      && this.backendName === "webgpu"
+    );
+    if (accumulationAllowed && !this.accumulationAllowedLastFrame) {
+      // The frozen centre sample rendered before the settle delay was not part
+      // of a running average. Begin accumulation with an explicit unjittered
+      // sample-zero reset; the first jittered sample is then index one, weight
+      // one half, and can never replace the centre sample at full weight.
+      this.pendingReasons.add("accumulation-start");
+    }
     const invalidationReasons = [...this.pendingReasons].sort();
     const historyReset = canRender && (
       dynamic
@@ -568,12 +675,6 @@ class StrongFieldQualityScheduler {
       this.accumulationSamples = 0;
     }
 
-    const accumulationAllowed = (
-      canRender
-      && fullyStatic
-      && stableElapsedMs >= this.profile.settleDelayMs
-      && this.backendName === "webgpu"
-    );
     let accumulationIndex = 0;
     let accumulationWeight = 1;
     let shouldRender = false;
@@ -591,6 +692,7 @@ class StrongFieldQualityScheduler {
       this.accumulationSamples += 1;
       shouldRender = true;
     }
+    this.accumulationAllowedLastFrame = accumulationAllowed;
 
     if (
       convergencePhase === "accumulating"

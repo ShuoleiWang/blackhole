@@ -41,7 +41,8 @@ body {
 
 button,
 input,
-output {
+output,
+select {
   font: inherit;
 }
 
@@ -996,6 +997,52 @@ h1 {
   border-radius: 50%;
   background: var(--cyan);
   box-shadow: 0 0 0 1px rgba(190, 239, 246, 0.38);
+}
+
+.sky-source-control {
+  display: grid;
+  gap: 6px;
+  margin-top: 5px;
+  padding: 9px;
+  border: 1px solid rgba(123, 203, 216, 0.23);
+  border-radius: 6px;
+  background: rgba(123, 203, 216, 0.055);
+}
+
+.sky-source-heading {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+}
+
+.sky-source-control select {
+  min-width: 0;
+  min-height: 34px;
+  padding: 5px 8px;
+  border: 1px solid rgba(123, 203, 216, 0.3);
+  border-radius: 5px;
+  outline: none;
+  background: #071119;
+  color: #dffbff;
+  cursor: pointer;
+  font-size: 0.69rem;
+}
+
+.sky-source-control select:hover {
+  border-color: rgba(123, 203, 216, 0.52);
+}
+
+.sky-source-control select:focus-visible {
+  border-color: var(--focus);
+  box-shadow: 0 0 0 2px rgba(148, 220, 232, 0.16);
+}
+
+.sky-source-hint {
+  margin: 0;
+  color: var(--faint);
+  font-size: 0.59rem;
+  line-height: 1.45;
 }
 
 .physics-note {

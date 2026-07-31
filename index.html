@@ -391,6 +391,20 @@
                   value="1.00"
                 />
               </label>
+
+              <div class="sky-source-control">
+                <div class="sky-source-heading">
+                  <label class="control-name" for="skySource">天空素材</label>
+                  <select id="skySource" aria-describedby="skySourceHint">
+                    <option value="high">ESO 原始 6000×3000（锁定）</option>
+                    <option value="ultra">Gaia 原始 16000×8000（锁定）</option>
+                  </select>
+                </div>
+                <p id="skySourceHint" class="sky-source-hint">
+                  始终按原始尺寸上传，不降采样或静默回退。Gaia 文件约
+                  236 MB，解码为 GPU 纹理约占 488 MiB 统一内存。
+                </p>
+              </div>
             </div>
           </section>
 
