@@ -2,6 +2,8 @@
 
 [English](./README.md) | **简体中文**
 
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
+
 基于 **WebGPU / WebGL2** 的交互式相对论黑洞实时成像实验。根 URL 进入实时
 双黑洞场景；旧 `?scene=binary-approx` URL 继续兼容，
 `?scene=schwarzschild` 则进入交互式单黑洞场景。
@@ -419,12 +421,16 @@ mismatch 为 0，最大 stored null residual 为 `3.068e-9`，p95 / 最大投影
 - **ESO/S. Brunier**：仓库内置 6000×3000 银河摄影背景，CC BY 4.0。
 - `assets/deep-field.webp`：由仓库脚本生成的备用深空素材，不是默认背景。
 
-下载地址、处理方式、哈希和完整许可信息见 [`assets/SOURCES.md`](./assets/SOURCES.md)。第三方素材不会因本项目代码未来采用某种许可证而被重新授权。
+下载地址、处理方式、哈希和完整许可信息见
+[`assets/SOURCES.md`](./assets/SOURCES.md)。第三方素材不会因本项目采用 MIT
+许可证而被重新授权。
 
 ## 许可证
 
-当前仓库尚未声明项目代码许可证。第三方天空素材、SXS 派生数据与 vendored
-依赖仍分别遵循其来源条款。Phase 2 使用的固定 Zenodo record 没有声明
-license，因此本仓库只记录该事实，不虚构 SPDX 标识，也不从其他页面推断
-license。在选择项目代码许可证前，请不要假设仓库内容已按 MIT、
-Apache-2.0 等许可证授权。
+本项目的原创源代码采用 [MIT License](./LICENSE)。
+
+第三方天空素材、SXS 派生数据、transfer-map 来源数据与 vendored 依赖不因
+本项目采用 MIT 许可证而被重新授权，仍分别遵循各自的来源条款。Phase 2
+使用的固定 Zenodo record 没有声明许可证；本仓库只记录该来源状态，不虚构
+SPDX 标识，也不从其他页面推断许可证。完整来源与许可信息见
+[`assets/SOURCES.md`](./assets/SOURCES.md)。

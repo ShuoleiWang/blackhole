@@ -2,6 +2,8 @@
 
 **English** | [简体中文](./README.zh-CN.md)
 
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
+
 An interactive, real-time black-hole renderer built with **WebGPU and WebGL2**.
 The root URL opens the real-time binary scene; the legacy
 `?scene=binary-approx` URL remains compatible, and
@@ -506,14 +508,19 @@ validation. The repository does not currently include GPU image-regression CI.
 - **ESO/S. Brunier** — Bundled 6000×3000 photographic Milky Way panorama, licensed under CC BY 4.0.
 - `assets/deep-field.webp` — Script-generated deep-space fallback asset; it is not the default sky.
 
-See [`assets/SOURCES.md`](./assets/SOURCES.md) for download locations, transformations, hashes, and complete license information. Third-party assets are not relicensed by any future license selected for this project's code.
+See [`assets/SOURCES.md`](./assets/SOURCES.md) for download locations,
+transformations, hashes, and complete license information. Third-party assets
+are not relicensed by this project's MIT License.
 
 ## License
 
-No license has currently been declared for the project code. Third-party sky
-assets, SXS-derived data, and vendored dependencies remain subject to their
-source terms. The pinned Zenodo record used for the Phase 2 SXS files does not
-declare a license; this repository therefore records that status without
-inventing an SPDX identifier or inferring a license from another page. Until a
-project license is selected, do not assume that the repository is available
-under MIT, Apache-2.0, or another software license.
+The original source code in this project is licensed under the
+[MIT License](./LICENSE).
+
+Third-party sky assets, SXS-derived data, transfer-map source data, and vendored
+dependencies are not relicensed by the MIT License and remain subject to their
+respective source terms. The pinned Zenodo record used for the Phase 2 SXS files
+does not declare a license; this repository records that source status without
+inventing an SPDX identifier or inferring a license from another page. See
+[`assets/SOURCES.md`](./assets/SOURCES.md) for complete provenance and licensing
+details.
