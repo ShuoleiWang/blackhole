@@ -307,9 +307,7 @@ export async function createBinaryApproxScene({
   let transportRevision = 0;
   let transportSignature = null;
 
-  const diagnosticElements = Object.freeze([
-    elements.modeOutcome,
-    elements.modeFrequency,
+  const advancedDiagnosticElements = Object.freeze([
     elements.modeLookback,
     elements.modeNull,
     elements.modeCost,
@@ -365,6 +363,11 @@ export async function createBinaryApproxScene({
     elements.modeScience.textContent = strongWebGPU
       ? "天空成像"
       : "弱场预览";
+    // Outcome classification and frequency shift remain part of the traced
+    // ray record and the scientific reference workbench, but they are not
+    // useful as primary display modes in the interactive binary scene.
+    elements.modeOutcome.hidden = true;
+    elements.modeFrequency.hidden = true;
     elements.modeOutcome.textContent = "光线结果";
     elements.modeOutcome.setAttribute(
       "title",
@@ -390,7 +393,7 @@ export async function createBinaryApproxScene({
       "title",
       "已执行积分步数相对 320 步编译上限的比例；这是计算成本，不是物理量",
     );
-    for (const element of diagnosticElements) {
+    for (const element of advancedDiagnosticElements) {
       element.hidden = !strongWebGPU;
     }
   }
@@ -407,7 +410,7 @@ export async function createBinaryApproxScene({
         "实时 3+1 Hamiltonian 强场光追",
         "boosted superposed Kerr–Schild",
         "fast-light 近似 · 非完整 NR",
-        "诊断：光线结果 / 回溯时间 / g / 零性残差 / 积分成本",
+        "高级诊断：回溯时间 / 零性残差 / 积分成本",
       ].join(" · ");
       return;
     }
@@ -417,7 +420,7 @@ export async function createBinaryApproxScene({
       "兼容性回退",
       "旧 two-centre weak-field 预览",
       "不具备 WebGPU 强场物理等价性",
-      "强场 outcome / lookback / g / null residual / cost 诊断已隐藏",
+      "强场高级数值诊断已隐藏",
     ].join(" · ");
   }
 
@@ -848,8 +851,8 @@ export async function createBinaryApproxScene({
           180,
           // Keep numerical failures inspectable in the photographic view
           // without leaking a conspicuous magenta diagnostic overlay into
-          // the default image.  The outcome mode remains the authoritative,
-          // high-contrast classification view.
+          // the default image. Raw outcomes remain available to regression
+          // probes and the scientific reference workbench.
           0.055,
           tier.stepCurveExponent,
         ]),

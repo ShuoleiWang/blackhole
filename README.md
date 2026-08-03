@@ -170,8 +170,11 @@ fallback.
 
 The single-hole scene retains its neutral science and stylized Hubble display
 transforms. In the root strong-field scene, the same mode area exposes the
-scientific sky plus ray outcome, frequency-shift, coordinate-lookback,
-Hamiltonian-residual, and integration-cost diagnostics.
+scientific sky as the primary image, with coordinate-lookback,
+Hamiltonian-residual, and integration-cost views kept under advanced
+diagnostics. Ray outcome and frequency-shift channels remain in the GPU result
+and stationary scientific-reference workbench without occupying primary
+binary-scene controls.
 
 In the root binary scene, drag and zoom control the camera. Each rendered frame
 constructs fresh camera rays and recomputes the active backend model; it does

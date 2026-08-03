@@ -242,10 +242,12 @@ test("binary scene wires the strong-field runtime without losing legacy fallback
     );
     assert.match(
       host.elements.get("sceneStatus").textContent,
-      /光线结果.*回溯时间.*g.*零性残差.*积分成本/,
+      /高级诊断.*回溯时间.*零性残差.*积分成本/,
     );
     assert.equal(host.elements.get("modeHubble").textContent, "光线结果");
     assert.equal(host.elements.get("modeFrequency").textContent, "频移因子 g");
+    assert.equal(host.elements.get("modeHubble").hidden, true);
+    assert.equal(host.elements.get("modeFrequency").hidden, true);
     assert.equal(host.elements.get("modeLookback").hidden, false);
     assert.equal(host.elements.get("modeNull").hidden, false);
     assert.equal(host.elements.get("modeError").textContent, "积分步数成本");
@@ -418,4 +420,23 @@ test("binary scene supports a reproducible paused protocol-time permalink", asyn
   } finally {
     globalThis.fetch = originalFetch;
   }
+});
+
+test("binary stylesheet removes outcome and frequency from the primary mode row", async () => {
+  const stylesheet = await readFile(
+    new URL("../src/styles.css", import.meta.url),
+    "utf8",
+  );
+  assert.match(
+    stylesheet,
+    /\.scene-binary-approx \.mode-switch\s*\{[^}]*grid-template-columns:\s*1fr;/s,
+  );
+  assert.match(
+    stylesheet,
+    /\.scene-binary-approx #modeHubble,[\s\S]*\.scene-binary-approx #modeFrequency\s*\{[^}]*display:\s*none;/,
+  );
+  assert.match(
+    stylesheet,
+    /\.scene-binary-approx\.renderer-webgpu \.diagnostic-only\[hidden\]\s*\{[^}]*display:\s*none;/s,
+  );
 });

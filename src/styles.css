@@ -456,12 +456,22 @@ h1 {
   display: block;
 }
 
-.scene-binary-approx.renderer-webgpu .mode-switch {
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+.scene-binary-approx .mode-switch {
+  grid-template-columns: 1fr;
+}
+
+.scene-binary-approx #modeHubble,
+.scene-binary-approx #modeFrequency {
+  display: none;
 }
 
 .scene-binary-approx.renderer-webgpu .diagnostic-only {
   display: block;
+}
+
+.diagnostic-only[hidden],
+.scene-binary-approx.renderer-webgpu .diagnostic-only[hidden] {
+  display: none;
 }
 
 .scene-binary-approx.renderer-webgl2 .mode-switch {
