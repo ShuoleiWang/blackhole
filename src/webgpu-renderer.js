@@ -12,6 +12,7 @@ const ORIGINAL_SKY_DIMENSIONS = Object.freeze([
   Object.freeze({ token: "milky-way-360-6k", width: 6000, height: 3000 }),
 ]);
 const PROGRESSIVE_ACCUMULATION_MODE = "linear-hdr-running-average-v1";
+const DYNAMIC_PROGRESSIVE_PHASES = new Set(["interactive", "realtime"]);
 const WEBGPU_FALLBACK_REASONS = Object.freeze({
   "device-lost": "WebGPU 设备连接丢失",
   "render-error": "WebGPU 渲染异常",
@@ -233,6 +234,36 @@ function shaderBundleFrom(options) {
   return options?.shaderBundle || {};
 }
 
+function traceSpecializationsFrom(bundle) {
+  const declarations = bundle.wgsl?.traceSpecializations;
+  if (declarations == null) {
+    return Object.freeze([
+      Object.freeze({ id: "default", constants: undefined }),
+    ]);
+  }
+  if (!Array.isArray(declarations) || declarations.length < 1) {
+    throw new Error("WGSL trace specializations must be a non-empty array");
+  }
+  const ids = new Set();
+  return Object.freeze(declarations.map((declaration, index) => {
+    const id = String(declaration?.id || "");
+    if (!id || ids.has(id)) {
+      throw new Error(`WGSL trace specialization ${index} has an invalid id`);
+    }
+    ids.add(id);
+    const constants = declaration.constants;
+    if (
+      !constants
+      || typeof constants !== "object"
+      || Array.isArray(constants)
+      || Object.values(constants).some((value) => !Number.isFinite(Number(value)))
+    ) {
+      throw new Error(`WGSL trace specialization ${id} has invalid constants`);
+    }
+    return Object.freeze({ id, constants: Object.freeze({ ...constants }) });
+  }));
+}
+
 function progressiveAccumulationFrom(options, bundle) {
   const declaration = options?.progressiveAccumulation ?? bundle.accumulation;
   if (declaration == null && bundle.id !== "binary-strong-field-v1") {
@@ -364,6 +395,15 @@ export function progressiveFrameState(frame) {
     historyEpoch,
     historyReset,
   });
+}
+
+function isDynamicProgressiveFrame(frame) {
+  return (
+    Number(frame?.motion) !== 0
+    || DYNAMIC_PROGRESSIVE_PHASES.has(
+      frame?.strongFieldQuality?.convergencePhase,
+    )
+  );
 }
 
 function uniformFloatCount(bundle) {
@@ -749,6 +789,9 @@ export class WebGPURenderer {
     this.height = 1;
     this.traceTexture = null;
     this.traceView = null;
+    this.tracePipelines = null;
+    this.traceBindGroups = null;
+    this.traceDefaultSpecialization = "default";
     this.postBindGroup = null;
     this.accumulationBuffer = null;
     this.accumulationData = new Float32Array(4);
@@ -1014,17 +1057,29 @@ export class WebGPURenderer {
       throw new Error(errors.map((error) => error.message).join("\n"));
     }
 
-    this.tracePipeline = await device.createRenderPipelineAsync({
-      label: "Relativistic trace pipeline",
-      layout: "auto",
-      vertex: { module: vertexModule, entryPoint: "vsMain" },
-      fragment: {
-        module: traceModule,
-        entryPoint: "fsMain",
-        targets: [{ format: HDR_FORMAT }],
-      },
-      primitive: { topology: "triangle-list" },
-    });
+    const traceSpecializations = traceSpecializationsFrom(this.shaderBundle);
+    const tracePipelineEntries = await Promise.all(
+      traceSpecializations.map(async ({ id, constants }) => [
+        id,
+        await device.createRenderPipelineAsync({
+          label: id === "default"
+            ? "Relativistic trace pipeline"
+            : `Relativistic trace pipeline · ${id}`,
+          layout: "auto",
+          vertex: { module: vertexModule, entryPoint: "vsMain" },
+          fragment: {
+            module: traceModule,
+            entryPoint: "fsMain",
+            ...(constants ? { constants } : {}),
+            targets: [{ format: HDR_FORMAT }],
+          },
+          primitive: { topology: "triangle-list" },
+        }),
+      ]),
+    );
+    this.tracePipelines = Object.fromEntries(tracePipelineEntries);
+    this.traceDefaultSpecialization = traceSpecializations[0].id;
+    this.tracePipeline = this.tracePipelines[this.traceDefaultSpecialization];
 
     this.postPipeline = await device.createRenderPipelineAsync({
       label: "Telescope display pipeline",
@@ -1057,7 +1112,8 @@ export class WebGPURenderer {
     }
 
     this.sceneResourceState = createSceneResources(this.shaderBundle, device);
-    this.traceBindGroup = this.createTraceBindGroup(this.skyTexture);
+    this.traceBindGroups = this.createTraceBindGroups(this.skyTexture);
+    this.traceBindGroup = this.traceBindGroups[this.traceDefaultSpecialization];
 
     // GPUDevice.lost cannot be cancelled. Keep only this detachable lifecycle
     // cell in the promise closure so dispose() releases the renderer and all
@@ -1093,10 +1149,10 @@ export class WebGPURenderer {
     this.reportCapabilities();
   }
 
-  createTraceBindGroup(texture) {
+  createTraceBindGroup(texture, pipeline = this.tracePipeline, label = "Trace resources") {
     return this.device.createBindGroup({
-      label: "Trace resources",
-      layout: this.tracePipeline.getBindGroupLayout(0),
+      label,
+      layout: pipeline.getBindGroupLayout(0),
       entries: [
         { binding: 0, resource: { buffer: this.uniformBuffer } },
         { binding: 1, resource: texture.createView() },
@@ -1104,6 +1160,29 @@ export class WebGPURenderer {
         ...(this.sceneResourceState?.entries || []),
       ],
     });
+  }
+
+  createTraceBindGroups(texture) {
+    const pipelines = this.tracePipelines || {
+      [this.traceDefaultSpecialization]: this.tracePipeline,
+    };
+    return Object.fromEntries(Object.entries(pipelines).map(([id, pipeline]) => [
+      id,
+      this.createTraceBindGroup(texture, pipeline, `Trace resources · ${id}`),
+    ]));
+  }
+
+  traceResourcesForFrame(frame) {
+    const selector = this.shaderBundle?.wgsl?.selectTraceSpecialization;
+    const selected = typeof selector === "function"
+      ? String(selector(frame))
+      : this.traceDefaultSpecialization;
+    const pipeline = this.tracePipelines?.[selected];
+    const bindGroup = this.traceBindGroups?.[selected];
+    if (pipeline && bindGroup) {
+      return { pipeline, bindGroup };
+    }
+    return { pipeline: this.tracePipeline, bindGroup: this.traceBindGroup };
   }
 
   async upgradeSkyTexture(url) {
@@ -1144,11 +1223,18 @@ export class WebGPURenderer {
       return false;
     }
 
-    let nextBindGroup;
+    let nextBindGroups;
     try {
       // Build every device-backed object before publishing the new texture.
       // A validation failure therefore leaves the previous sky fully intact.
-      nextBindGroup = this.createTraceBindGroup(next.texture);
+      if (typeof this.createTraceBindGroups === "function") {
+        nextBindGroups = this.createTraceBindGroups(next.texture);
+      } else {
+        const fallbackId = this.traceDefaultSpecialization || "default";
+        nextBindGroups = {
+          [fallbackId]: this.createTraceBindGroup(next.texture),
+        };
+      }
     } catch (error) {
       next.texture.destroy();
       throw error;
@@ -1161,7 +1247,10 @@ export class WebGPURenderer {
     this.skyUrl = next.url;
     this.skyRadianceScale = /gaia-edr3/i.test(next.url) ? 0.16 : 0.55;
     this.skyDetail = `${next.width}×${next.height} 原始全景 · 解析恒星层`;
-    this.traceBindGroup = nextBindGroup;
+    this.traceBindGroups = nextBindGroups;
+    this.traceBindGroup = nextBindGroups[
+      this.traceDefaultSpecialization || "default"
+    ];
     this.invalidateProgressiveHistory();
     previousTexture?.destroy();
     this.reportCapabilities();
@@ -1316,16 +1405,18 @@ export class WebGPURenderer {
         frame,
         state: null,
         signature: null,
+        bypassAccumulation: false,
       };
     }
     const requested = progressiveFrameState(frame);
     const signature = progressiveHistorySignature(frame);
+    const dynamicFrame = isDynamicProgressiveFrame(frame);
     const forcedReset = (
       requested.historyReset
       || !this.progressiveHistoryValid
       || signature !== this.progressiveHistorySignature
       || requested.historyEpoch !== this.progressiveHistoryEpoch
-      || Number(frame.motion) !== 0
+      || dynamicFrame
     );
     const state = forcedReset
       ? {
@@ -1348,6 +1439,11 @@ export class WebGPURenderer {
       },
       state,
       signature,
+      // A dynamic sample is already forced to sample zero and cannot seed
+      // reusable history. The reset accumulation shader would only copy the
+      // FP16 trace target into another same-sized FP16 target before the same
+      // post pipeline reads it, so post can read traceView directly instead.
+      bypassAccumulation: dynamicFrame,
     };
   }
 
@@ -1370,6 +1466,7 @@ export class WebGPURenderer {
 
     const progressive = this.prepareProgressiveFrame(frame);
     this.writeUniforms(progressive.frame);
+    const traceResources = this.traceResourcesForFrame(progressive.frame);
     const encoder = this.device.createCommandEncoder({ label: "Black-hole frame" });
     const tracePass = encoder.beginRenderPass({
       colorAttachments: [{
@@ -1379,13 +1476,13 @@ export class WebGPURenderer {
         storeOp: "store",
       }],
     });
-    tracePass.setPipeline(this.tracePipeline);
-    tracePass.setBindGroup(0, this.traceBindGroup);
+    tracePass.setPipeline(traceResources.pipeline);
+    tracePass.setBindGroup(0, traceResources.bindGroup);
     tracePass.draw(3);
     tracePass.end();
 
     let postBindGroup = this.postBindGroup;
-    if (progressive.state) {
+    if (progressive.state && !progressive.bypassAccumulation) {
       const writeIndex = 1 - this.accumulationReadIndex;
       this.accumulationData[0] = progressive.state.accumulationWeight;
       this.accumulationData[1] = progressive.state.historyReset ? 1 : 0;
@@ -1434,10 +1531,17 @@ export class WebGPURenderer {
       return false;
     }
     if (progressive.state) {
-      this.accumulationReadIndex = 1 - this.accumulationReadIndex;
-      this.progressiveHistoryValid = true;
-      this.progressiveHistorySignature = progressive.signature;
-      this.progressiveHistoryEpoch = progressive.state.historyEpoch;
+      if (progressive.bypassAccumulation) {
+        // The displayed trace is current, but it must never become temporal
+        // history. The first static sample will take the regular reset path,
+        // populate an accumulation target, and only then mark history valid.
+        this.invalidateProgressiveHistory();
+      } else {
+        this.accumulationReadIndex = 1 - this.accumulationReadIndex;
+        this.progressiveHistoryValid = true;
+        this.progressiveHistorySignature = progressive.signature;
+        this.progressiveHistoryEpoch = progressive.state.historyEpoch;
+      }
     }
     return true;
   }

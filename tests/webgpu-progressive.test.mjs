@@ -48,6 +48,105 @@ function frame(overrides = {}) {
   };
 }
 
+function renderHarness(overrides = {}) {
+  const passes = [];
+  const queueWrites = [];
+  const submitted = [];
+  const encoder = {
+    beginRenderPass(descriptor) {
+      const record = {
+        descriptor,
+        pipeline: null,
+        bindGroup: null,
+        drawCount: 0,
+        ended: false,
+      };
+      passes.push(record);
+      return {
+        setPipeline(pipeline) {
+          record.pipeline = pipeline;
+        },
+        setBindGroup(index, bindGroup) {
+          assert.equal(index, 0);
+          record.bindGroup = bindGroup;
+        },
+        draw(count) {
+          record.drawCount = count;
+        },
+        end() {
+          record.ended = true;
+        },
+      };
+    },
+    finish() {
+      return "command-buffer";
+    },
+  };
+  const queue = {
+    writeBuffer(...args) {
+      queueWrites.push(args);
+    },
+  };
+  const renderer = Object.assign(Object.create(WebGPURenderer.prototype), {
+    progressiveAccumulation: {
+      mode: "linear-hdr-running-average-v1",
+    },
+    progressiveHistoryValid: true,
+    progressiveHistorySignature: null,
+    progressiveHistoryEpoch: 1,
+    traceView: { id: "trace-view" },
+    postBindGroup: { id: "trace-post-bind-group" },
+    accumulationBuffer: { id: "accumulation-buffer" },
+    accumulationData: new Float32Array(4),
+    accumulationViews: [
+      { id: "history-view-0" },
+      { id: "history-view-1" },
+    ],
+    accumulationBindGroups: [
+      { id: "history-read-bind-group-0" },
+      { id: "history-read-bind-group-1" },
+    ],
+    progressivePostBindGroups: [
+      { id: "history-post-bind-group-0" },
+      { id: "history-post-bind-group-1" },
+    ],
+    accumulationReadIndex: 0,
+    tracePipeline: { id: "trace-pipeline" },
+    accumulationPipeline: { id: "accumulation-pipeline" },
+    postPipeline: { id: "post-pipeline" },
+    context: {
+      getCurrentTexture() {
+        return {
+          createView() {
+            return { id: "canvas-view" };
+          },
+        };
+      },
+    },
+    device: {
+      queue,
+      createCommandEncoder() {
+        return encoder;
+      },
+    },
+    submissionGate: {
+      submit(receivedQueue, commandBuffers) {
+        assert.equal(receivedQueue, queue);
+        submitted.push(commandBuffers);
+        return true;
+      },
+    },
+    canSubmitFrame() {
+      return true;
+    },
+    writeUniforms(nextFrame) {
+      this.writtenFrame = nextFrame;
+    },
+    ...overrides,
+  });
+  return { renderer, passes, queueWrites, submitted };
+}
+
 test("progressive accumulation shader averages linear HDR before post", () => {
   assert.match(
     progressiveAccumulationFragmentWGSL,
@@ -197,6 +296,101 @@ test("motion always prevents cross-time history reuse", () => {
   const prepared = renderer.prepareProgressiveFrame(moving);
   assert.equal(prepared.state.historyReset, true);
   assert.equal(prepared.state.accumulationIndex, 0);
+  assert.equal(prepared.bypassAccumulation, true);
+});
+
+test("interactive frames independently reset and bypass progressive history", () => {
+  const renderer = Object.create(WebGPURenderer.prototype);
+  renderer.progressiveAccumulation = {
+    mode: "linear-hdr-running-average-v1",
+  };
+  const interactive = frame({
+    motion: 0,
+    strongFieldQuality: {
+      convergencePhase: "interactive",
+      accumulationIndex: 4,
+      accumulationWeight: 0.2,
+      historyEpoch: 5,
+      historyReset: false,
+    },
+  });
+  renderer.progressiveHistoryValid = true;
+  renderer.progressiveHistorySignature = progressiveHistorySignature(interactive);
+  renderer.progressiveHistoryEpoch = 5;
+
+  const prepared = renderer.prepareProgressiveFrame(interactive);
+  assert.equal(prepared.state.historyReset, true);
+  assert.equal(prepared.state.accumulationIndex, 0);
+  assert.equal(prepared.bypassAccumulation, true);
+});
+
+test("dynamic frames encode trace and post only, then invalidate history", () => {
+  const { renderer, passes, queueWrites, submitted } = renderHarness();
+  const moving = frame({
+    motion: 1,
+    strongFieldQuality: {
+      convergencePhase: "realtime",
+      accumulationIndex: 7,
+      accumulationWeight: 0.125,
+      historyEpoch: 4,
+      historyReset: false,
+    },
+  });
+  renderer.progressiveHistorySignature = progressiveHistorySignature(moving);
+  renderer.progressiveHistoryEpoch = 4;
+
+  assert.equal(renderer.render(moving), true);
+  assert.equal(passes.length, 2);
+  assert.deepEqual(
+    passes.map((pass) => pass.pipeline.id),
+    ["trace-pipeline", "post-pipeline"],
+  );
+  assert.equal(passes[1].bindGroup, renderer.postBindGroup);
+  assert.equal(queueWrites.length, 0);
+  assert.equal(renderer.accumulationReadIndex, 0);
+  assert.equal(renderer.progressiveHistoryValid, false);
+  assert.equal(renderer.progressiveHistorySignature, null);
+  assert.equal(renderer.progressiveHistoryEpoch, null);
+  assert.equal(renderer.writtenFrame.frame, 0);
+  assert.deepEqual(submitted, [["command-buffer"]]);
+  for (const pass of passes) {
+    assert.equal(pass.drawCount, 3);
+    assert.equal(pass.ended, true);
+  }
+});
+
+test("the first static sample still seeds FP16 history before post", () => {
+  const { renderer, passes, queueWrites } = renderHarness({
+    progressiveHistoryValid: false,
+    progressiveHistoryEpoch: null,
+  });
+  const stationary = frame({
+    motion: 0,
+    strongFieldQuality: {
+      convergencePhase: "accumulating",
+      accumulationIndex: 0,
+      accumulationWeight: 1,
+      historyEpoch: 6,
+      historyReset: true,
+    },
+  });
+
+  assert.equal(renderer.render(stationary), true);
+  assert.equal(passes.length, 3);
+  assert.deepEqual(
+    passes.map((pass) => pass.pipeline.id),
+    ["trace-pipeline", "accumulation-pipeline", "post-pipeline"],
+  );
+  assert.equal(passes[1].bindGroup, renderer.accumulationBindGroups[0]);
+  assert.equal(passes[2].bindGroup, renderer.progressivePostBindGroups[1]);
+  assert.equal(queueWrites.length, 1);
+  assert.equal(renderer.accumulationReadIndex, 1);
+  assert.equal(renderer.progressiveHistoryValid, true);
+  assert.equal(
+    renderer.progressiveHistorySignature,
+    progressiveHistorySignature(stationary),
+  );
+  assert.equal(renderer.progressiveHistoryEpoch, 6);
 });
 
 test("WebGPU submission gate permits exactly one in-flight frame", async () => {

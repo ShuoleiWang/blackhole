@@ -108,6 +108,65 @@ one frame from the latest camera and physical time. Thus an input can wait at
 most for the currently executing frame; old camera views never accumulate in a
 GPU queue. WebGL2 has no asynchronous completion signal and retains RAF timing.
 
+### M3 Pro production trace-path optimization
+
+The WebGPU path applies two optimizations without lowering any numerical or
+spatial quality budget:
+
+- moving or continuously playing frames go directly from the linear-HDR trace
+  target to the existing post pass; they do not copy a sample that is forbidden
+  from becoming temporal history into an otherwise unused accumulation target;
+- three Metal pipelines specialize the frame-uniform spacetime phase as binary,
+  transition, or remnant, allowing the compiler to remove inactive
+  Kerr-Schild providers instead of retaining the worst-case provider graph.
+
+Two more aggressive algebraic candidates -- replacing production `pow` and
+fusing inverse-metric derivative contractions -- were rejected after the GPU
+readback exposed critical-ray drift. They are deliberately not part of the
+production diff even though their scalar identities hold in exact arithmetic.
+
+Static sample zero and all later paused samples still use the original
+`rgba16float` history path. Spatial resolution, sky texture dimensions,
+integration tiers, escape/capture rules, HDR/P3 output, and the WebGL2 fallback
+are not changed by these optimizations.
+
+The repository also contains a production-WGSL GPU readback harness. It appends
+a compute entry point to the exact fragment-tracer module and records outcome,
+termination reason, escape direction, frequency shift, lookback, maximum null
+Hamiltonian residual, iteration count, and minimum horizon distance. This is
+the acceptance boundary for future algebra, pipeline, or native-backend work;
+a shader-string test or visually similar screenshot is not sufficient.
+
+#### Controlled local result (2026-08-04)
+
+One local Apple M3 Pro A/B used the same 1280x720 CSS viewport at DPR 2
+(`2560x1440` internal raster), ESO 6K sky, SDR output, binary protocol time
+`-965.30 M`, a running timeline frozen at `0 M/s`, and the unchanged 72-step
+interactive tier. Against clean commit `7845101`, completed WebGPU submission
+EMA changed from `250.00 ms` (`4.00 FPS`) to `97.62 ms` (`10.24 FPS`): 61.0%
+less queue-completion time and 2.56x throughput. This telemetry is
+submit-to-queue-completion time, not a claim about end-to-end display-present
+latency.
+
+An independent M3 Pro readback compared 2,405 deterministic rays in each of
+the binary, transition, remnant, and forced budget-exhaustion cases (9,620
+total) against the clean baseline. It covered all three raw outcomes. All
+7,084 escaped rays kept their classification; maximum escape-direction drift
+was `1.06e-5`, maximum frequency-shift drift was `2.38e-7`, and no escaped ray
+became shadow or unresolved. Transition output was identical in every recorded
+channel, and remnant outcome/termination output was identical.
+
+The strict comparator intentionally reports two separatrix classifications
+rather than hiding them: one of 78 production binary captured probes became
+`unresolved` after exhausting the 296-step critical budget only `0.00255 M`
+outside the declared capture padding; one deliberately under-budget probe
+moved from `unresolved` to captured. Captured/non-sky rays also showed expected
+floating-point path-length and iteration drift after Metal specialization.
+Both boundary changes remain fail-closed with respect to sky -- no unresolved
+ray is painted as escaped sky -- but they are not claimed as bitwise
+equivalence. The paused fine tier reached all 32 accumulation samples; two
+full-page captures two seconds apart were byte identical after `steady`.
+
 ## Progressive sequence
 
 After input stops, the scheduler progresses through:

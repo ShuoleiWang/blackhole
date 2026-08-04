@@ -107,6 +107,20 @@ test("strong-field bundle declares asymmetric WebGPU production policy", () => {
     strongFieldBinaryShaderBundle.backendPolicy.physicalParityRequired,
     false,
   );
+  assert.deepEqual(
+    strongFieldBinaryShaderBundle.wgsl.traceSpecializations.map(
+      ({ id, constants }) => [id, constants.SPACETIME_PHASE_MODE],
+    ),
+    [["binary", 0], ["transition", 2], ["remnant", 1]],
+  );
+  const selectPhase = strongFieldBinaryShaderBundle.wgsl
+    .selectTraceSpecialization;
+  assert.equal(selectPhase({ sceneStrongFieldUniforms: [0, 0] }), "binary");
+  assert.equal(
+    selectPhase({ sceneStrongFieldUniforms: [0, 0.5] }),
+    "transition",
+  );
+  assert.equal(selectPhase({ sceneStrongFieldUniforms: [0, 1] }), "remnant");
   assert.equal(
     strongFieldBinaryShaderBundle.accumulation.mode,
     "linear-hdr-running-average-v1",
@@ -331,6 +345,55 @@ test("WGSL exposes the strong-field provider and complete ray-result contract", 
     strongFieldBinaryTraceFragmentWGSL,
     /dot\(position, -rhs\.velocity\) > 0\.0/,
   );
+});
+
+test("WGSL specializes exact inspiral and remnant endpoints", () => {
+  assert.match(
+    strongFieldBinaryTraceFragmentWGSL,
+    /override SPACETIME_PHASE_MODE: i32 = -1/,
+  );
+  const providerStart = strongFieldBinaryTraceFragmentWGSL.indexOf(
+    "fn sampleSpacetime(",
+  );
+  const providerEnd = strongFieldBinaryTraceFragmentWGSL.indexOf(
+    "\n  var g00 = dualConstant(-1.0);",
+    providerStart,
+  );
+  assert.ok(providerStart >= 0 && providerEnd > providerStart);
+  const provider = strongFieldBinaryTraceFragmentWGSL.slice(
+    providerStart,
+    providerEnd,
+  );
+  const inspiralStart = provider.indexOf("SPACETIME_PHASE_MODE == 0");
+  const remnantStart = provider.indexOf(
+    "SPACETIME_PHASE_MODE == 1",
+    inspiralStart,
+  );
+  const transitionStart = provider.indexOf("} else {", remnantStart);
+  assert.ok(
+    inspiralStart >= 0
+      && remnantStart > inspiralStart
+      && transitionStart > remnantStart,
+  );
+
+  const inspiral = provider.slice(inspiralStart, remnantStart);
+  assert.match(inspiral, /params\.bodyAPositionMass/);
+  assert.match(inspiral, /params\.bodyBPositionMass/);
+  assert.doesNotMatch(inspiral, /params\.remnantPositionMass/);
+  assert.equal((inspiral.match(/attenuationWeight\(/g) || []).length, 2);
+
+  const remnant = provider.slice(remnantStart, transitionStart);
+  assert.match(remnant, /params\.remnantPositionMass/);
+  assert.doesNotMatch(remnant, /params\.body[AB]PositionMass/);
+  assert.doesNotMatch(remnant, /attenuationWeight\(/);
+
+  const transition = provider.slice(transitionStart);
+  assert.match(transition, /params\.bodyAPositionMass/);
+  assert.match(transition, /params\.bodyBPositionMass/);
+  assert.match(transition, /params\.remnantPositionMass/);
+  assert.match(transition, /binaryActive/);
+  assert.match(transition, /remnantActive/);
+  assert.equal((transition.match(/attenuationWeight\(/g) || []).length, 2);
 });
 
 test("photographic sky sampling uses a path-independent stable four-tap footprint", () => {

@@ -200,6 +200,10 @@ const RAY_UNRESOLVED: u32 = 0u;
 const RAY_CAPTURED: u32 = 1u;
 const RAY_ESCAPED: u32 = 2u;
 const DUAL_EPSILON: f32 = 1.0e-12;
+// Render pipelines specialize this override to 0=binary, 1=remnant, or
+// 2=transition.  The default keeps the complete provider available to the GPU
+// probe and any consumer that does not opt into pipeline specialization.
+override SPACETIME_PHASE_MODE: i32 = -1;
 
 struct Params {
   resolutionTimeMass: vec4<f32>,
@@ -783,45 +787,97 @@ fn sampleSpacetime(
   // spacetimeControl.y is already quintic smootherstep(rawMergerBlend), packed
   // by the CPU provider.  This preserves a C2 metric transition.
   let blend = clamp(params.spacetimeControl.y, 0.0, 1.0);
-  let binaryWeight = 1.0 - blend;
-  let binaryActive = select(0.0, 1.0, binaryWeight > 1.0e-6);
-  let remnantActive = select(0.0, 1.0, blend > 1.0e-6);
+  var holeA = zeroHoleContribution();
+  var holeB = zeroHoleContribution();
+  var remnant = zeroHoleContribution();
+  var weightA = dualConstant(0.0);
+  var weightB = dualConstant(0.0);
+  var weightRemnant = dualConstant(0.0);
 
-  let holeA = boostedKerrSchildContribution(
-    position,
-    params.bodyAPositionMass.xyz,
-    params.bodyAVelocityActive.xyz,
-    params.bodyAPositionMass.w,
-    params.bodyASpin.xyz,
-    params.bodyAVelocityActive.w * binaryActive
-  );
-  let holeB = boostedKerrSchildContribution(
-    position,
-    params.bodyBPositionMass.xyz,
-    params.bodyBVelocityActive.xyz,
-    params.bodyBPositionMass.w,
-    params.bodyBSpin.xyz,
-    params.bodyBVelocityActive.w * binaryActive
-  );
-  let remnant = boostedKerrSchildContribution(
-    position,
-    params.remnantPositionMass.xyz,
-    params.remnantVelocityActive.xyz,
-    params.remnantPositionMass.w,
-    params.remnantSpinBlend.xyz,
-    params.remnantVelocityActive.w * remnantActive
-  );
-  let weightA = dualScale(
-    attenuationWeight(holeB.cartesianRadius),
-    binaryWeight * params.bodyAVelocityActive.w
-  );
-  let weightB = dualScale(
-    attenuationWeight(holeA.cartesianRadius),
-    binaryWeight * params.bodyBVelocityActive.w
-  );
-  let weightRemnant = dualConstant(
-    blend * params.remnantVelocityActive.w
-  );
+  // The endpoint phase is a frame-uniform value.  Branching here skips the
+  // inactive Kerr-Schild providers and, in the remnant phase, both companion
+  // attenuation evaluations.  The open interval retains the general C2 blend.
+  if (
+    SPACETIME_PHASE_MODE == 0
+    || (SPACETIME_PHASE_MODE < 0 && blend == 0.0)
+  ) {
+    holeA = boostedKerrSchildContribution(
+      position,
+      params.bodyAPositionMass.xyz,
+      params.bodyAVelocityActive.xyz,
+      params.bodyAPositionMass.w,
+      params.bodyASpin.xyz,
+      params.bodyAVelocityActive.w
+    );
+    holeB = boostedKerrSchildContribution(
+      position,
+      params.bodyBPositionMass.xyz,
+      params.bodyBVelocityActive.xyz,
+      params.bodyBPositionMass.w,
+      params.bodyBSpin.xyz,
+      params.bodyBVelocityActive.w
+    );
+    weightA = dualScale(
+      attenuationWeight(holeB.cartesianRadius),
+      params.bodyAVelocityActive.w
+    );
+    weightB = dualScale(
+      attenuationWeight(holeA.cartesianRadius),
+      params.bodyBVelocityActive.w
+    );
+  } else if (
+    SPACETIME_PHASE_MODE == 1
+    || (SPACETIME_PHASE_MODE < 0 && blend == 1.0)
+  ) {
+    remnant = boostedKerrSchildContribution(
+      position,
+      params.remnantPositionMass.xyz,
+      params.remnantVelocityActive.xyz,
+      params.remnantPositionMass.w,
+      params.remnantSpinBlend.xyz,
+      params.remnantVelocityActive.w
+    );
+    weightRemnant = dualConstant(params.remnantVelocityActive.w);
+  } else {
+    let binaryWeight = 1.0 - blend;
+    let binaryActive = select(0.0, 1.0, binaryWeight > 1.0e-6);
+    let remnantActive = select(0.0, 1.0, blend > 1.0e-6);
+    holeA = boostedKerrSchildContribution(
+      position,
+      params.bodyAPositionMass.xyz,
+      params.bodyAVelocityActive.xyz,
+      params.bodyAPositionMass.w,
+      params.bodyASpin.xyz,
+      params.bodyAVelocityActive.w * binaryActive
+    );
+    holeB = boostedKerrSchildContribution(
+      position,
+      params.bodyBPositionMass.xyz,
+      params.bodyBVelocityActive.xyz,
+      params.bodyBPositionMass.w,
+      params.bodyBSpin.xyz,
+      params.bodyBVelocityActive.w * binaryActive
+    );
+    remnant = boostedKerrSchildContribution(
+      position,
+      params.remnantPositionMass.xyz,
+      params.remnantVelocityActive.xyz,
+      params.remnantPositionMass.w,
+      params.remnantSpinBlend.xyz,
+      params.remnantVelocityActive.w * remnantActive
+    );
+    weightA = dualScale(
+      attenuationWeight(holeB.cartesianRadius),
+      binaryWeight * params.bodyAVelocityActive.w
+    );
+    weightB = dualScale(
+      attenuationWeight(holeA.cartesianRadius),
+      binaryWeight * params.bodyBVelocityActive.w
+    );
+    weightRemnant = dualConstant(
+      blend * params.remnantVelocityActive.w
+    );
+  }
 
   var g00 = dualConstant(-1.0);
   var g0 = dualVectorConstant(vec3<f32>(0.0));
@@ -1753,6 +1809,30 @@ export const strongFieldBinaryShaderBundle = Object.freeze({
   }),
   wgsl: Object.freeze({
     trace: strongFieldBinaryTraceFragmentWGSL,
+    traceSpecializations: Object.freeze([
+      Object.freeze({
+        id: "binary",
+        constants: Object.freeze({ SPACETIME_PHASE_MODE: 0 }),
+      }),
+      Object.freeze({
+        id: "transition",
+        constants: Object.freeze({ SPACETIME_PHASE_MODE: 2 }),
+      }),
+      Object.freeze({
+        id: "remnant",
+        constants: Object.freeze({ SPACETIME_PHASE_MODE: 1 }),
+      }),
+    ]),
+    selectTraceSpecialization(frame) {
+      const blend = Number(frame?.sceneStrongFieldUniforms?.[1]);
+      if (blend === 0) {
+        return "binary";
+      }
+      if (blend === 1) {
+        return "remnant";
+      }
+      return "transition";
+    },
   }),
   glsl: Object.freeze({
     // Deliberate fallback, not a port of the strong-field provider.
