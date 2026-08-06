@@ -114,7 +114,7 @@ export function referenceHref(href, referenceKey) {
   return url.href;
 }
 
-export function defaultSceneHref(href) {
+function defaultSceneHref(href) {
   const url = new URL(href);
   url.searchParams.delete("scene");
   url.searchParams.delete("reference");

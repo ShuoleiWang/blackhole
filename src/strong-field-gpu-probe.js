@@ -16,7 +16,6 @@ import {
 export const STRONG_FIELD_GPU_PROBE_SCHEMA =
   "blackhole.strong-field-gpu-probe/v1";
 export const STRONG_FIELD_GPU_PROBE_WORKGROUP_SIZE = 64;
-export const STRONG_FIELD_GPU_PROBE_INPUT_BYTES = 16;
 export const STRONG_FIELD_GPU_PROBE_OUTPUT_BYTES = 48;
 
 export const STRONG_FIELD_GPU_PROBE_TOLERANCES = Object.freeze({

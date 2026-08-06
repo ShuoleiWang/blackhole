@@ -509,7 +509,6 @@ validation. The repository does not currently include GPU image-regression CI.
 
 - **ESA/Gaia/DPAC · A. Moitinho** — Optional 16000×8000 Gaia EDR3 data-derived all-sky map, licensed under CC BY-SA 3.0 IGO.
 - **ESO/S. Brunier** — Bundled 6000×3000 photographic Milky Way panorama, licensed under CC BY 4.0.
-- `assets/deep-field.webp` — Script-generated deep-space fallback asset; it is not the default sky.
 
 See [`assets/SOURCES.md`](./assets/SOURCES.md) for download locations,
 transformations, hashes, and complete license information. Third-party assets

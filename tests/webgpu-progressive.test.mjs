@@ -581,7 +581,7 @@ test("sky uploads enter a non-frame queue scope around the GPU copy", async () =
   );
   assert.match(
     source,
-    /loadBestSkyTexture\([\s\S]*\(\) => this\.beginResourceQueueWork\(\)/,
+    /loadSkyTexture\([\s\S]*\(\) => this\.beginResourceQueueWork\(\)/,
   );
 });
 
@@ -596,12 +596,14 @@ test("the 16K sky is loaded only for an explicit ultra request", async () => {
   );
   assert.match(
     source,
-    /loadBestSkyTexture\([\s\S]*skyUrl,[\s\S]*blockForUltra/,
+    /loadSkyTexture\([\s\S]*skyUrl,[\s\S]*blockForUltra/,
   );
   assert.doesNotMatch(source, /scheduleBackgroundTask/);
-  assert.doesNotMatch(source, /upgradeSkyTexture\(source\.ultra\)/);
-  assert.doesNotMatch(webGLSource, /scheduleBackgroundTask/);
-  assert.doesNotMatch(webGLSource, /upgradeSkyTexture\(source\.ultra\)/);
+  assert.doesNotMatch(
+    source,
+    /upgradeSkyTexture|adoptSkyTextureUpgrade|skyUpgradeController|lifecycleGeneration/,
+  );
+  assert.doesNotMatch(webGLSource, /scheduleBackgroundTask|upgradeSkyTexture/);
 });
 
 test("ESO 6K and Gaia 16K upload at their decoded original dimensions without fallback", async () => {
@@ -623,8 +625,8 @@ test("ESO 6K and Gaia 16K upload at their decoded original dimensions without fa
       /token: "milky-way-360-6k", width: 6000, height: 3000/,
     );
     assert.match(source, /const selected = requireUltra \? source\.ultra : source\.high/);
-    const candidates = source.match(/function skyCandidates\([\s\S]*?\n}/)?.[0] || "";
-    assert.doesNotMatch(candidates, /fallback/);
+    const selector = source.match(/function selectedSkyUrl\([\s\S]*?\n}/)?.[0] || "";
+    assert.doesNotMatch(selector, /fallback/);
     assert.match(
       source,
       /assertOriginalSkyDimensions\(url, width, height\)/,
@@ -671,114 +673,11 @@ test("the visible sky selector preserves the URL and exposes the 16K memory cost
   );
 });
 
-test("late sky upgrades are rejected after disposal or lifecycle change", () => {
-  for (const renderer of [
-    { disposed: true, lost: false, lifecycleGeneration: 2 },
-    { disposed: false, lost: true, lifecycleGeneration: 2 },
-    { disposed: false, lost: false, lifecycleGeneration: 3 },
-  ]) {
-    let destroyed = 0;
-    renderer.createTraceBindGroup = () => {
-      throw new Error("must not touch a dead GPU device");
-    };
-    const adopted = WebGPURenderer.prototype.adoptSkyTextureUpgrade.call(
-      renderer,
-      {
-        texture: { destroy: () => { destroyed += 1; } },
-        width: 16000,
-        height: 8000,
-        url: "ultra.png",
-      },
-      2,
-    );
-    assert.equal(adopted, false);
-    assert.equal(destroyed, 1);
-  }
-});
-
-test("sky upgrade publication is transactional and destroys the retired texture", () => {
-  let previousDestroyed = 0;
-  let nextDestroyed = 0;
-  let invalidations = 0;
-  let notifications = 0;
-  const nextTexture = { destroy: () => { nextDestroyed += 1; } };
-  const renderer = {
-    disposed: false,
-    lost: false,
-    lifecycleGeneration: 7,
-    skyTexture: { destroy: () => { previousDestroyed += 1; } },
-    createTraceBindGroup(texture) {
-      assert.equal(texture, nextTexture);
-      return { id: "new-bind-group" };
-    },
-    invalidateProgressiveHistory() {
-      invalidations += 1;
-    },
-    reportCapabilities() {},
-    onSkyChanged() {
-      notifications += 1;
-    },
-  };
-
-  assert.equal(
-    WebGPURenderer.prototype.adoptSkyTextureUpgrade.call(
-      renderer,
-      {
-        texture: nextTexture,
-        width: 16000,
-        height: 8000,
-        url: "gaia-edr3-16k.png",
-      },
-      7,
-    ),
-    true,
-  );
-  assert.equal(renderer.traceBindGroup.id, "new-bind-group");
-  assert.equal(renderer.skyTexture, nextTexture);
-  assert.equal(previousDestroyed, 1);
-  assert.equal(nextDestroyed, 0);
-  assert.equal(invalidations, 1);
-  assert.equal(notifications, 1);
-});
-
-test("a failed sky bind-group build destroys only the unpublished texture", () => {
-  let previousDestroyed = 0;
-  let nextDestroyed = 0;
-  const previousTexture = { destroy: () => { previousDestroyed += 1; } };
-  const renderer = {
-    disposed: false,
-    lost: false,
-    lifecycleGeneration: 1,
-    skyTexture: previousTexture,
-    createTraceBindGroup() {
-      throw new Error("device validation failed");
-    },
-  };
-  assert.throws(
-    () => WebGPURenderer.prototype.adoptSkyTextureUpgrade.call(
-      renderer,
-      {
-        texture: { destroy: () => { nextDestroyed += 1; } },
-        width: 16000,
-        height: 8000,
-        url: "ultra.png",
-      },
-      1,
-    ),
-    /device validation failed/,
-  );
-  assert.equal(renderer.skyTexture, previousTexture);
-  assert.equal(previousDestroyed, 0);
-  assert.equal(nextDestroyed, 1);
-});
-
-test("dispose cancels renderer-owned callbacks and is idempotent", () => {
+test("dispose releases renderer-owned resources and is idempotent", () => {
   const calls = [];
   const lifecycle = { renderer: null };
   const renderer = Object.assign(Object.create(WebGPURenderer.prototype), {
     disposed: false,
-    lifecycleGeneration: 4,
-    skyUpgradeController: { abort: () => calls.push("abort-upgrade") },
     deviceLossLifecycle: lifecycle,
     device: {
       removeEventListener: () => calls.push("remove-listener"),
@@ -795,20 +694,16 @@ test("dispose cancels renderer-owned callbacks and is idempotent", () => {
     context: { unconfigure: () => calls.push("unconfigure") },
     onLost() {},
     onError() {},
-    onSkyChanged() {},
   });
   lifecycle.renderer = renderer;
 
   renderer.dispose();
   renderer.dispose();
 
-  assert.equal(renderer.lifecycleGeneration, 5);
   assert.equal(lifecycle.renderer, null);
   assert.equal(renderer.onLost, null);
   assert.equal(renderer.onError, null);
-  assert.equal(renderer.onSkyChanged, null);
   assert.deepEqual(calls, [
-    "abort-upgrade",
     "remove-listener",
     "close-gate",
     "dispose-scene",

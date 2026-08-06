@@ -432,14 +432,6 @@ fn dualVectorSub(a: DualVector3, b: DualVector3) -> DualVector3 {
   return result;
 }
 
-fn dualVectorScale(a: DualVector3, scale: f32) -> DualVector3 {
-  var result: DualVector3;
-  result.x = dualScale(a.x, scale);
-  result.y = dualScale(a.y, scale);
-  result.z = dualScale(a.z, scale);
-  return result;
-}
-
 fn dualVectorScaleDual(a: DualVector3, scale: Dual3) -> DualVector3 {
   var result: DualVector3;
   result.x = dualMul(a.x, scale);

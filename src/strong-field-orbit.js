@@ -496,9 +496,6 @@ function buildWaveformModel(track, manifest, options) {
   const phase = integratedPhase.map(
     (value) => value + phaseOffset + orientationOffset,
   );
-  const alignedWaveformPhase = waveformOrbitalPhase.map(
-    (value) => value + orientationOffset,
-  );
 
   const totalMassM = physicalSystemFromManifest(
     manifest,

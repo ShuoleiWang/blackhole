@@ -20,9 +20,7 @@ let activeScene = null;
 const SKY_URLS = {
   ultra: "./assets/gaia-edr3-16k.png",
   high: "./assets/milky-way-360-6k.jpg",
-  fallback: "./assets/milky-way-360.webp",
 };
-const RG_SECONDS_PER_SOLAR_MASS = 4.925490947e-6;
 const SCHWARZSCHILD_KM_PER_SOLAR_MASS = 2.953339382;
 const GRAVITATIONAL_KM_PER_SOLAR_MASS = SCHWARZSCHILD_KM_PER_SOLAR_MASS / 2;
 const AU_KM = 149_597_870.7;
@@ -1181,11 +1179,6 @@ async function start() {
       ui.hdrStatus.title = `${renderer.outputDescription} · ${renderer.skyDetail}`;
     };
     updateOutputStatus();
-    renderer.onSkyChanged = () => {
-      updateOutputStatus();
-      invalidateStrongFieldQuality("sky-texture-change");
-      state.needsRender = true;
-    };
     const dynamicRange = matchMedia("(dynamic-range: high)");
     dynamicRange.addEventListener?.("change", () => {
       updateOutputStatus();
@@ -1202,13 +1195,11 @@ async function start() {
     } else {
       resizeRenderer(true);
     }
-    app.classList.add("is-ready");
     lastFrameTime = performance.now();
     requestAnimationFrame(animate);
   } catch (error) {
     console.error(error);
     setRendererRootClass();
-    app.classList.remove("is-ready");
     renderer?.dispose?.();
     if (!error?.sceneUiHandled) {
       try {

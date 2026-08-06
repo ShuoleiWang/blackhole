@@ -53,7 +53,7 @@ function finiteLimit(value, fallback) {
   return Number.isFinite(number) && number > 0 ? Math.floor(number) : fallback;
 }
 
-function skyCandidates(urls, requireUltra = false) {
+function selectedSkyUrl(urls, requireUltra = false) {
   const source = typeof urls === "string" ? { high: urls } : urls;
   const selected = requireUltra ? source.ultra : source.high;
   if (!selected) {
@@ -63,7 +63,7 @@ function skyCandidates(urls, requireUltra = false) {
         : "The required ESO 6K sky source is unavailable",
     );
   }
-  return [selected];
+  return selected;
 }
 
 function assertOriginalSkyDimensions(url, width, height) {
@@ -246,35 +246,28 @@ export class WebGLRenderer {
 
     const skyMode = new URLSearchParams(location.search).get("sky");
     const blockForUltra = skyMode === "ultra";
-    let lastSkyError;
-    for (const url of skyCandidates(skyUrl, blockForUltra)) {
-      let texture;
-      try {
-        texture = await loadTexture(url);
-        const image = texture.image;
-        const width = image.naturalWidth || image.width;
-        const height = image.naturalHeight || image.height;
-        if (
-          width > this.glCapabilities.maxTextureSize
-          || height > this.glCapabilities.maxTextureSize
-        ) {
-          throw new Error(
-            `${width}×${height} exceeds the WebGL ${this.glCapabilities.maxTextureSize}px texture limit`,
-          );
-        }
-        configureSkyTexture(texture);
-        this.uploadSkyTexture(texture, url);
-        this.skyTexture = texture;
-        this.skyUrl = url;
-        break;
-      } catch (error) {
-        lastSkyError = error;
-        texture?.dispose();
-        console.info(`Sky candidate ${url} unavailable; trying the next size.`, error);
+    const url = selectedSkyUrl(skyUrl, blockForUltra);
+    let texture;
+    try {
+      texture = await loadTexture(url);
+      const image = texture.image;
+      const width = image.naturalWidth || image.width;
+      const height = image.naturalHeight || image.height;
+      if (
+        width > this.glCapabilities.maxTextureSize
+        || height > this.glCapabilities.maxTextureSize
+      ) {
+        throw new Error(
+          `${width}×${height} exceeds the WebGL ${this.glCapabilities.maxTextureSize}px texture limit`,
+        );
       }
-    }
-    if (!this.skyTexture) {
-      throw lastSkyError || new Error("No celestial panorama could be loaded");
+      configureSkyTexture(texture);
+      this.uploadSkyTexture(texture, url);
+      this.skyTexture = texture;
+      this.skyUrl = url;
+    } catch (error) {
+      texture?.dispose();
+      throw error;
     }
     this.skyRadianceScale = /gaia-edr3/i.test(this.skyUrl) ? 0.16 : 0.55;
     const image = this.skyTexture.image;

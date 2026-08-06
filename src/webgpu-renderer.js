@@ -460,7 +460,7 @@ function finiteLimit(value, fallback) {
   return Number.isFinite(number) && number > 0 ? Math.floor(number) : fallback;
 }
 
-function skyCandidates(urls, requireUltra = false) {
+function selectedSkyUrl(urls, requireUltra = false) {
   const source = typeof urls === "string" ? { high: urls } : urls;
   const selected = requireUltra ? source.ultra : source.high;
   if (!selected) {
@@ -470,7 +470,7 @@ function skyCandidates(urls, requireUltra = false) {
         : "The required ESO 6K sky source is unavailable",
     );
   }
-  return [selected];
+  return selected;
 }
 
 function assertOriginalSkyDimensions(url, width, height) {
@@ -485,65 +485,14 @@ function assertOriginalSkyDimensions(url, width, height) {
   }
 }
 
-function abortError() {
-  return new DOMException("The sky-texture load was aborted", "AbortError");
-}
-
-function throwIfAborted(signal) {
-  if (signal?.aborted) {
-    throw signal.reason instanceof Error ? signal.reason : abortError();
-  }
-}
-
-function waitForAbort(promise, signal, disposeLateValue = undefined) {
-  if (!signal) {
-    return promise;
-  }
-  throwIfAborted(signal);
-  return new Promise((resolve, reject) => {
-    let settled = false;
-    const onAbort = () => {
-      settled = true;
-      reject(signal.reason instanceof Error ? signal.reason : abortError());
-    };
-    signal.addEventListener("abort", onAbort, { once: true });
-    Promise.resolve(promise).then(
-      (value) => {
-        signal.removeEventListener("abort", onAbort);
-        if (settled) {
-          disposeLateValue?.(value);
-          return;
-        }
-        settled = true;
-        resolve(value);
-      },
-      (error) => {
-        signal.removeEventListener("abort", onAbort);
-        if (settled) {
-          return;
-        }
-        settled = true;
-        reject(error);
-      },
-    );
-  });
-}
-
-async function loadBitmap(url, signal = undefined) {
-  throwIfAborted(signal);
-  const response = await fetch(url, { signal });
+async function loadBitmap(url) {
+  const response = await fetch(url);
   if (!response.ok) {
     throw new Error(`Sky texture request failed (${response.status})`);
   }
   const blob = await response.blob();
   try {
-    const bitmap = await waitForAbort(
-      createImageBitmap(blob, { colorSpaceConversion: "none" }),
-      signal,
-      (lateBitmap) => lateBitmap.close?.(),
-    );
-    throwIfAborted(signal);
-    return bitmap;
+    return await createImageBitmap(blob, { colorSpaceConversion: "none" });
   } catch (bitmapError) {
     // Chromium can reject very large PNGs in the ImageBitmap decoder even
     // when the GPU advertises a 16K texture limit.  HTMLImageElement uses the
@@ -554,8 +503,7 @@ async function loadBitmap(url, signal = undefined) {
     image.decoding = "async";
     image.src = objectUrl;
     try {
-      await waitForAbort(image.decode(), signal);
-      throwIfAborted(signal);
+      await image.decode();
       image.close = () => URL.revokeObjectURL(objectUrl);
       return image;
     } catch (imageError) {
@@ -613,47 +561,32 @@ async function uploadSkyTexture(
   return texture;
 }
 
-async function loadBestSkyTexture(
+async function loadSkyTexture(
   device,
   urls,
   requireUltra = false,
-  signal = undefined,
   beginExternalQueueWork = undefined,
 ) {
   const maxTextureDimension = finiteLimit(device.limits.maxTextureDimension2D, 4096);
-  let lastError;
-  for (const url of skyCandidates(urls, requireUltra)) {
-    let bitmap;
-    try {
-      throwIfAborted(signal);
-      bitmap = await loadBitmap(url, signal);
-      if (bitmap.width > maxTextureDimension || bitmap.height > maxTextureDimension) {
-        throw new Error(
-          `${bitmap.width}×${bitmap.height} exceeds the device ${maxTextureDimension}px texture limit`,
-        );
-      }
-      const texture = await uploadSkyTexture(
-        device,
-        bitmap,
-        url,
-        beginExternalQueueWork,
+  const url = selectedSkyUrl(urls, requireUltra);
+  let bitmap;
+  try {
+    bitmap = await loadBitmap(url);
+    if (bitmap.width > maxTextureDimension || bitmap.height > maxTextureDimension) {
+      throw new Error(
+        `${bitmap.width}×${bitmap.height} exceeds the device ${maxTextureDimension}px texture limit`,
       );
-      if (signal?.aborted) {
-        texture.destroy();
-        throwIfAborted(signal);
-      }
-      return { texture, width: bitmap.width, height: bitmap.height, url };
-    } catch (error) {
-      if (signal?.aborted) {
-        throw error;
-      }
-      lastError = error;
-      console.info(`Sky candidate ${url} unavailable; trying the next size.`, error);
-    } finally {
-      bitmap?.close?.();
     }
+    const texture = await uploadSkyTexture(
+      device,
+      bitmap,
+      url,
+      beginExternalQueueWork,
+    );
+    return { texture, width: bitmap.width, height: bitmap.height, url };
+  } finally {
+    bitmap?.close?.();
   }
-  throw lastError || new Error("No celestial panorama could be loaded");
 }
 
 function adapterLabel(adapter) {
@@ -814,8 +747,6 @@ export class WebGPURenderer {
     this.lost = false;
     this.deviceLossInfo = null;
     this.pendingRuntimeError = null;
-    this.lifecycleGeneration = 0;
-    this.skyUpgradeController = null;
     this.outputFallbackReason = "";
     this.resizeWasClamped = false;
     this.handleUncapturedError = (event) => {
@@ -1012,11 +943,10 @@ export class WebGPURenderer {
       width: skyTextureWidth,
       height: skyTextureHeight,
       url: selectedSkyUrl,
-    } = await loadBestSkyTexture(
+    } = await loadSkyTexture(
       device,
       skyUrl,
       blockForUltra,
-      undefined,
       () => this.beginResourceQueueWork(),
     );
     this.skyRadianceScale = /gaia-edr3/i.test(selectedSkyUrl) ? 0.16 : 0.55;
@@ -1128,10 +1058,6 @@ export class WebGPURenderer {
       }
       target.lost = true;
       target.deviceLossInfo = info;
-      target.lifecycleGeneration += 1;
-      target.skyUpgradeController?.abort(
-        new DOMException("WebGPU device lost", "AbortError"),
-      );
       target.submissionGate.close();
       try {
         target.onLost?.(info);
@@ -1183,79 +1109,6 @@ export class WebGPURenderer {
       return { pipeline, bindGroup };
     }
     return { pipeline: this.tracePipeline, bindGroup: this.traceBindGroup };
-  }
-
-  async upgradeSkyTexture(url) {
-    if (this.disposed || this.lost || this.skyUpgradeController) {
-      return false;
-    }
-    const lifecycleGeneration = this.lifecycleGeneration;
-    const controller = new AbortController();
-    this.skyUpgradeController = controller;
-    try {
-      const next = await loadBestSkyTexture(
-        this.device,
-        url,
-        false,
-        controller.signal,
-        () => this.beginResourceQueueWork(),
-      );
-      return this.adoptSkyTextureUpgrade(next, lifecycleGeneration);
-    } catch (error) {
-      if (!controller.signal.aborted && !this.disposed && !this.lost) {
-        console.info("The 16K sky upgrade was unavailable; keeping the responsive fallback.", error);
-      }
-      return false;
-    } finally {
-      if (this.skyUpgradeController === controller) {
-        this.skyUpgradeController = null;
-      }
-    }
-  }
-
-  adoptSkyTextureUpgrade(next, lifecycleGeneration) {
-    if (
-      this.disposed
-      || this.lost
-      || lifecycleGeneration !== this.lifecycleGeneration
-    ) {
-      next.texture.destroy();
-      return false;
-    }
-
-    let nextBindGroups;
-    try {
-      // Build every device-backed object before publishing the new texture.
-      // A validation failure therefore leaves the previous sky fully intact.
-      if (typeof this.createTraceBindGroups === "function") {
-        nextBindGroups = this.createTraceBindGroups(next.texture);
-      } else {
-        const fallbackId = this.traceDefaultSpecialization || "default";
-        nextBindGroups = {
-          [fallbackId]: this.createTraceBindGroup(next.texture),
-        };
-      }
-    } catch (error) {
-      next.texture.destroy();
-      throw error;
-    }
-
-    const previousTexture = this.skyTexture;
-    this.skyTexture = next.texture;
-    this.skyTextureWidth = next.width;
-    this.skyTextureHeight = next.height;
-    this.skyUrl = next.url;
-    this.skyRadianceScale = /gaia-edr3/i.test(next.url) ? 0.16 : 0.55;
-    this.skyDetail = `${next.width}×${next.height} 原始全景 · 解析恒星层`;
-    this.traceBindGroups = nextBindGroups;
-    this.traceBindGroup = nextBindGroups[
-      this.traceDefaultSpecialization || "default"
-    ];
-    this.invalidateProgressiveHistory();
-    previousTexture?.destroy();
-    this.reportCapabilities();
-    this.onSkyChanged?.();
-    return true;
   }
 
   resize(width, height) {
@@ -1551,11 +1404,6 @@ export class WebGPURenderer {
       return;
     }
     this.disposed = true;
-    this.lifecycleGeneration += 1;
-    this.skyUpgradeController?.abort(
-      new DOMException("WebGPU renderer disposed", "AbortError"),
-    );
-    this.skyUpgradeController = null;
     if (this.deviceLossLifecycle) {
       this.deviceLossLifecycle.renderer = null;
       this.deviceLossLifecycle = null;
@@ -1566,7 +1414,6 @@ export class WebGPURenderer {
     );
     this.onLost = null;
     this.onError = null;
-    this.onSkyChanged = null;
     this.deviceLossInfo = null;
     this.pendingRuntimeError = null;
     this.submissionGate.close();

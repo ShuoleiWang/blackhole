@@ -420,7 +420,6 @@ mismatch 为 0，最大 stored null residual 为 `3.068e-9`，p95 / 最大投影
 
 - **ESA/Gaia/DPAC · A. Moitinho**：可选 16000×8000 Gaia EDR3 全天图，CC BY-SA 3.0 IGO。
 - **ESO/S. Brunier**：仓库内置 6000×3000 银河摄影背景，CC BY 4.0。
-- `assets/deep-field.webp`：由仓库脚本生成的备用深空素材，不是默认背景。
 
 下载地址、处理方式、哈希和完整许可信息见
 [`assets/SOURCES.md`](./assets/SOURCES.md)。第三方素材不会因本项目采用 MIT

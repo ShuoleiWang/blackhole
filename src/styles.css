@@ -1141,25 +1141,6 @@ h1 {
   display: none;
 }
 
-.webgl-error {
-  position: fixed;
-  inset: 0;
-  z-index: 20;
-  display: grid;
-  place-items: center;
-  padding: 24px;
-  background: var(--space);
-  color: var(--text);
-  text-align: center;
-}
-
-.webgl-error p {
-  max-width: 560px;
-  margin: 0;
-  color: var(--muted);
-  line-height: 1.7;
-}
-
 button:focus-visible,
 input:focus-visible,
 .scene-link:focus-visible {

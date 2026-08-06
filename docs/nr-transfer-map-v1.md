@@ -12,8 +12,9 @@ radiative-transfer format.
 > project-generated stationary analytic Schwarzschild map and an analytic Kerr
 > remnant-spin reference. No
 > numerical-relativity spacetime, NR-derived transfer map, or NR playback scene
-> is bundled. The root weak-field binary renderer, explicit
-> `?scene=schwarzschild` renderer, and scientific references remain isolated.
+> is bundled. The root WebGPU strong-field approximation, its explicit WebGL2
+> weak-field fallback, the `?scene=schwarzschild` renderer, and the scientific
+> references remain isolated.
 > Their routing and the real-time/offline development split are defined in
 > [`rendering-modes.md`](./rendering-modes.md).
 
@@ -35,12 +36,14 @@ physically correct. A browser that eventually plays an NR-derived transfer map
 will still be a playback/composition layer, not an NR solver.
 
 The root binary scene, also available through its legacy `binary-approx`
-alias, is **SXS-driven dynamics with weak-field fast-light rendering**. Phase 2
-consumes pinned `SXS:BBH:0001` Lev5
-apparent-horizon centroid diagnostics, the CoM-corrected extrapolated `h22`
-waveform, events, and remnant metadata. It does not consume the SXS near-zone
-spacetime or an NR-derived ray-transfer payload, so its pixels are not NR ray
-tracing.
+alias, uses the WebGPU boosted-superposed-Kerr-Schild strong-field fast-light
+approximation, with an explicitly labelled weak-field WebGL2 fallback. It
+consumes pinned `SXS:BBH:0001` Lev5 waveform, event, and remnant anchors, while
+the renderer-coordinate orbit excludes gauge-dependent SXS centroids as
+physical positions. The source manifest retains its legacy weak-field adapter
+metadata for provenance and fallback regression. Neither path consumes the SXS
+near-zone spacetime or an NR-derived ray-transfer payload, so the pixels are
+not NR ray tracing.
 
 ## Repository entry points
 
