@@ -561,6 +561,10 @@ test("runtime recovery URL explicitly selects WebGL2 and records one bounded rea
   assert.equal(recovered.hash, "#view");
   assert.equal(
     webGPUFallbackDescription(recovered.searchParams.get("fallback")),
+    "WebGPU device connection lost",
+  );
+  assert.equal(
+    webGPUFallbackDescription(recovered.searchParams.get("fallback"), "zh-CN"),
     "WebGPU 设备连接丢失",
   );
   assert.equal(webGPUFallbackDescription("unknown"), "");
@@ -654,11 +658,13 @@ test("the visible sky selector preserves the URL and exposes the 16K memory cost
     readFile(new URL("../index.html", import.meta.url), "utf8"),
     readFile(new URL("../src/main.js", import.meta.url), "utf8"),
   ]);
-  assert.match(html, /<label class="control-name" for="skySource">天空素材<\/label>/);
+  assert.match(html, /<html lang="en">/);
+  assert.match(html, /for="languageSelect"[\s\S]*<select id="languageSelect"/);
+  assert.match(html, /<label class="control-name" for="skySource" data-i18n="sky\.label">/);
   assert.match(html, /<select id="skySource"[^>]*aria-describedby="skySourceHint"/);
-  assert.match(html, /<option value="high">ESO 原始 6000×3000（锁定）<\/option>/);
-  assert.match(html, /<option value="ultra">Gaia 原始 16000×8000（锁定）<\/option>/);
-  assert.match(html, /始终按原始尺寸上传，不降采样或静默回退[\s\S]*236 MB[\s\S]*488 MiB/);
+  assert.match(html, /<option value="high" data-i18n="sky\.eso">[\s\S]*ESO native 6000×3000/);
+  assert.match(html, /<option value="ultra" data-i18n="sky\.gaia">[\s\S]*Gaia native 16000×8000/);
+  assert.match(html, /native dimensions[\s\S]*no downsampling or silent fallback[\s\S]*236 MB[\s\S]*488 MiB/);
   assert.match(
     main,
     /const requestedSkyMode = query\.get\("sky"\) === "ultra" \? "ultra" : "high"/,

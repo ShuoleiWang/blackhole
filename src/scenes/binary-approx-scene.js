@@ -1,5 +1,6 @@
 import { createStrongFieldOrbitRuntime } from "../strong-field-orbit.js";
 import { strongFieldBinaryShaderBundle } from "../strong-field-shaders.js";
+import { createI18n } from "../i18n.js";
 import { loadBinaryDynamics } from "./binary-dynamics-adapter.js";
 import { createPlaybackClock } from "./binary-playback-clock.js";
 
@@ -109,17 +110,17 @@ function waveformPath(evaluate, firstTime, finalTime) {
   }).join(" ");
 }
 
-function regimeLabel(sample) {
+function regimeLabel(sample, i18n) {
   if (sample.regime === "nr-inspiral") {
-    return "SXS NR 螺旋靠近";
+    return i18n.t("binary.regime.inspiral");
   }
   if (sample.regime === "nr-horizon-gap") {
-    return "A/B 轨迹结束 · 事件间隙";
+    return i18n.t("binary.regime.gap");
   }
   if (sample.regime === "nr-merger") {
-    return "共同视界形成";
+    return i18n.t("binary.regime.merger");
   }
-  return "余留体 ringdown";
+  return i18n.t("binary.regime.ringdown");
 }
 
 function requiredElement(documentRef, id) {
@@ -170,6 +171,7 @@ export async function createBinaryApproxScene({
   document: documentRef,
   ui,
   state,
+  i18n: providedI18n,
   formatMass,
   formatGravitationalRadius,
   controls,
@@ -190,6 +192,7 @@ export async function createBinaryApproxScene({
   const sceneQuery = new URLSearchParams(
     documentRef.defaultView?.location?.search || "",
   );
+  const i18n = providedI18n ?? createI18n(sceneQuery);
   const requestedInitialTime = sceneQuery.get("binaryTime");
   const parsedInitialTime = Number(requestedInitialTime);
   const initialTime = (
@@ -348,8 +351,8 @@ export async function createBinaryApproxScene({
 
   function updateMotionButton(running) {
     const action = running
-      ? "暂停双黑洞时间线"
-      : "继续双黑洞时间线";
+      ? i18n.t("binary.pauseTimeline")
+      : i18n.t("binary.resumeTimeline");
     elements.playPause.setAttribute("aria-label", action);
     elements.playPause.setAttribute("title", action);
     elements.playPause.setAttribute("aria-pressed", String(!running));
@@ -361,37 +364,37 @@ export async function createBinaryApproxScene({
 
   function configureDiagnosticControls(strongWebGPU) {
     elements.modeScience.textContent = strongWebGPU
-      ? "天空成像"
-      : "弱场预览";
+      ? i18n.t("binary.mode.sky")
+      : i18n.t("binary.mode.weakField");
     // Outcome classification and frequency shift remain part of the traced
     // ray record and the scientific reference workbench, but they are not
     // useful as primary display modes in the interactive binary scene.
     elements.modeOutcome.hidden = true;
     elements.modeFrequency.hidden = true;
-    elements.modeOutcome.textContent = "光线结果";
+    elements.modeOutcome.textContent = i18n.t("binary.mode.outcome");
     elements.modeOutcome.setAttribute(
       "title",
-      "蓝色为捕获，绿色为逃逸，洋红为未收敛；分类来自当前 WebGPU 光线积分",
+      i18n.t("binary.mode.outcomeTitle"),
     );
-    elements.modeFrequency.textContent = "频移因子 g";
+    elements.modeFrequency.textContent = i18n.t("binary.mode.frequency");
     elements.modeFrequency.setAttribute(
       "title",
-      "观测频率与无穷远频率之比 g；仅对已逃逸光线有物理意义",
+      i18n.t("binary.mode.frequencyTitle"),
     );
-    elements.modeLookback.textContent = "坐标回溯时间";
+    elements.modeLookback.textContent = i18n.t("binary.mode.lookback");
     elements.modeLookback.setAttribute(
       "title",
-      "沿 fast-light 切片积分的坐标时间，不是可观测的相对到达时延",
+      i18n.t("binary.mode.lookbackTitle"),
     );
-    elements.modeNull.textContent = "零性 / H 残差";
+    elements.modeNull.textContent = i18n.t("binary.mode.null");
     elements.modeNull.setAttribute(
       "title",
-      "沿光线记录的最大归一化零 Hamiltonian 残差",
+      i18n.t("binary.mode.nullTitle"),
     );
-    elements.modeCost.textContent = "积分步数成本";
+    elements.modeCost.textContent = i18n.t("binary.mode.cost");
     elements.modeCost.setAttribute(
       "title",
-      "已执行积分步数相对 320 步编译上限的比例；这是计算成本，不是物理量",
+      i18n.t("binary.mode.costTitle"),
     );
     for (const element of advancedDiagnosticElements) {
       element.hidden = !strongWebGPU;
@@ -407,20 +410,20 @@ export async function createBinaryApproxScene({
       elements.sceneStatus.classList.add("is-strong-field");
       elements.sceneStatus.textContent = [
         rendererView?.backend || capabilities.backend || "WebGPU",
-        "实时 3+1 Hamiltonian 强场光追",
+        i18n.t("binary.status.strongTrace"),
         "boosted superposed Kerr–Schild",
-        "fast-light 近似 · 非完整 NR",
-        "高级诊断：回溯时间 / 零性残差 / 积分成本",
+        i18n.t("binary.status.fastLight"),
+        i18n.t("binary.status.advanced"),
       ].join(" · ");
       return;
     }
     elements.sceneStatus.classList.add("is-fallback");
     elements.sceneStatus.textContent = [
       rendererView?.backend || capabilities.backend || "WebGL2",
-      "兼容性回退",
-      "旧 two-centre weak-field 预览",
-      "不具备 WebGPU 强场物理等价性",
-      "强场高级数值诊断已隐藏",
+      i18n.t("binary.status.compatibility"),
+      i18n.t("binary.status.legacy"),
+      i18n.t("binary.status.noParity"),
+      i18n.t("binary.status.hiddenDiagnostics"),
     ].join(" · ");
   }
 
@@ -430,7 +433,10 @@ export async function createBinaryApproxScene({
     elements.timeValue.textContent = timeText;
     elements.scrubber.setAttribute(
       "aria-valuetext",
-      `${timeText}，${regimeLabel(sample)}`,
+      i18n.t("binary.ariaTime", {
+        time: timeText,
+        regime: regimeLabel(sample, i18n),
+      }),
     );
     const factor = playbackClock.factorAt(
       sample.tM,
@@ -439,18 +445,23 @@ export async function createBinaryApproxScene({
     const stationary = !state.running || scrubbing || playbackHolding;
     elements.playbackRate.textContent = stationary
       ? playbackHolding && state.running
-        ? "末尾停留 · 0 M/s"
-        : "已暂停 · 0 M/s"
+        ? i18n.t("binary.playback.endHold")
+        : i18n.t("binary.playback.paused")
       : factor < 0.999
-        ? `实际 ${actualRateMPerSecond.toFixed(1)} M/s · ${factor.toFixed(2)}×`
-        : `实际 ${actualRateMPerSecond.toFixed(0)} M/s`;
+        ? i18n.t("binary.playback.actualWithFactor", {
+          rate: actualRateMPerSecond.toFixed(1),
+          factor: factor.toFixed(2),
+        })
+        : i18n.t("binary.playback.actual", {
+          rate: actualRateMPerSecond.toFixed(0),
+        });
     elements.slowMotion.setAttribute(
       "aria-pressed",
       String(slowMotionEnabled),
     );
     elements.slowMotion.textContent = slowMotionEnabled
-      ? "合并慢放 开"
-      : "合并慢放 关";
+      ? i18n.t("binary.playback.slowOn")
+      : i18n.t("binary.playback.slowOff");
   }
 
   function updateDynamicReadouts(sample) {
@@ -464,16 +475,16 @@ export async function createBinaryApproxScene({
       ].join(" · ");
     } else if (sample.regime === "nr-horizon-gap") {
       ui.observerValue.textContent = (
-        "A/B 轨迹已结束 · 共同视界事件尚未发生"
+        i18n.t("binary.readout.gap")
       );
     } else if (sample.renderTopologyBlend < 0.995) {
-      ui.observerValue.textContent = "共同视界形成 · A/B 轨迹已结束";
+      ui.observerValue.textContent = i18n.t("binary.readout.horizon");
     } else {
-      ui.observerValue.textContent = "单一 SXS 余留体";
+      ui.observerValue.textContent = i18n.t("binary.readout.remnant");
     }
-    ui.shadowValue.textContent = regimeLabel(sample);
+    ui.shadowValue.textContent = regimeLabel(sample, i18n);
     elements.binaryRegime.textContent = [
-      regimeLabel(sample),
+      regimeLabel(sample, i18n),
       `|rh₂₂| ${sample.waveform.amplitude.toFixed(3)}`,
     ].join(" · ");
     const cursor = (
@@ -580,8 +591,8 @@ export async function createBinaryApproxScene({
       max: 70,
     }),
     motionLabels: Object.freeze({
-      pause: "暂停双黑洞时间线",
-      resume: "继续双黑洞时间线",
+      pause: i18n.t("binary.pauseTimeline"),
+      resume: i18n.t("binary.resumeTimeline"),
     }),
     startsRunning,
     rendererOptions: Object.freeze({
@@ -636,7 +647,7 @@ export async function createBinaryApproxScene({
       transportSignature = null;
       bumpTransportRevision();
       documentRef.documentElement.classList.add("scene-binary-approx");
-      documentRef.title = "实时双黑洞 · 深空观测台";
+      documentRef.title = i18n.t("binary.documentTitle");
       state.time = playbackClock.seek(initialTime);
       state.distance = defaults.observerRadiusM;
       state.phase = 0.58;
@@ -655,19 +666,19 @@ export async function createBinaryApproxScene({
         )
       );
 
-      elements.eyebrow.textContent = "实时强场光追 · SXS 锚定";
-      elements.title.textContent = "实时双黑洞";
-      elements.observerLabel.textContent = "SXS 坐标证据（不驱动光追）";
-      elements.radiusLabel.textContent = "1 M（GM/c²）";
-      elements.shadowLabel.textContent = "数据区段";
-      elements.massLabel.textContent = "系统总质量";
+      elements.eyebrow.textContent = i18n.t("binary.eyebrow");
+      elements.title.textContent = i18n.t("binary.title");
+      elements.observerLabel.textContent = i18n.t("binary.observerLabel");
+      elements.radiusLabel.textContent = i18n.t("binary.radiusLabel");
+      elements.shadowLabel.textContent = i18n.t("binary.segmentLabel");
+      elements.massLabel.textContent = i18n.t("binary.massLabel");
       elements.sceneStatus.hidden = false;
       elements.sceneStatus.textContent = [
-        "WebGPU 强场生产路径",
+        i18n.t("binary.initialStatus.strong"),
         "boosted superposed Kerr–Schild",
-        "SXS h₂₂ / 合并事件锚定",
-        "fast-light 近似 · 非完整 NR",
-        "WebGL2 回退为旧弱场",
+        i18n.t("binary.initialStatus.anchor"),
+        i18n.t("binary.status.fastLight"),
+        i18n.t("binary.initialStatus.fallback"),
       ].join(" · ");
       elements.binaryTimeline.hidden = false;
       elements.waveformLabel.innerHTML = (
@@ -682,16 +693,11 @@ export async function createBinaryApproxScene({
       elements.scrubber.max = finalTime.toFixed(6);
       elements.scrubber.step = "0.25";
       elements.desktopHint.textContent = (
-        "拖动观察 · 滚轮缩放 · 拖动时间轴 · 空格暂停"
+        i18n.t("binary.desktopHint")
       );
-      elements.physicsNote.innerHTML = [
-        "波形、共同视界时刻和余留体参数锚定到 ",
-        '<a href="https://doi.org/10.5281/zenodo.3273935" target="_blank" rel="noreferrer">SXS:BBH:0001 Lev5</a>',
-        "。右侧显示的视界质心分离/相位是<strong>依赖规范的坐标证据，绝不进入 WebGPU 黑洞位置</strong>；",
-        "实时轨道由 h₂₂ 频率与 PN/EOB-like 准圆关系生成，光线在 boosted superposed Kerr–Schild 3+1 度规中积分。",
-        "这是<strong>强场 fast-light 近似，不是约束求解后的完整 NR 时空，也不是 slow-light</strong>；",
-        "WebGL2 会明确退回旧 weak-field 预览。合并慢放只改变播放墙钟速度。",
-      ].join("");
+      elements.physicsNote.innerHTML = i18n.t("binary.physicsHtml", {
+        sourceLink: '<a href="https://doi.org/10.5281/zenodo.3273935" target="_blank" rel="noreferrer">SXS:BBH:0001 Lev5</a>',
+      });
       elements.accretionControl.setAttribute("aria-hidden", "true");
       ui.accretion.disabled = true;
       bindPlaybackControls();
@@ -726,7 +732,7 @@ export async function createBinaryApproxScene({
         );
       }
       ui.massValue.textContent = formatMass(state.massSolar);
-      ui.accretionValue.textContent = "真空";
+      ui.accretionValue.textContent = i18n.t("binary.vacuum");
       ui.exposureValue.textContent = `${state.exposure.toFixed(2)}×`;
       ui.timeScaleValue.textContent = `${state.timeScale.toFixed(0)} M/s`;
       ui.qualityValue.textContent = `${state.quality.toFixed(2)}×`;

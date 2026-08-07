@@ -480,12 +480,12 @@ test("diagnostic modes have stable query identities and preserve reference selec
   assert.deepEqual(
     TRANSFER_MAP_DIAGNOSTIC_MODES.map((mode) => mode.label),
     [
-      "合成图",
-      "光线结果",
-      "坐标回溯时间",
-      "频移因子 g",
-      "零性残差",
-      "投影误差",
+      "Composite image",
+      "Ray outcome",
+      "Coordinate lookback time",
+      "Frequency shift g",
+      "Null residual",
+      "Projection error",
     ],
   );
   for (const [mode, definition] of TRANSFER_MAP_DIAGNOSTIC_MODES.entries()) {
@@ -515,14 +515,14 @@ test("diagnostic modes have stable query identities and preserve reference selec
 });
 
 test("reference workbench keeps realtime navigation primary and advanced diagnostics layered", () => {
-  const binaryPosition = indexHtml.indexOf("实时双黑洞");
-  const singlePosition = indexHtml.indexOf("单黑洞");
-  const referencePosition = indexHtml.indexOf("科学参考");
+  const binaryPosition = indexHtml.indexOf('id="sceneBinary"');
+  const singlePosition = indexHtml.indexOf('id="sceneSchwarzschild"');
+  const referencePosition = indexHtml.indexOf('id="sceneTransferMap"');
   assert.ok(binaryPosition >= 0);
   assert.ok(binaryPosition < singlePosition);
   assert.ok(singlePosition < referencePosition);
-  assert.match(indexHtml, /Schwarzschild（非旋转）/);
-  assert.match(indexHtml, /Kerr（旋转余留体）/);
+  assert.match(indexHtml, /Schwarzschild \(non-rotating\)/);
+  assert.match(indexHtml, /Kerr \(rotating remnant\)/);
 
   const advancedStart = indexHtml.indexOf('id="transferAdvancedDiagnostics"');
   const advancedEnd = indexHtml.indexOf("</details>", advancedStart);
@@ -897,7 +897,7 @@ test("reference scene inspector, diagnostic URL, and listeners survive dispose/r
 
   scene.initialize();
   scene.initialize();
-  assert.equal(scene.panelLabel, "显示设置");
+  assert.equal(scene.panelLabel, "display settings");
   assert.equal(state.mode, 4);
   assert.equal(host.document.listenerCount("click"), 1);
   assert.equal(host.document.listenerCount("keydown"), 1);
@@ -906,17 +906,17 @@ test("reference scene inspector, diagnostic URL, and listeners survive dispose/r
     host.elements.get("transferAdvancedDiagnostics").attributeValues.has("open"),
     true,
   );
-  assert.equal(host.elements.get("modeScience").textContent, "合成图");
-  assert.equal(host.elements.get("modeHubble").textContent, "光线结果");
-  assert.equal(host.elements.get("modeFrequency").textContent, "频移因子 g");
-  assert.equal(host.elements.get("parameterTitle").textContent, "显示设置");
-  assert.equal(host.elements.get("parameterContext").textContent, "固定数据");
+  assert.equal(host.elements.get("modeScience").textContent, "Composite image");
+  assert.equal(host.elements.get("modeHubble").textContent, "Ray outcome");
+  assert.equal(host.elements.get("modeFrequency").textContent, "Frequency shift g");
+  assert.equal(host.elements.get("parameterTitle").textContent, "Display settings");
+  assert.equal(host.elements.get("parameterContext").textContent, "Fixed data");
   assert.equal(
     host.elements.get("togglePanel").attributeValues.get("aria-label"),
-    "展开显示设置",
+    "Expand display settings",
   );
-  assert.match(host.elements.get("sceneEyebrow").textContent, /固定相机离线校准/);
-  assert.match(host.elements.get("physicsNote").textContent, /不是.*高保真成品/);
+  assert.match(host.elements.get("sceneEyebrow").textContent, /fixed-camera offline calibration/);
+  assert.match(host.elements.get("physicsNote").textContent, /not a binary black-hole merger image/);
   assert.equal(host.elements.get("transferInspectorClose").listenerCount("click"), 1);
   assert.equal(
     host.document.documentElement.classList.contains(
@@ -1000,6 +1000,31 @@ test("reference scene inspector, diagnostic URL, and listeners survive dispose/r
   assert.ok(renderRequests >= 4);
 });
 
+test("reference scene localizes dynamic diagnostics and readouts in Chinese", async () => {
+  const host = fakeSceneHost(
+    "https://blackhole.test/?lang=zh-CN&scene=transfer-map-reference",
+  );
+  const scene = await createTransferMapReferenceScene({
+    document: host.document,
+    ui: host.ui,
+    state: sceneState(),
+    controls: { requestRender() {} },
+    searchParams: new URLSearchParams(host.location.search),
+    location: host.location,
+    history: host.windowRef.history,
+    referenceRegistry: testRegistry(),
+    async loadTransferMapImpl() {
+      return decodedDataset();
+    },
+  });
+  scene.initialize();
+  assert.equal(scene.panelLabel, "显示设置");
+  assert.equal(host.elements.get("modeScience").textContent, "合成图");
+  assert.equal(host.elements.get("parameterContext").textContent, "固定数据");
+  assert.match(host.elements.get("physicsNote").textContent, /不是双黑洞合并画面/);
+  scene.dispose();
+});
+
 test("reference scene failure UI stays fail-closed with retry and return actions", async () => {
   const host = fakeSceneHost(
     "https://blackhole.test/?scene=transfer-map-reference&diagnostic=lookback",
@@ -1034,7 +1059,7 @@ test("reference scene failure UI stays fail-closed with retry and return actions
   const actions = status.children[1];
   assert.equal(actions.children.length, 2);
   assert.match(actions.children[0].href, /scene=transfer-map-reference/);
-  assert.equal(actions.children[1].textContent, "返回实时双黑洞");
+  assert.equal(actions.children[1].textContent, "Return to live binary");
   const returnUrl = new URL(actions.children[1].href);
   assert.equal(returnUrl.searchParams.get("scene"), null);
   assert.equal(returnUrl.searchParams.get("diagnostic"), null);
@@ -1048,7 +1073,7 @@ test("reference scene failure UI stays fail-closed with retry and return actions
   );
   assert.equal(
     host.elements.get("togglePanel").attributeValues.get("aria-label"),
-    "收起显示设置",
+    "Collapse display settings",
   );
   assert.equal(host.document.listenerCount("click"), 0);
   assert.equal(host.windowRef.listenerCount("resize"), 0);

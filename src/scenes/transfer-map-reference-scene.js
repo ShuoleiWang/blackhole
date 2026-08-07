@@ -7,6 +7,7 @@ import {
 import {
   createTransferMapShaderBundle,
 } from "../transfer-map-shaders.js";
+import { createI18n } from "../i18n.js";
 
 const SCHWARZSCHILD_MANIFEST_URL = new URL(
   "../../assets/transfer-maps/schwarzschild-reference-v1/manifest.json",
@@ -27,14 +28,16 @@ export const TRUSTED_REFERENCE_REGISTRY = Object.freeze({
   schwarzschild: Object.freeze({
     key: "schwarzschild",
     datasetId: "schwarzschild-reference-v1",
-    title: "Schwarzschild 离线校准",
+    title: "Schwarzschild offline calibration",
+    titleKey: "reference.schwarzschildTitle",
     manifestUrl: SCHWARZSCHILD_MANIFEST_URL.href,
     expectedManifestSha256: REFERENCE_MANIFEST_SHA256,
   }),
   "kerr-remnant": Object.freeze({
     key: "kerr-remnant",
     datasetId: "kerr-remnant-reference-v1",
-    title: "Kerr 余留体离线校准",
+    title: "Kerr-remnant offline calibration",
+    titleKey: "reference.kerrTitle",
     manifestUrl: KERR_REMNANT_MANIFEST_URL.href,
     expectedManifestSha256: (
       "5b0022ab963c0cc35d3d8acab17190bd1294bc72da2b49003d785f964ac81d99"
@@ -43,12 +46,44 @@ export const TRUSTED_REFERENCE_REGISTRY = Object.freeze({
 });
 
 export const TRANSFER_MAP_DIAGNOSTIC_MODES = Object.freeze([
-  Object.freeze({ id: "sky", label: "合成图", range: null }),
-  Object.freeze({ id: "outcome", label: "光线结果", range: null }),
-  Object.freeze({ id: "lookback", label: "坐标回溯时间", range: "lookback" }),
-  Object.freeze({ id: "frequency-shift", label: "频移因子 g", range: "frequencyShift" }),
-  Object.freeze({ id: "null-residual", label: "零性残差", range: "nullResidual", logarithmic: true }),
-  Object.freeze({ id: "projection-error", label: "投影误差", range: "projectionError", logarithmic: true }),
+  Object.freeze({
+    id: "sky",
+    label: "Composite image",
+    labelKey: "reference.mode.composite",
+    range: null,
+  }),
+  Object.freeze({
+    id: "outcome",
+    label: "Ray outcome",
+    labelKey: "reference.mode.outcome",
+    range: null,
+  }),
+  Object.freeze({
+    id: "lookback",
+    label: "Coordinate lookback time",
+    labelKey: "reference.mode.lookback",
+    range: "lookback",
+  }),
+  Object.freeze({
+    id: "frequency-shift",
+    label: "Frequency shift g",
+    labelKey: "reference.mode.frequency",
+    range: "frequencyShift",
+  }),
+  Object.freeze({
+    id: "null-residual",
+    label: "Null residual",
+    labelKey: "reference.mode.null",
+    range: "nullResidual",
+    logarithmic: true,
+  }),
+  Object.freeze({
+    id: "projection-error",
+    label: "Projection error",
+    labelKey: "reference.mode.error",
+    range: "projectionError",
+    logarithmic: true,
+  }),
 ]);
 
 const ADVANCED_DIAGNOSTIC_MODES = new Set([2, 4, 5]);
@@ -179,22 +214,24 @@ export function resolveTrustedReference(
   return entry;
 }
 
-function progressLabel(progress, title) {
+function progressLabel(progress, title, i18n) {
   switch (progress.phase) {
     case "manifest":
       return progress.completed
-        ? `${title} manifest SHA-256 已验证`
-        : `正在获取 ${title} 的固定版本 manifest…`;
+        ? i18n.t("reference.progress.manifestVerified", { title })
+        : i18n.t("reference.progress.manifestFetching", { title });
     case "sidecar":
       return progress.completed
-        ? "Manifest sidecar 已交叉验证"
-        : "正在核对 manifest sidecar…";
+        ? i18n.t("reference.progress.sidecarVerified")
+        : i18n.t("reference.progress.sidecarChecking");
     case "chunks":
-      return `正在验证 transfer-map chunks ${progress.completed}/${progress.total}…`;
+      return i18n.t("reference.progress.chunks", progress);
     case "decoded":
-      return `已严格解码 ${progress.total.toLocaleString("zh-CN")} 条光线记录`;
+      return i18n.t("reference.progress.decoded", {
+        total: i18n.formatNumber(progress.total),
+      });
     default:
-      return "正在验证 stationary transfer map…";
+      return i18n.t("reference.progress.default");
   }
 }
 
@@ -257,7 +294,7 @@ function observerCoordinate(manifest, spinMagnitude) {
   });
 }
 
-export function readoutsFromManifest(manifest) {
+export function readoutsFromManifest(manifest, i18n = createI18n("en")) {
   const spinMagnitude = Math.max(
     0,
     ...manifest.physicalSystem.dimensionlessSpins.map(
@@ -277,11 +314,11 @@ export function readoutsFromManifest(manifest) {
     captured,
     escaped,
     fovDegrees,
-    massLabel: `${mass.symbol} = ${Number(mass.value).toLocaleString("zh-CN")}`,
-    outcomeLabel: (
-      `${(captured * 100).toFixed(2)}% 捕获 · `
-      + `${(escaped * 100).toFixed(2)}% 逃逸`
-    ),
+    massLabel: `${mass.symbol} = ${i18n.formatNumber(mass.value)}`,
+    outcomeLabel: i18n.t("reference.outcomes", {
+      captured: (captured * 100).toFixed(2),
+      escaped: (escaped * 100).toFixed(2),
+    }),
   });
 }
 
@@ -388,19 +425,24 @@ function createRecoveryLink(documentRef, className, label, href) {
   return link;
 }
 
-function showLoadFailure(documentRef, elements, error, href) {
+function showLoadFailure(documentRef, elements, error, href, i18n) {
   elements.sceneStatus.classList.add("is-error");
   elements.sceneStatus.setAttribute("role", "alert");
   const message = documentRef.createElement("span");
-  message.textContent = `Transfer map 验证失败：${error.message}`;
+  message.textContent = i18n.t("reference.loadFailed", { message: error.message });
   const actions = documentRef.createElement("span");
   actions.className = "scene-recovery-actions";
   actions.append(
-    createRecoveryLink(documentRef, "scene-recovery-link", "重试验证", href),
     createRecoveryLink(
       documentRef,
       "scene-recovery-link",
-      "返回实时双黑洞",
+      i18n.t("reference.retry"),
+      href,
+    ),
+    createRecoveryLink(
+      documentRef,
+      "scene-recovery-link",
+      i18n.t("reference.returnBinary"),
       defaultSceneHref(href),
     ),
   );
@@ -411,7 +453,10 @@ function showLoadFailure(documentRef, elements, error, href) {
   // viewports even when startup fails at that earlier boundary.
   elements.panel.classList.add("is-open");
   elements.panelToggle.setAttribute("aria-expanded", "true");
-  elements.panelToggle.setAttribute("aria-label", "收起显示设置");
+  elements.panelToggle.setAttribute(
+    "aria-label",
+    i18n.t("panel.collapse", { context: i18n.t("reference.panelLabel") }),
+  );
 }
 
 function formatMetric(value, digits = 3) {
@@ -430,11 +475,25 @@ function validityNames(manifest, mask) {
     .map(([name]) => name);
 }
 
+function localizedOutcome(name, i18n) {
+  const key = {
+    captured: "reference.outcome.captured",
+    escaped: "reference.outcome.escaped",
+    unresolved: "reference.outcome.unresolved",
+    "outside-domain": "reference.outcome.outsideDomain",
+    "integrator-failure": "reference.outcome.integratorFailure",
+    missing: "reference.outcome.missing",
+    unusable: "reference.outcome.unusable",
+  }[name];
+  return key ? i18n.t(key) : name;
+}
+
 export async function createTransferMapReferenceScene({
   document: documentRef,
   ui,
   state,
   controls,
+  i18n: providedI18n,
   searchParams = new URLSearchParams(documentRef.defaultView?.location?.search || ""),
   location = documentRef.defaultView?.location,
   history = documentRef.defaultView?.history,
@@ -444,6 +503,7 @@ export async function createTransferMapReferenceScene({
   if (typeof controls?.requestRender !== "function") {
     throw new Error("Transfer-map scene requires host render controls");
   }
+  const i18n = providedI18n ?? createI18n(searchParams);
 
   const elements = {
     canvas: requiredElement(documentRef, "universe"),
@@ -551,18 +611,23 @@ export async function createTransferMapReferenceScene({
   elements.sceneStatus.setAttribute("aria-live", "polite");
 
   let reference;
+  let referenceTitle;
   let dataset;
   try {
     reference = resolveTrustedReference(searchParams, referenceRegistry);
+    referenceTitle = reference.titleKey
+      ? i18n.t(reference.titleKey)
+      : reference.title;
     configureReferenceLinks(reference.key, href);
-    elements.eyebrow.textContent = "固定信任根 · 正在验证";
-    elements.title.textContent = reference.title;
+    elements.eyebrow.textContent = i18n.t("reference.loadingEyebrow");
+    elements.title.textContent = referenceTitle;
     dataset = await loadTransferMapImpl(reference.manifestUrl, {
       expectedManifestSha256: reference.expectedManifestSha256,
       onProgress(progress) {
         elements.sceneStatus.textContent = progressLabel(
           progress,
-          reference.title,
+          referenceTitle,
+          i18n,
         );
       },
     });
@@ -574,13 +639,13 @@ export async function createTransferMapReferenceScene({
     }
   } catch (error) {
     const cause = error instanceof Error ? error : new Error(String(error));
-    showLoadFailure(documentRef, elements, cause, href);
+    showLoadFailure(documentRef, elements, cause, href, i18n);
     throw new TransferMapSceneLoadError(cause.message, { cause });
   }
 
   const manifest = dataset.manifest;
   const fixedCamera = cameraFromManifest(manifest);
-  const readouts = readoutsFromManifest(manifest);
+  const readouts = readoutsFromManifest(manifest, i18n);
   const verticalFov = manifest.projection.verticalFieldOfViewRad;
   const shaderBundle = createTransferMapShaderBundle(dataset);
   const modeButtons = [
@@ -626,7 +691,7 @@ export async function createTransferMapReferenceScene({
       ? ` → ${record.captureTargetId}`
       : "";
     selectedPixel = { x, y };
-    elements.inspectorCoordinates.textContent = `像素 x ${x} · y ${y}`;
+    elements.inspectorCoordinates.textContent = i18n.t("reference.pixel", { x, y });
     elements.inspectorDirection.textContent = directionValid
       ? record.escapeDirection.map((value) => value.toFixed(6)).join(", ")
       : "—";
@@ -642,10 +707,12 @@ export async function createTransferMapReferenceScene({
     elements.inspectorError.textContent = (
       record.validityMask & TRANSFER_MAP_ABI.validity.projectionError
     ) ? `${formatMetric(record.projectionErrorPx)} px` : "—";
-    elements.inspectorOutcome.textContent = `${record.rayOutcomeName}${target}`;
+    elements.inspectorOutcome.textContent = (
+      `${localizedOutcome(record.rayOutcomeName, i18n)}${target}`
+    );
     elements.inspectorValidity.textContent = (
       `0x${record.validityMask.toString(16).padStart(4, "0")} · `
-      + (validity.join(", ") || "none")
+      + (validity.join(", ") || i18n.t("reference.none"))
     );
     elements.inspectorRaw.textContent = record.rawHex;
     elements.inspector.hidden = false;
@@ -726,7 +793,7 @@ export async function createTransferMapReferenceScene({
     startsRunning: false,
     motionEnabled: false,
     cameraLocked: true,
-    panelLabel: "显示设置",
+    panelLabel: i18n.t("reference.panelLabel"),
     manifest,
     dataset,
     reference,
@@ -738,7 +805,9 @@ export async function createTransferMapReferenceScene({
       }
       initialized = true;
       documentRef.documentElement.classList.add("scene-transfer-map-reference");
-      documentRef.title = `${reference.title} · 深空观测台`;
+      documentRef.title = i18n.t("reference.documentTitle", {
+        title: referenceTitle,
+      });
       state.running = false;
       state.distance = readouts.affineCameraDistance;
       state.phase = 0;
@@ -756,53 +825,59 @@ export async function createTransferMapReferenceScene({
       canvas.setAttribute("tabindex", "0");
       canvas.setAttribute(
         "aria-label",
-        `${reference.title}固定相机离线校准画面；点击像素或使用方向键检查光线记录`,
+        i18n.t("reference.canvasAria", { title: referenceTitle }),
       );
       canvas.setAttribute("aria-describedby", "transferMapInspectorHelp");
-      elements.eyebrow.textContent = "研究工具 · 固定相机离线校准";
-      elements.title.textContent = reference.title;
-      elements.observerLabel.textContent = "固定观测相机";
-      elements.radiusLabel.textContent = "无量纲自旋";
-      elements.shadowLabel.textContent = "光线结果";
-      elements.massLabel.textContent = "质量标度";
-      elements.parameterTitle.textContent = "显示设置";
-      elements.parameterContext.textContent = "固定数据";
+      elements.eyebrow.textContent = i18n.t("reference.eyebrow");
+      elements.title.textContent = referenceTitle;
+      elements.observerLabel.textContent = i18n.t("reference.fixedObserver");
+      elements.radiusLabel.textContent = i18n.t("reference.spin");
+      elements.shadowLabel.textContent = i18n.t("reference.rayOutcome");
+      elements.massLabel.textContent = i18n.t("reference.massScale");
+      elements.parameterTitle.textContent = i18n.t("reference.displaySettings");
+      elements.parameterContext.textContent = i18n.t("reference.fixedData");
       const panelExpanded = elements.panel.classList.contains("is-open");
       elements.panelToggle.setAttribute("aria-expanded", String(panelExpanded));
       elements.panelToggle.setAttribute(
         "aria-label",
-        panelExpanded ? "收起显示设置" : "展开显示设置",
+        i18n.t(panelExpanded ? "panel.collapse" : "panel.expand", {
+          context: i18n.t("reference.panelLabel"),
+        }),
       );
       elements.sceneStatus.hidden = false;
       elements.sceneStatus.classList.remove("is-error");
       elements.sceneStatus.setAttribute("role", "status");
       elements.sceneStatus.textContent = [
-        "解析真空参考",
-        "固定相机",
+        i18n.t("reference.status.analytic"),
+        i18n.t("reference.status.fixedCamera"),
         `${dataset.width}×${dataset.height}`,
-        `${manifest.chunks.length}/${manifest.chunks.length} 数据块 SHA-256 已验证`,
+        i18n.t("reference.status.chunks", {
+          verified: manifest.chunks.length,
+          total: manifest.chunks.length,
+        }),
       ].join(" · ");
       elements.binaryTimeline.hidden = true;
       elements.modeSwitch.setAttribute(
         "aria-label",
-        "固定相机离线校准诊断视图",
+        i18n.t("reference.modeGroup"),
       );
       modeButtons.forEach((button, mode) => {
-        button.textContent = TRANSFER_MAP_DIAGNOSTIC_MODES[mode].label;
+        button.textContent = i18n.t(
+          TRANSFER_MAP_DIAGNOSTIC_MODES[mode].labelKey,
+        );
       });
-      elements.desktopHint.textContent = "点击查看光线记录 · 方向键移动 · Shift 加速";
+      elements.desktopHint.textContent = i18n.t("reference.desktopHint");
       if (elements.touchHint) {
-        elements.touchHint.textContent = "轻点画面查看像素光线记录";
+        elements.touchHint.textContent = i18n.t("reference.touchHint");
       }
       const referenceDescription = reference.key === "kerr-remnant"
-        ? "解析 Kerr 余留体真空时空"
-        : "解析 Schwarzschild 真空时空";
-      elements.physicsNote.textContent = [
-        `${referenceDescription}的固定相机离线校准画面，只用于研究与验证 transfer-map 数据链；`,
-        "不是双黑洞合并画面、NR 光追或高保真成品，不包含吸积发射。",
-        ` 坐标：${manifest.coordinates.nrChart.coordinates}。`,
-        ` 积分器：${manifest.rayIntegration.integrator.name}。`,
-      ].join("");
+        ? i18n.t("reference.description.kerr")
+        : i18n.t("reference.description.schwarzschild");
+      elements.physicsNote.textContent = i18n.t("reference.physics", {
+        description: referenceDescription,
+        coordinates: manifest.coordinates.nrChart.coordinates,
+        integrator: manifest.rayIntegration.integrator.name,
+      });
 
       for (const input of [ui.mass, ui.accretion, ui.timeScale]) {
         input.disabled = true;
@@ -822,14 +897,14 @@ export async function createTransferMapReferenceScene({
       ui.massValue.textContent = (
         `${readouts.massLabel} · |χ| = ${readouts.spinMagnitude.toFixed(6)}`
       );
-      ui.accretionValue.textContent = "真空 · 无发射模型";
+      ui.accretionValue.textContent = i18n.t("reference.vacuum");
       ui.exposureValue.textContent = `${state.exposure.toFixed(2)}×`;
-      ui.timeScaleValue.textContent = "静态";
+      ui.timeScaleValue.textContent = i18n.t("reference.static");
       ui.qualityValue.textContent = `${state.quality.toFixed(2)}×`;
       ui.observerValue.textContent = (
         `${readouts.observerCoordinateLabel} = `
         + `${readouts.observerCoordinateRadius.toFixed(2)} M · `
-        + `固定正交标架 · FOV ${readouts.fovDegrees.toFixed(1)}°`
+        + `${i18n.t("reference.fixedTetrad")} · FOV ${readouts.fovDegrees.toFixed(1)}°`
       );
       ui.rsValue.textContent = `|χ| ${readouts.spinMagnitude.toFixed(6)}`;
       ui.shadowValue.textContent = readouts.outcomeLabel;

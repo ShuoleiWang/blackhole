@@ -1,20 +1,29 @@
 <!doctype html>
-<html lang="zh-CN">
+<html lang="en">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <meta name="theme-color" content="#020407" />
     <meta
       name="description"
-      content="面向 Apple M3 Pro 的可交互相对论黑洞系统实时光线追踪。"
+      content="Interactive real-time relativistic ray tracing for black-hole systems on Apple M3 Pro."
+      data-i18n-content="meta.description"
     />
-    <title>相对论黑洞实时光线追踪</title>
+    <title data-i18n="document.defaultTitle">Real-time Relativistic Black-hole Ray Tracing</title>
     <link rel="icon" href="data:," />
     <link rel="stylesheet" href="./src/styles.css" />
   </head>
   <body>
-    <main class="app" aria-label="相对论黑洞观测模拟">
-      <canvas id="universe" aria-label="可拖动的黑洞与深空观测画面"></canvas>
+    <main
+      class="app"
+      aria-label="Relativistic black-hole observatory simulation"
+      data-i18n-aria-label="app.ariaLabel"
+    >
+      <canvas
+        id="universe"
+        aria-label="Draggable black-hole and deep-space observation view"
+        data-i18n-aria-label="canvas.ariaLabel"
+      ></canvas>
       <div
         id="transferPixelMarker"
         class="transfer-pixel-marker"
@@ -22,25 +31,29 @@
         hidden
       ></div>
 
-      <dl class="system-status" aria-label="实时渲染状态">
+      <dl
+        class="system-status"
+        aria-label="Live rendering status"
+        data-i18n-aria-label="status.ariaLabel"
+      >
         <div class="status-item status-wide">
-          <dt>计算后端</dt>
-          <dd id="backendStatus">正在初始化</dd>
+          <dt data-i18n="status.backend">Compute backend</dt>
+          <dd id="backendStatus" data-i18n="status.initializing">Initializing</dd>
         </div>
         <div class="status-item status-secondary">
-          <dt>图形处理器</dt>
-          <dd id="gpuStatus">检测中</dd>
+          <dt data-i18n="status.gpu">Graphics processor</dt>
+          <dd id="gpuStatus" data-i18n="status.detecting">Detecting</dd>
         </div>
         <div class="status-item">
-          <dt>显示输出</dt>
-          <dd id="hdrStatus">检测中</dd>
+          <dt data-i18n="status.output">Display output</dt>
+          <dd id="hdrStatus" data-i18n="status.detecting">Detecting</dd>
         </div>
         <div class="status-item">
-          <dt>帧率</dt>
+          <dt data-i18n="status.fps">Frame rate</dt>
           <dd><span id="fpsValue">—</span> FPS</dd>
         </div>
         <div class="status-item status-secondary">
-          <dt>实际倍率</dt>
+          <dt data-i18n="status.renderScale">Actual scale</dt>
           <dd id="renderScaleValue">—</dd>
         </div>
       </dl>
@@ -49,16 +62,24 @@
         <header class="panel-header">
           <span class="sheet-handle" aria-hidden="true"></span>
           <div class="panel-heading">
-            <p id="sceneEyebrow" class="eyebrow">GPU 零测地线实时成像</p>
-            <h1 id="panelTitle">Schwarzschild 黑洞</h1>
+            <p id="sceneEyebrow" class="eyebrow" data-i18n="panel.defaultEyebrow">
+              GPU null-geodesic imaging
+            </p>
+            <h1 id="panelTitle" data-i18n="panel.defaultTitle">Schwarzschild black hole</h1>
           </div>
-          <div class="panel-actions" aria-label="视角操作">
+          <div
+            class="panel-actions"
+            aria-label="View controls"
+            data-i18n-aria-label="panel.actions"
+          >
             <button
               id="toggleMotion"
               class="icon-button"
               type="button"
-              aria-label="暂停自动环绕"
-              title="暂停自动环绕"
+              aria-label="Pause physical orbit"
+              title="Pause physical orbit"
+              data-i18n-aria-label="motion.pauseOrbit"
+              data-i18n-title="motion.pauseOrbit"
             >
               <span aria-hidden="true">Ⅱ</span>
             </button>
@@ -66,8 +87,10 @@
               id="resetView"
               class="icon-button"
               type="button"
-              aria-label="重置观测视角"
-              title="重置观测视角"
+              aria-label="Reset observation view"
+              title="Reset observation view"
+              data-i18n-aria-label="view.reset"
+              data-i18n-title="view.reset"
             >
               <span aria-hidden="true">↺</span>
             </button>
@@ -77,28 +100,41 @@
               type="button"
               aria-controls="panelContent"
               aria-expanded="false"
-              aria-label="展开观测参数"
+              aria-label="Expand observation settings"
+              data-i18n-aria-label="panel.expandObservationSettings"
             >
-              <span class="toggle-label">参数</span>
+              <span class="toggle-label" data-i18n="panel.parameters">Parameters</span>
               <span class="toggle-chevron" aria-hidden="true">⌃</span>
             </button>
           </div>
         </header>
 
         <div id="panelContent" class="panel-content">
-          <nav class="scene-switch" aria-label="时空场景">
+          <div class="language-control">
+            <label for="languageSelect" data-i18n="language.label">Interface language</label>
+            <select id="languageSelect" name="language">
+              <option value="en" lang="en">English</option>
+              <option value="zh-CN" lang="zh-CN">简体中文</option>
+            </select>
+          </div>
+
+          <nav
+            class="scene-switch"
+            aria-label="Spacetime scene"
+            data-i18n-aria-label="scene.navigation"
+          >
             <a id="sceneBinary" class="scene-link is-active" href="./" aria-current="page">
-              实时双黑洞
+              <span data-i18n="scene.binary">Live binary</span>
             </a>
             <a id="sceneSchwarzschild" class="scene-link" href="./?scene=schwarzschild">
-              单黑洞
+              <span data-i18n="scene.single">Single black hole</span>
             </a>
             <a
               id="sceneTransferMap"
               class="scene-link scene-link-reference"
               href="./?scene=transfer-map-reference"
             >
-              科学参考
+              <span data-i18n="scene.reference">Science reference</span>
             </a>
           </nav>
 
@@ -107,7 +143,8 @@
           <nav
             id="transferReferenceSwitch"
             class="transfer-reference-switch"
-            aria-label="固定相机离线校准参考"
+            aria-label="Fixed-camera offline calibration reference"
+            data-i18n-aria-label="reference.navigation"
             hidden
           >
             <a
@@ -115,25 +152,31 @@
               class="reference-link"
               href="./?scene=transfer-map-reference"
             >
-              Schwarzschild（非旋转）
+              <span data-i18n="reference.schwarzschildLink">Schwarzschild (non-rotating)</span>
             </a>
             <a
               id="referenceKerr"
               class="reference-link"
               href="./?scene=transfer-map-reference&amp;reference=kerr-remnant"
             >
-              Kerr（旋转余留体）
+              <span data-i18n="reference.kerrLink">Kerr (rotating remnant)</span>
             </a>
           </nav>
 
-          <div id="modeSwitch" class="mode-switch" role="group" aria-label="成像色彩模式">
+          <div
+            id="modeSwitch"
+            class="mode-switch"
+            role="group"
+            aria-label="Imaging color mode"
+            data-i18n-aria-label="mode.group"
+          >
             <button
               id="modeScience"
               class="mode-button is-active"
               type="button"
               aria-pressed="true"
             >
-              科学真色
+              <span data-i18n="mode.science">Scientific true color</span>
             </button>
             <button
               id="modeHubble"
@@ -141,7 +184,7 @@
               type="button"
               aria-pressed="false"
             >
-              哈勃调色
+              <span data-i18n="mode.hubble">Hubble palette</span>
             </button>
             <button
               id="modeFrequency"
@@ -149,56 +192,63 @@
               type="button"
               aria-pressed="false"
             >
-              频移因子 g
+              <span data-i18n="mode.frequency">Frequency shift g</span>
             </button>
             <details
               id="transferAdvancedDiagnostics"
               class="transfer-advanced-diagnostics diagnostic-only"
             >
-              <summary>高级数值诊断</summary>
+              <summary data-i18n="diagnostics.advanced">Advanced numerical diagnostics</summary>
               <div class="advanced-diagnostic-grid">
                 <button
                   id="modeLookback"
                   class="mode-button diagnostic-only"
                   type="button"
                   aria-pressed="false"
-                  title="坐标量，不等同于可观测的相对到达时延"
+                  title="A coordinate quantity, not an observable relative arrival-time delay"
+                  data-i18n-title="diagnostics.lookbackTitle"
                 >
-                  坐标回溯时间
+                  <span data-i18n="diagnostics.lookback">Coordinate lookback time</span>
                 </button>
                 <button
                   id="modeNull"
                   class="mode-button diagnostic-only"
                   type="button"
                   aria-pressed="false"
-                  title="沿光线记录的最大零性条件残差"
+                  title="Maximum null-condition residual recorded along the ray"
+                  data-i18n-title="diagnostics.nullTitle"
                 >
-                  零性残差
+                  <span data-i18n="diagnostics.null">Null residual</span>
                 </button>
                 <button
                   id="modeError"
                   class="mode-button diagnostic-only"
                   type="button"
                   aria-pressed="false"
-                  title="以探测器像素为单位的数值投影误差"
+                  title="Numerical projection error in detector pixels"
+                  data-i18n-title="diagnostics.errorTitle"
                 >
-                  投影误差
+                  <span data-i18n="diagnostics.error">Projection error</span>
                 </button>
               </div>
             </details>
           </div>
 
-          <dl class="physical-readout" aria-label="物理观测读数">
+          <dl
+            class="physical-readout"
+            aria-label="Physical observation readouts"
+            data-i18n-aria-label="readout.group"
+          >
             <div class="readout-primary">
-              <dt id="observerLabel">观测位置</dt>
+              <dt id="observerLabel" data-i18n="readout.observer">Observer position</dt>
               <dd id="observerValue">50.0 r<sub>g</sub> · 18.9°</dd>
             </div>
             <div>
-              <dt id="radiusLabel">史瓦西半径</dt>
+              <dt id="radiusLabel" data-i18n="readout.schwarzschildRadius">Schwarzschild radius</dt>
               <dd id="rsValue">2.00 r<sub>g</sub></dd>
             </div>
             <div>
-              <dt id="shadowLabel">阴影角直径</dt>
+              <dt id="shadowLabel" data-i18n="readout.shadowDiameter">Shadow angular diameter</dt>
               <dd id="shadowValue">11.69°</dd>
             </div>
           </dl>
@@ -211,17 +261,21 @@
           >
             <header class="transfer-inspector-heading">
               <h2 id="transferInspectorTitle">
-                像素光线记录
+                <span data-i18n="inspector.title">Pixel ray record</span>
                 <span>32 B ABI</span>
               </h2>
               <div class="transfer-inspector-actions">
-                <output id="transferInspectorCoordinates">像素 x — · y —</output>
+                <output id="transferInspectorCoordinates" data-i18n="inspector.coordinatesEmpty">
+                  Pixel x — · y —
+                </output>
                 <button
                   id="transferInspectorClose"
                   class="transfer-inspector-close"
                   type="button"
-                  aria-label="关闭像素光线记录"
-                  title="关闭像素光线记录"
+                  aria-label="Close pixel ray record"
+                  title="Close pixel ray record"
+                  data-i18n-aria-label="inspector.close"
+                  data-i18n-title="inspector.close"
                 >
                   ×
                 </button>
@@ -229,58 +283,72 @@
             </header>
             <dl class="transfer-inspector-grid">
               <div class="transfer-inspector-wide">
-                <dt>逃逸方向（ICRS）</dt>
+                <dt data-i18n="inspector.direction">Escape direction (ICRS)</dt>
                 <dd id="transferInspectorDirection">—</dd>
               </div>
               <div>
-                <dt>频移因子 g</dt>
+                <dt data-i18n="inspector.frequency">Frequency shift g</dt>
                 <dd id="transferInspectorFrequency">—</dd>
               </div>
               <div>
-                <dt>坐标回溯时间</dt>
+                <dt data-i18n="inspector.lookback">Coordinate lookback time</dt>
                 <dd id="transferInspectorLookback">—</dd>
               </div>
               <div>
-                <dt>光线结果</dt>
+                <dt data-i18n="inspector.outcome">Ray outcome</dt>
                 <dd id="transferInspectorOutcome">—</dd>
               </div>
             </dl>
             <details class="transfer-inspector-details">
-              <summary>数值与 ABI 详情</summary>
+              <summary data-i18n="inspector.details">Numerical and ABI details</summary>
               <dl class="transfer-inspector-grid transfer-inspector-advanced-grid">
                 <div>
-                  <dt>零性残差</dt>
+                  <dt data-i18n="inspector.null">Null residual</dt>
                   <dd id="transferInspectorNull">—</dd>
                 </div>
                 <div>
-                  <dt>投影误差</dt>
+                  <dt data-i18n="inspector.error">Projection error</dt>
                   <dd id="transferInspectorError">—</dd>
                 </div>
                 <div class="transfer-inspector-wide">
-                  <dt>有效位掩码</dt>
+                  <dt data-i18n="inspector.validity">Validity mask</dt>
                   <dd id="transferInspectorValidity">—</dd>
                 </div>
                 <div class="transfer-inspector-wide">
-                  <dt>原始小端序字节</dt>
+                  <dt data-i18n="inspector.raw">Raw little-endian bytes</dt>
                   <dd><code id="transferInspectorRaw">—</code></dd>
                 </div>
               </dl>
             </details>
-            <p id="transferMapInspectorHelp" class="transfer-inspector-help">
-              点击画面选择像素；聚焦画布后用方向键逐像素移动，Shift 加速，关闭按钮或 Esc 退出。
+            <p
+              id="transferMapInspectorHelp"
+              class="transfer-inspector-help"
+              data-i18n="inspector.help"
+            >
+              Click the view to select a pixel. With the canvas focused, use arrow keys to move
+              one pixel, hold Shift to move faster, and press Esc or the close button to exit.
             </p>
           </section>
 
-          <section id="binaryTimeline" class="binary-timeline" aria-label="双黑洞时间线" hidden>
+          <section
+            id="binaryTimeline"
+            class="binary-timeline"
+            aria-label="Binary black-hole timeline"
+            data-i18n-aria-label="binary.timeline"
+            hidden
+          >
             <div class="binary-timeline-heading">
-              <span id="binaryWaveformLabel">应变预览 · r h<sub>+</sub> / M</span>
+              <span id="binaryWaveformLabel">
+                <span data-i18n="binary.waveformPreview">Strain preview · r h₊ / M</span>
+              </span>
               <output id="binaryRegime">PN inspiral</output>
             </div>
             <svg
               class="binary-waveform"
               viewBox="0 0 280 46"
               role="img"
-              aria-label="基于清单采样的双黑洞应变预览"
+              aria-label="Manifest-sampled binary black-hole strain preview"
+              data-i18n-aria-label="binary.waveformAria"
               preserveAspectRatio="none"
             >
               <path id="binaryWaveformPath" d="" />
@@ -289,20 +357,25 @@
             <div
               class="binary-transport"
               role="group"
-              aria-label="双黑洞时间控制"
+              aria-label="Binary black-hole time controls"
+              data-i18n-aria-label="binary.transport"
             >
               <button
                 id="binaryPlayPause"
                 class="binary-transport-button"
                 type="button"
-                aria-label="暂停双黑洞时间线"
+                aria-label="Pause binary black-hole timeline"
                 aria-pressed="false"
-                title="暂停双黑洞时间线"
+                title="Pause binary black-hole timeline"
+                data-i18n-aria-label="binary.pauseTimeline"
+                data-i18n-title="binary.pauseTimeline"
               >
                 <span aria-hidden="true">Ⅱ</span>
               </button>
               <label class="binary-scrubber" for="binaryTimeScrubber">
-                <span class="visually-hidden">模拟时间</span>
+                <span class="visually-hidden" data-i18n="binary.simulationTime">
+                  Simulation time
+                </span>
                 <input
                   id="binaryTimeScrubber"
                   type="range"
@@ -319,29 +392,32 @@
                 id="binarySlowMotion"
                 type="button"
                 aria-pressed="true"
-                title="只改变播放速度，不改变物理数据"
+                title="Changes playback speed only; physical data remain unchanged"
+                data-i18n-title="binary.slowMotionTitle"
               >
-                合并慢放
+                <span data-i18n="binary.slowMotion">Merger slow motion</span>
               </button>
-              <output id="binaryPlaybackRate">实际 0 M/s</output>
+              <output id="binaryPlaybackRate" data-i18n="binary.actualRateZero">Actual 0 M/s</output>
             </div>
           </section>
 
           <section class="parameter-section" aria-labelledby="parameterTitle">
             <div class="section-heading">
-              <h2 id="parameterTitle">观测参数</h2>
-              <span id="parameterContext">实时</span>
+              <h2 id="parameterTitle" data-i18n="parameters.title">Observation parameters</h2>
+              <span id="parameterContext" data-i18n="parameters.realtime">Real time</span>
             </div>
 
             <div class="control-list">
               <label class="control" for="mass">
-                <span id="massLabel" class="control-name">黑洞质量</span>
+                <span id="massLabel" class="control-name" data-i18n="control.mass">
+                  Black-hole mass
+                </span>
                 <output id="massValue" for="mass">6.50 × 10⁹ M☉</output>
                 <input id="mass" type="range" min="6" max="10" step="0.01" value="9.81" />
               </label>
 
               <label id="accretionControl" class="control" for="accretion">
-                <span class="control-name">吸积率</span>
+                <span class="control-name" data-i18n="control.accretion">Accretion rate</span>
                 <output id="accretionValue" for="accretion">0.006% Edd</output>
                 <input
                   id="accretion"
@@ -354,7 +430,7 @@
               </label>
 
               <label class="control" for="exposure">
-                <span class="control-name">曝光</span>
+                <span class="control-name" data-i18n="control.exposure">Exposure</span>
                 <output id="exposureValue" for="exposure">1.00×</output>
                 <input
                   id="exposure"
@@ -367,7 +443,7 @@
               </label>
 
               <label class="control" for="timeScale">
-                <span class="control-name">时间倍率</span>
+                <span class="control-name" data-i18n="control.timeScale">Time scale</span>
                 <output id="timeScaleValue" for="timeScale">24 M/s</output>
                 <input
                   id="timeScale"
@@ -380,7 +456,7 @@
               </label>
 
               <label class="control" for="quality">
-                <span class="control-name">画质上限</span>
+                <span class="control-name" data-i18n="control.quality">Quality ceiling</span>
                 <output id="qualityValue" for="quality">1.00×</output>
                 <input
                   id="quality"
@@ -394,31 +470,47 @@
 
               <div class="sky-source-control">
                 <div class="sky-source-heading">
-                  <label class="control-name" for="skySource">天空素材</label>
+                  <label class="control-name" for="skySource" data-i18n="sky.label">
+                    Sky source
+                  </label>
                   <select id="skySource" aria-describedby="skySourceHint">
-                    <option value="high">ESO 原始 6000×3000（锁定）</option>
-                    <option value="ultra">Gaia 原始 16000×8000（锁定）</option>
+                    <option value="high" data-i18n="sky.eso">
+                      ESO native 6000×3000 (locked)
+                    </option>
+                    <option value="ultra" data-i18n="sky.gaia">
+                      Gaia native 16000×8000 (locked)
+                    </option>
                   </select>
                 </div>
-                <p id="skySourceHint" class="sky-source-hint">
-                  始终按原始尺寸上传，不降采样或静默回退。Gaia 文件约
-                  236 MB，解码为 GPU 纹理约占 488 MiB 统一内存。
+                <p id="skySourceHint" class="sky-source-hint" data-i18n="sky.hint">
+                  Always uploaded at native dimensions, with no downsampling or silent fallback.
+                  The Gaia file is about 236 MB and decodes to about 488 MiB of unified-memory GPU
+                  texture data.
                 </p>
               </div>
             </div>
           </section>
 
-          <p id="physicsNote" class="physics-note">
-            采用非旋转 Schwarzschild 度规。成像模式只改变谱段映射与望远镜响应；测地线、遮挡和频移保持一致。默认盘峰值约 4500 K，颜色由黑体谱与相对论频移计算，并非金色滤镜。
-            全天球数据：<a href="https://sci.esa.int/web/gaia/-/the-colour-of-the-sky-from-gaia-s-early-data-release-3-equirectangular-projection" target="_blank" rel="noreferrer">ESA/Gaia/DPAC · A. Moitinho</a>；6K 摄影回退：<a href="https://www.eso.org/public/images/eso0932a/" target="_blank" rel="noreferrer">ESO/S. Brunier</a>。
+          <p id="physicsNote" class="physics-note" data-i18n-html="physics.schwarzschildHtml">
+            Uses the non-rotating Schwarzschild metric. Imaging modes change only spectral mapping
+            and telescope response; geodesics, occlusion, and frequency shift remain unchanged. The
+            default disk peaks near 4500 K, with color computed from blackbody emission and
+            relativistic frequency shift rather than a gold filter. All-sky data:
+            <a href="https://sci.esa.int/web/gaia/-/the-colour-of-the-sky-from-gaia-s-early-data-release-3-equirectangular-projection" target="_blank" rel="noreferrer">ESA/Gaia/DPAC · A. Moitinho</a>;
+            6K photographic fallback:
+            <a href="https://www.eso.org/public/images/eso0932a/" target="_blank" rel="noreferrer">ESO/S. Brunier</a>.
           </p>
         </div>
       </aside>
 
       <div id="interactionHint" class="interaction-hint" role="status" aria-live="polite">
         <span class="pointer-mark" aria-hidden="true"></span>
-        <span id="desktopHint" class="desktop-hint">拖动环绕 · 滚轮缩放 · 0 键侧视</span>
-        <span class="touch-hint">单指环绕 · 双指缩放</span>
+        <span id="desktopHint" class="desktop-hint" data-i18n="hint.desktop">
+          Drag to orbit · Wheel to zoom · Press 0 for side view
+        </span>
+        <span class="touch-hint" data-i18n="hint.touch">
+          One finger to orbit · Two fingers to zoom
+        </span>
       </div>
     </main>
 

@@ -238,23 +238,23 @@ test("binary scene wires the strong-field runtime without losing legacy fallback
     );
     assert.match(
       host.elements.get("sceneStatus").textContent,
-      /实时 3\+1 Hamiltonian 强场光追/,
+      /Real-time 3\+1 Hamiltonian strong-field ray tracing/,
     );
     assert.match(
       host.elements.get("sceneStatus").textContent,
-      /高级诊断.*回溯时间.*零性残差.*积分成本/,
+      /Advanced diagnostics.*lookback time.*null residual.*integration cost/,
     );
-    assert.equal(host.elements.get("modeHubble").textContent, "光线结果");
-    assert.equal(host.elements.get("modeFrequency").textContent, "频移因子 g");
+    assert.equal(host.elements.get("modeHubble").textContent, "Ray outcome");
+    assert.equal(host.elements.get("modeFrequency").textContent, "Frequency shift g");
     assert.equal(host.elements.get("modeHubble").hidden, true);
     assert.equal(host.elements.get("modeFrequency").hidden, true);
     assert.equal(host.elements.get("modeLookback").hidden, false);
     assert.equal(host.elements.get("modeNull").hidden, false);
-    assert.equal(host.elements.get("modeError").textContent, "积分步数成本");
+    assert.equal(host.elements.get("modeError").textContent, "Integration-step cost");
     assert.equal(host.elements.get("modeError").hidden, false);
     assert.match(
       host.elements.get("physicsNote").innerHTML,
-      /绝不进入 WebGPU 黑洞位置/,
+      /never drive WebGPU black-hole positions/,
     );
 
     const frame = scene.extendFrame(baseFrame(state.time));
@@ -343,11 +343,11 @@ test("binary scene wires the strong-field runtime without losing legacy fallback
     });
     assert.match(
       host.elements.get("sceneStatus").textContent,
-      /旧 two-centre weak-field 预览/,
+      /Legacy two-centre weak-field preview/,
     );
     assert.match(
       host.elements.get("sceneStatus").textContent,
-      /强场物理等价性/,
+      /strong-field physical parity/,
     );
     for (const id of [
       "modeHubble",
@@ -377,6 +377,54 @@ test("binary scene wires the strong-field runtime without losing legacy fallback
       "legacy pre-scheduler step budgets must not invalidate strong-field history",
     );
 
+    scene.dispose();
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("binary scene localizes dynamic strong-field status in Chinese", async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = localFetch;
+  try {
+    const host = fakeHost("?lang=zh-CN");
+    const state = {
+      time: 0,
+      running: true,
+      distance: 50,
+      phase: 0,
+      orbitTilt: 0,
+      exposure: 1,
+      timeScale: 100,
+      massSolar: 60,
+      quality: 1,
+    };
+    const scene = await createBinaryApproxScene({
+      document: host.document,
+      ui: host.ui,
+      state,
+      controls: {
+        setRunning(running) {
+          state.running = running;
+        },
+        requestRender() {},
+      },
+      formatMass: (value) => `${value} Msol`,
+      formatGravitationalRadius: (value) => `${value} rg`,
+    });
+    scene.initialize();
+    const capabilities = Object.freeze({
+      api: "webgpu",
+      backend: "WebGPU · Metal",
+      progressiveAccumulation: "linear-hdr-running-average-v1",
+    });
+    scene.onRendererReady(capabilities, {
+      backend: capabilities.backend,
+      capabilities,
+    });
+    assert.match(host.elements.get("sceneStatus").textContent, /实时 3\+1 Hamiltonian 强场光追/);
+    assert.equal(host.elements.get("modeError").textContent, "积分步数成本");
+    assert.match(host.elements.get("physicsNote").innerHTML, /绝不进入 WebGPU 黑洞位置/);
     scene.dispose();
   } finally {
     globalThis.fetch = originalFetch;

@@ -1,4 +1,5 @@
 import * as THREE from "../vendor/three.module.js";
+import { createI18n } from "./i18n.js";
 import {
   fullscreenVertexGLSL,
   traceFragmentGLSL,
@@ -84,12 +85,15 @@ function loadTexture(url) {
   });
 }
 
-function gpuLabel(gl) {
+function gpuLabel(gl, i18n) {
   const extension = gl.getExtension("WEBGL_debug_renderer_info");
   if (!extension) {
-    return isApplePlatform() ? "Apple GPU" : "Hardware GPU";
+    return isApplePlatform()
+      ? i18n.t("renderer.appleGpu")
+      : i18n.t("renderer.hardwareGpu");
   }
-  return gl.getParameter(extension.UNMASKED_RENDERER_WEBGL) || "Hardware GPU";
+  return gl.getParameter(extension.UNMASKED_RENDERER_WEBGL)
+    || i18n.t("renderer.hardwareGpu");
 }
 
 function clearErrors(gl) {
@@ -211,17 +215,18 @@ export class WebGLRenderer {
   constructor(canvas, context, capabilities, options = undefined) {
     this.canvas = canvas;
     this.context = context;
+    this.i18n = createI18n(options?.locale || "en");
     this.backend = isApplePlatform()
-      ? "WebGL2 · Metal fallback"
+      ? this.i18n.t("renderer.webglMetalFallback")
       : "WebGL2 · GPU";
-    this.gpu = gpuLabel(context);
+    this.gpu = gpuLabel(context, this.i18n);
     this.glCapabilities = capabilities;
     this.maxRenderDimension = capabilities.maxRenderDimension;
     this.hdrMode = "sRGB · SDR";
     this.outputHDR = false;
     this.displayP3 = false;
-    this.outputDescription = "WebGL2 回退路径使用 sRGB 标准动态范围";
-    this.skyDetail = "银河背景待载入";
+    this.outputDescription = this.i18n.t("renderer.webglSdr");
+    this.skyDetail = this.i18n.t("renderer.skyPending");
     this.skyRadianceScale = 0.55;
     this.shaderBundle = shaderBundleFrom(options);
     this.width = 1;
@@ -271,7 +276,10 @@ export class WebGLRenderer {
     }
     this.skyRadianceScale = /gaia-edr3/i.test(this.skyUrl) ? 0.16 : 0.55;
     const image = this.skyTexture.image;
-    this.skyDetail = `${image.naturalWidth || image.width}×${image.naturalHeight || image.height} 原始全景 · 解析恒星层`;
+    this.skyDetail = this.i18n.t("renderer.skyDetail", {
+      width: image.naturalWidth || image.width,
+      height: image.naturalHeight || image.height,
+    });
 
     this.traceUniforms = {
       tSky: { value: this.skyTexture },
@@ -363,7 +371,9 @@ export class WebGLRenderer {
       ? THREE.HalfFloatType
       : THREE.UnsignedByteType;
     const intermediate = this.glCapabilities.halfFloatRenderTarget ? "RGBA16F" : "RGBA8";
-    this.outputDescription = `WebGL2 回退路径使用 sRGB 标准动态范围 · ${intermediate} 中间缓冲`;
+    this.outputDescription = this.i18n.t("renderer.webglSdrIntermediate", {
+      intermediate,
+    });
     this.capabilities = Object.freeze({
       api: "webgl2",
       backend: this.backend,

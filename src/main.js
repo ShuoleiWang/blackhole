@@ -8,8 +8,20 @@ import {
   applyStrongFieldFrameParameters,
   createStrongFieldQualityScheduler,
 } from "./strong-field-quality.js";
+import {
+  applyDocumentI18n,
+  createI18n,
+  isSupportedLocale,
+  languageUrl,
+  persistLocale,
+} from "./i18n.js";
 
 const query = new URLSearchParams(window.location.search);
+const i18n = createI18n(query);
+if (isSupportedLocale(query.get("lang"))) {
+  persistLocale(i18n.locale);
+}
+applyDocumentI18n(document, i18n);
 const requestedSkyMode = query.get("sky") === "ultra" ? "ultra" : "high";
 if (query.get("presentation") === "1") {
   document.documentElement.classList.add("is-presentation");
@@ -75,6 +87,10 @@ for (const [id, element] of Object.entries(ui)) {
 const skySourceSelect = document.getElementById("skySource");
 if (skySourceSelect) {
   skySourceSelect.value = requestedSkyMode;
+}
+const languageSelect = document.getElementById("languageSelect");
+if (languageSelect) {
+  languageSelect.value = i18n.locale;
 }
 
 const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
@@ -347,6 +363,7 @@ async function loadRequestedScene() {
       document,
       ui,
       state,
+      i18n,
       controls: {
         requestRender() {
           state.needsRender = true;
@@ -364,6 +381,7 @@ async function loadRequestedScene() {
     document,
     ui,
     state,
+    i18n,
     formatMass,
     formatGravitationalRadius,
     controls: {
@@ -454,9 +472,15 @@ function requestWebGLRendererRecovery(reason, error, source = renderer) {
 
 async function createRenderer() {
   const requestedBackend = query.get("renderer");
-  const rendererOptions = activeScene?.rendererOptions;
+  const rendererOptions = {
+    ...activeScene?.rendererOptions,
+    locale: i18n.locale,
+  };
   if (requestedBackend === "webgl") {
-    rendererFallbackReason = webGPUFallbackDescription(query.get("fallback"));
+    rendererFallbackReason = webGPUFallbackDescription(
+      query.get("fallback"),
+      i18n.locale,
+    );
     return WebGLRenderer.create(canvas, SKY_URLS, rendererOptions);
   }
   try {
@@ -502,12 +526,12 @@ function formatMass(mass) {
 function formatLength(km) {
   const au = km / AU_KM;
   if (au >= 0.1) {
-    return `${au.toLocaleString("zh-CN", { maximumFractionDigits: au < 10 ? 2 : 1 })} AU`;
+    return `${i18n.formatNumber(au, { maximumFractionDigits: au < 10 ? 2 : 1 })} AU`;
   }
   if (km >= 1e6) {
     return `${(km / 1e6).toFixed(2)} × 10⁶ km`;
   }
-  return `${Math.round(km).toLocaleString("zh-CN")} km`;
+  return `${i18n.formatNumber(Math.round(km))} km`;
 }
 
 function formatRadius(massSolar) {
@@ -574,8 +598,8 @@ function setMotion(running) {
   state.running = running;
   invalidateStrongFieldQuality("timeline-state-change");
   const labels = activeScene?.motionLabels ?? {
-    pause: "暂停物理轨道",
-    resume: "继续物理轨道",
+    pause: i18n.t("motion.pauseOrbit"),
+    resume: i18n.t("motion.resumeOrbit"),
   };
   const actionLabel = running ? labels.pause : labels.resume;
   ui.toggleMotion.dataset.state = running ? "running" : "paused";
@@ -992,8 +1016,11 @@ function updateFps(dt) {
 }
 
 function bindUi() {
-  const panelContext = activeScene?.panelLabel ?? "观测参数";
-  ui.togglePanel.setAttribute("aria-label", `展开${panelContext}`);
+  const panelContext = activeScene?.panelLabel ?? i18n.t("panel.observationSettings");
+  ui.togglePanel.setAttribute(
+    "aria-label",
+    i18n.t("panel.expand", { context: panelContext }),
+  );
   [ui.mass, ui.accretion, ui.exposure, ui.timeScale].forEach((input) => {
     input.addEventListener("input", updateReadouts);
   });
@@ -1009,6 +1036,12 @@ function bindUi() {
       nextUrl.searchParams.set("sky", selectedSkyMode);
       window.location.assign(nextUrl.href);
     }
+  });
+  languageSelect?.addEventListener("change", () => {
+    const locale = persistLocale(languageSelect.value);
+    // Scenes and renderers snapshot their locale. A bounded reload applies the
+    // new catalog atomically while languageUrl preserves every route parameter.
+    window.location.assign(languageUrl(window.location.href, locale));
   });
   [
     ui.modeScience,
@@ -1028,7 +1061,9 @@ function bindUi() {
     ui.togglePanel.setAttribute("aria-expanded", String(expanded));
     ui.togglePanel.setAttribute(
       "aria-label",
-      `${expanded ? "收起" : "展开"}${panelContext}`,
+      i18n.t(expanded ? "panel.collapse" : "panel.expand", {
+        context: panelContext,
+      }),
     );
   });
   window.addEventListener("resize", () => {
@@ -1045,11 +1080,12 @@ function bindUi() {
 }
 
 function showFatalError(message) {
-  ui.backendStatus.textContent = "初始化失败";
+  ui.backendStatus.textContent = i18n.t("fatal.initialization");
   const error = app.querySelector(".fatal-error") || document.createElement("div");
   error.className = "fatal-error";
+  error.setAttribute("role", "alert");
   const title = document.createElement("strong");
-  title.textContent = "无法启动 GPU 渲染器";
+  title.textContent = i18n.t("fatal.rendererTitle");
   const detail = document.createElement("span");
   detail.textContent = String(message);
   error.replaceChildren(title, detail);
@@ -1186,7 +1222,9 @@ async function start() {
       state.needsRender = true;
     });
     if (rendererFallbackReason) {
-      ui.backendStatus.title = `WebGPU 回退原因：${rendererFallbackReason}`;
+      ui.backendStatus.title = i18n.t("fallback.reason", {
+        reason: rendererFallbackReason,
+      });
     }
     bindInteractions();
     if (strongFieldQualityScheduler) {
@@ -1209,7 +1247,7 @@ async function start() {
       }
     }
     if (error?.sceneUiHandled) {
-      ui.backendStatus.textContent = "数据验证失败";
+      ui.backendStatus.textContent = i18n.t("fatal.dataValidation");
       return;
     }
     showFatalError(error instanceof Error ? error.message : error);

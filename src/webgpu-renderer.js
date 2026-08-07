@@ -3,6 +3,7 @@ import {
   traceFragmentWGSL,
   postFragmentWGSL,
 } from "./shaders.js";
+import { createI18n } from "./i18n.js";
 
 const HDR_FORMAT = "rgba16float";
 const UNIFORM_FLOATS = 40;
@@ -14,8 +15,8 @@ const ORIGINAL_SKY_DIMENSIONS = Object.freeze([
 const PROGRESSIVE_ACCUMULATION_MODE = "linear-hdr-running-average-v1";
 const DYNAMIC_PROGRESSIVE_PHASES = new Set(["interactive", "realtime"]);
 const WEBGPU_FALLBACK_REASONS = Object.freeze({
-  "device-lost": "WebGPU 设备连接丢失",
-  "render-error": "WebGPU 渲染异常",
+  "device-lost": "renderer.fallback.deviceLost",
+  "render-error": "renderer.fallback.renderError",
 });
 
 export function webGLRecoveryUrl(href, reason) {
@@ -28,12 +29,13 @@ export function webGLRecoveryUrl(href, reason) {
   return url.href;
 }
 
-export function webGPUFallbackDescription(token) {
+export function webGPUFallbackDescription(token, locale = "en") {
   const prefix = "webgpu-";
   const reason = typeof token === "string" && token.startsWith(prefix)
     ? token.slice(prefix.length)
     : "";
-  return WEBGPU_FALLBACK_REASONS[reason] || "";
+  const key = WEBGPU_FALLBACK_REASONS[reason];
+  return key ? createI18n(locale).t(key) : "";
 }
 
 function monotonicNowMs() {
@@ -589,7 +591,7 @@ async function loadSkyTexture(
   }
 }
 
-function adapterLabel(adapter) {
+function adapterLabel(adapter, i18n) {
   let info = {};
   try {
     info = adapter.info || {};
@@ -605,7 +607,9 @@ function adapterLabel(adapter) {
     return pieces.join(" · ");
   }
 
-  return isApplePlatform() ? "Apple GPU · Metal" : "High-performance GPU";
+  return isApplePlatform()
+    ? i18n.t("renderer.appleGpuMetal")
+    : i18n.t("renderer.highPerformanceGpu");
 }
 
 async function requestCompatibleAdapter() {
@@ -699,18 +703,19 @@ export class WebGPURenderer {
     this.context = context;
     this.adapter = adapter;
     this.device = device;
+    this.i18n = createI18n(options?.locale || "en");
     this.preferredFormat = navigator.gpu.getPreferredCanvasFormat();
     this.format = this.preferredFormat;
     this.backend = isApplePlatform() ? "WebGPU · Metal" : "WebGPU · GPU";
-    this.gpu = adapterLabel(adapter);
+    this.gpu = adapterLabel(adapter, this.i18n);
     this.requestedUltraLimit = negotiation.requestedUltraLimit;
     this.limitFallbackReason = negotiation.limitFallbackReason;
     this.maxRenderDimension = finiteLimit(device.limits.maxTextureDimension2D, 4096);
     this.outputHDR = false;
     this.displayP3 = false;
     this.hdrPeak = 1;
-    this.outputDescription = "sRGB 标准动态范围";
-    this.skyDetail = "银河背景待载入";
+    this.outputDescription = this.i18n.t("renderer.srgb");
+    this.skyDetail = this.i18n.t("renderer.skyPending");
     this.skyRadianceScale = 0.55;
     this.shaderBundle = shaderBundleFrom(options);
     this.progressiveAccumulation = progressiveAccumulationFrom(
@@ -768,7 +773,7 @@ export class WebGPURenderer {
     if (this.outputHDR) {
       return matchMedia("(dynamic-range: high)").matches
         ? "HDR · P3 · FP16"
-        : "P3 扩展 · 屏幕 SDR";
+        : this.i18n.t("renderer.p3ExtendedSdr");
     }
     return this.displayP3 ? "Display‑P3 · SDR" : "sRGB · SDR";
   }
@@ -834,7 +839,7 @@ export class WebGPURenderer {
         // Relative to SDR diffuse white.  The WebGPU canvas compositor maps
         // values above 1.0 into the active macOS display's HDR headroom.
         this.hdrPeak = 4;
-        this.outputDescription = "16 位浮点 Display‑P3 扩展 HDR（高光最高 4× SDR 白）";
+        this.outputDescription = this.i18n.t("renderer.hdrDescription");
         return;
       } catch (error) {
         console.info("Extended WebGPU HDR unavailable; trying wide-gamut SDR.", error);
@@ -855,7 +860,7 @@ export class WebGPURenderer {
         throw new Error("Browser did not retain Display-P3 output");
       }
       this.displayP3 = true;
-      this.outputDescription = "Display‑P3 标准动态范围";
+      this.outputDescription = this.i18n.t("renderer.p3Sdr");
       return;
     } catch (error) {
       console.info("Display-P3 canvas unavailable; using sRGB SDR.", error);
@@ -876,7 +881,7 @@ export class WebGPURenderer {
       this.context.unconfigure?.();
       this.context.configure({ ...common, format: this.format });
     }
-    this.outputDescription = "sRGB 标准动态范围";
+    this.outputDescription = this.i18n.t("renderer.srgb");
   }
 
   reportCapabilities() {
@@ -953,7 +958,10 @@ export class WebGPURenderer {
     this.skyTexture = texture;
     this.skyTextureWidth = skyTextureWidth;
     this.skyTextureHeight = skyTextureHeight;
-    this.skyDetail = `${skyTextureWidth}×${skyTextureHeight} 原始全景 · 解析恒星层`;
+    this.skyDetail = this.i18n.t("renderer.skyDetail", {
+      width: skyTextureWidth,
+      height: skyTextureHeight,
+    });
     this.skyUrl = selectedSkyUrl;
 
     const vertexModule = device.createShaderModule({

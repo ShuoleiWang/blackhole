@@ -307,11 +307,44 @@ h1 {
   background: rgba(123, 203, 216, 0.28);
 }
 
+.language-control {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(8.25rem, auto);
+  align-items: center;
+  gap: 10px;
+  padding: 9px 12px 5px;
+}
+
+.language-control label {
+  color: var(--muted);
+  font-size: 0.67rem;
+  font-weight: 650;
+  letter-spacing: 0.025em;
+}
+
+.language-control select {
+  width: 100%;
+  min-width: 0;
+  min-height: 38px;
+  padding: 6px 28px 6px 9px;
+  border: 1px solid rgba(123, 203, 216, 0.3);
+  border-radius: 5px;
+  outline: none;
+  background: #071119;
+  color: #dffbff;
+  cursor: pointer;
+  font-size: 0.72rem;
+}
+
+.language-control select:hover {
+  border-color: rgba(123, 203, 216, 0.52);
+}
+
 .scene-switch {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 5px;
-  padding: 10px 12px 6px;
+  padding: 5px 12px 6px;
 }
 
 .scene-link {
@@ -1143,6 +1176,7 @@ h1 {
 
 button:focus-visible,
 input:focus-visible,
+select:focus-visible,
 .scene-link:focus-visible {
   outline: 2px solid var(--focus);
   outline-offset: 2px;
@@ -1274,6 +1308,11 @@ input:focus-visible,
     min-height: 44px;
   }
 
+  .language-control select {
+    min-height: 44px;
+    font-size: 1rem;
+  }
+
   .physical-readout div {
     padding: 9px 11px;
   }
@@ -1376,6 +1415,7 @@ input:focus-visible,
   .icon-button,
   .panel-toggle,
   .mode-button,
+  select,
   .control input[type="range"] {
     min-height: 44px;
   }
