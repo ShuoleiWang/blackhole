@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import test from "node:test";
 
 import { binaryTraceFragmentGLSL } from "../src/binary-shaders.js";
@@ -10,13 +11,19 @@ import {
 } from "../src/strong-field-spacetime.js";
 import {
   STRONG_FIELD_DIAGNOSTIC_MODES,
+  STRONG_FIELD_ACCRETION_UNIFORM_FLOATS,
+  STRONG_FIELD_ACCRETION_UNIFORM_LAYOUT,
+  STRONG_FIELD_ACCRETION_UNIFORM_TAIL_FLOATS,
   STRONG_FIELD_MAXIMUM_STEP_M,
   STRONG_FIELD_OUTCOMES,
   STRONG_FIELD_UNIFORM_FLOATS,
   STRONG_FIELD_UNIFORM_LAYOUT,
   STRONG_FIELD_UNIFORM_TAIL_FLOATS,
+  strongFieldBinaryDualDiskShaderBundle,
+  strongFieldBinaryDualDiskTraceFragmentWGSL,
   strongFieldBinaryShaderBundle,
   strongFieldBinaryTraceFragmentWGSL,
+  writeStrongFieldAccretionUniformTail,
   writeStrongFieldUniformTail,
 } from "../src/strong-field-shaders.js";
 
@@ -65,6 +72,21 @@ function frame(overrides = {}) {
     sceneStrongFieldUniforms: spacetimeProvider.frameAt(-100).uniforms,
     ...overrides,
   };
+}
+
+const dualDiskUniforms = Object.freeze([
+  1, 0.8, 1, 6,
+  0, 1, 0, 3,
+  8.5, 6.3e-5, 1, 1,
+  0, 1, 0, 3,
+  8.5, 6.3e-5, 1, 1,
+]);
+
+function dualDiskFrame(overrides = {}) {
+  return frame({
+    sceneStrongAccretionUniforms: dualDiskUniforms,
+    ...overrides,
+  });
 }
 
 function matrixVector(matrix, vector) {
@@ -136,6 +158,51 @@ test("strong-field bundle declares asymmetric WebGPU production policy", () => {
   assert.match(
     strongFieldBinaryShaderBundle.labels.webglFallback,
     /weak-field/i,
+  );
+});
+
+test("dual-disk bundle keeps phase specializations and weak-field fallback explicit", () => {
+  assert.equal(
+    strongFieldBinaryDualDiskShaderBundle.id,
+    "binary-dual-disk-strong-field-v1",
+  );
+  assert.equal(
+    strongFieldBinaryDualDiskShaderBundle.uniforms.requiredFloatCount,
+    STRONG_FIELD_ACCRETION_UNIFORM_FLOATS,
+  );
+  assert.equal(
+    strongFieldBinaryDualDiskShaderBundle.wgsl.trace,
+    strongFieldBinaryDualDiskTraceFragmentWGSL,
+  );
+  assert.deepEqual(
+    strongFieldBinaryDualDiskShaderBundle.wgsl.traceSpecializations.map(
+      ({ id, constants }) => [id, constants.SPACETIME_PHASE_MODE],
+    ),
+    [["binary", 0], ["transition", 2], ["remnant", 1]],
+  );
+  assert.equal(
+    strongFieldBinaryDualDiskShaderBundle.glsl.trace,
+    binaryTraceFragmentGLSL,
+  );
+  assert.equal(
+    strongFieldBinaryDualDiskShaderBundle.backendPolicy.physicalParityRequired,
+    false,
+  );
+  assert.equal(
+    strongFieldBinaryDualDiskShaderBundle.backendPolicy.matterBackreaction,
+    false,
+  );
+  assert.match(
+    strongFieldBinaryDualDiskShaderBundle.backendPolicy.scientificStatus,
+    /analytic.*not GRMHD or NR/i,
+  );
+  assert.match(
+    strongFieldBinaryDualDiskShaderBundle.backendPolicy.scientificStatus,
+    /bounded phenomenological emissivity texture/i,
+  );
+  assert.match(
+    strongFieldBinaryDualDiskShaderBundle.labels.webglFallback,
+    /vacuum.*without disk parity/i,
   );
 });
 
@@ -247,6 +314,244 @@ test("uniform writer fails closed on malformed source state", () => {
     ),
     /sceneStrongIntegrator/,
   );
+});
+
+test("dual-disk ABI appends twenty floats without changing the vacuum ABI", () => {
+  assert.equal(STRONG_FIELD_UNIFORM_FLOATS, 96);
+  assert.equal(STRONG_FIELD_UNIFORM_TAIL_FLOATS, 60);
+  assert.equal(STRONG_FIELD_ACCRETION_UNIFORM_FLOATS, 116);
+  assert.equal(STRONG_FIELD_ACCRETION_UNIFORM_TAIL_FLOATS, 80);
+  assert.deepEqual(
+    Object.values(STRONG_FIELD_ACCRETION_UNIFORM_LAYOUT)
+      .map(({ offset }) => offset),
+    [0, 36, 80, 84, 88, 92, 96],
+  );
+
+  const vacuumTail = new Float32Array(STRONG_FIELD_UNIFORM_TAIL_FLOATS);
+  const accretionTail = new Float32Array(
+    STRONG_FIELD_ACCRETION_UNIFORM_TAIL_FLOATS,
+  );
+  writeStrongFieldUniformTail(vacuumTail, frame());
+  writeStrongFieldAccretionUniformTail(accretionTail, dualDiskFrame());
+  assert.deepEqual(
+    Array.from(accretionTail.slice(0, STRONG_FIELD_UNIFORM_TAIL_FLOATS)),
+    Array.from(vacuumTail),
+  );
+  assert.deepEqual(
+    Array.from(accretionTail.slice(STRONG_FIELD_UNIFORM_TAIL_FLOATS)),
+    dualDiskUniforms.map(Math.fround),
+  );
+});
+
+test("dual-disk uniform writer rejects malformed or non-physical transfer state", () => {
+  const write = (values, length = STRONG_FIELD_ACCRETION_UNIFORM_TAIL_FLOATS) => (
+    writeStrongFieldAccretionUniformTail(
+      new Float32Array(length),
+      dualDiskFrame({ sceneStrongAccretionUniforms: values }),
+    )
+  );
+  assert.throws(
+    () => write(dualDiskUniforms, STRONG_FIELD_ACCRETION_UNIFORM_TAIL_FLOATS - 1),
+    /needs 80 floats/,
+  );
+  assert.throws(() => write(dualDiskUniforms.slice(0, 19)), /20 finite/);
+  assert.throws(
+    () => write(dualDiskUniforms.with(0, 0.5)),
+    /active flag/,
+  );
+  for (const values of [
+    dualDiskUniforms.with(1, 0),
+    dualDiskUniforms.with(1, 1.01),
+    dualDiskUniforms.with(2, 0),
+    dualDiskUniforms.with(2, 17),
+    dualDiskUniforms.with(3, -1),
+    dualDiskUniforms.with(3, 101),
+  ]) {
+    assert.throws(() => write(values), /control parameters/);
+  }
+  for (const values of [
+    dualDiskUniforms.with(4, 0.2),
+    dualDiskUniforms.with(7, 0),
+    dualDiskUniforms.with(8, 2.9),
+    dualDiskUniforms.with(9, 0),
+    dualDiskUniforms.with(10, 1.1),
+    dualDiskUniforms.with(11, 0),
+    dualDiskUniforms.with(16, 1.0e5 + 1),
+    dualDiskUniforms.with(17, 1.0e3 + 1),
+  ]) {
+    assert.throws(() => write(values), /disk parameters/);
+  }
+  const inactive = [
+    0, 0.8, 1, 6,
+    0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0,
+  ];
+  assert.doesNotThrow(() => write(inactive));
+
+  const transitionProvider = spacetimeProvider.frameAt(-50).uniforms;
+  assert.ok(transitionProvider[1] > 0 && transitionProvider[1] < 1);
+  assert.throws(
+    () => writeStrongFieldAccretionUniformTail(
+      new Float32Array(STRONG_FIELD_ACCRETION_UNIFORM_TAIL_FLOATS),
+      dualDiskFrame({ sceneStrongFieldUniforms: transitionProvider }),
+    ),
+    /must be dark during merger transition/,
+  );
+  const darkTransitionDisks = dualDiskUniforms
+    .with(10, 0)
+    .with(18, 0);
+  assert.doesNotThrow(() => writeStrongFieldAccretionUniformTail(
+    new Float32Array(STRONG_FIELD_ACCRETION_UNIFORM_TAIL_FLOATS),
+    dualDiskFrame({
+      sceneStrongFieldUniforms: transitionProvider,
+      sceneStrongAccretionUniforms: darkTransitionDisks,
+    }),
+  ));
+});
+
+test("vacuum generated WGSL remains byte-for-byte unchanged", () => {
+  assert.equal(
+    createHash("sha256").update(strongFieldBinaryTraceFragmentWGSL).digest("hex"),
+    "de367f0ba7f2f2bc71750d983067ac813c35eb0818c0b1dfdb0cf2ef7ab28849",
+  );
+  assert.equal(strongFieldBinaryTraceFragmentWGSL.length, 49097);
+  assert.doesNotMatch(
+    strongFieldBinaryTraceFragmentWGSL,
+    /sceneDiskControl|DiskIntersection|diskRadiance|accumulateDualDiskEmission/,
+  );
+});
+
+test("dual-disk WGSL sorts segment crossings and composes finite optical depth", () => {
+  const shader = strongFieldBinaryDualDiskTraceFragmentWGSL;
+  for (const token of [
+    "sceneDiskControl: vec4<f32>",
+    "struct DiskIntersection",
+    "fn segmentDiskIntersection(",
+    "let fraction = sideStart / denominator",
+    "let firstIsA = hitA.fraction <= hitB.fraction",
+    "fn applyDiskIntersection(",
+    "result.diskRadiance = result.diskRadiance",
+    "result.diskTransmittance = result.diskTransmittance * (1.0 - sample.opacity)",
+    "let lineOfSightTau = min(tauFace / muEmitter, 30.0)",
+    "let opaqueSurfaceFraction = clamp(",
+    "activeWeight * edgeCoverage * opaqueSurfaceFraction",
+    "fields.horizonDistance <= capturePadding",
+    "result.diskTransferFailure = 1.0",
+  ]) {
+    assert.ok(shader.includes(token), `missing dual-disk token: ${token}`);
+  }
+  const firstBranch = shader.slice(
+    shader.indexOf("if (firstIsA)"),
+    shader.indexOf("return result;", shader.indexOf("if (firstIsA)")),
+  );
+  assert.ok(firstBranch.indexOf("result, hitA") < firstBranch.indexOf("result, hitB"));
+  assert.match(
+    shader,
+    /let previousPosition = position;[\s\S]*position = position - acceptedStepSize[\s\S]*accumulateDualDiskEmission\(/,
+  );
+});
+
+test("dual-disk transfer uses local emitter energy, g4, and mass-scaled T_eff4", () => {
+  const shader = strongFieldBinaryDualDiskTraceFragmentWGSL;
+  for (const pattern of [
+    /let emitterFrequency = \([\s\S]*conservedEnergy \* emitterTime - dot\(momentum, emitterSpatial\)/,
+    /let rawFrequencyShift = observerFrequency \/ emitterFrequency/,
+    /let chromaticFrequencyShift = clamp\(rawFrequencyShift, 0\.02, 8\.0\)/,
+    /let g2 = rawFrequencyShift \* rawFrequencyShift/,
+    /let bolometricTransfer = g2 \* g2/,
+    /eddingtonRatio \* 1\.0e8 \/ bodyMassSolar[\s\S]*structuredFluxShape \* thermalFluxScale/,
+    /visibleBlackbodyLinearSrgbPerBolometric\([\s\S]*emittedTemperature \* chromaticFrequencyShift[\s\S]*\)/,
+    /if \(!finiteScalar\(rawFrequencyShift\) \|\| rawFrequencyShift <= 0\.0\)/,
+  ]) {
+    assert.match(shader, pattern);
+  }
+  assert.match(
+    shader,
+    /bolometric surface flux retains T_eff\^4 proportional to[\s\S]*\(Mdot \/ M\^2\)/,
+  );
+  assert.doesNotMatch(
+    shader,
+    /let g2 = chromaticFrequencyShift \* chromaticFrequencyShift/,
+  );
+  const sourceStart = shader.indexOf("let intrinsicFlux =");
+  const sourceEnd = shader.indexOf("if (!finiteVector(radiance)", sourceStart);
+  const source = shader.slice(sourceStart, sourceEnd);
+  assert.doesNotMatch(source, /activeWeight|edgeCoverage/);
+});
+
+test("dual-disk visible spectrum uses CIE integration and one C2 covering fraction", () => {
+  const shader = strongFieldBinaryDualDiskTraceFragmentWGSL;
+  const spectralStart = shader.indexOf(
+    "fn visibleBlackbodyLinearSrgbPerBolometric(",
+  );
+  const spectralEnd = shader.indexOf("\n}\n\nfn smootherstep01", spectralStart);
+  assert.ok(spectralStart >= 0 && spectralEnd > spectralStart);
+  const spectral = shader.slice(spectralStart, spectralEnd);
+  assert.match(spectral, /array<vec4<f32>, 15>/);
+  assert.match(spectral, /380-780 nm/);
+  assert.match(spectral, /linearSrgb = vec3<f32>/);
+  assert.match(spectral, /referenceRatio2 \* referenceRatio2/);
+  assert.doesNotMatch(spectral, /spectrum \/ luminance|planckChromaticity/);
+
+  const edgeStart = shader.indexOf("fn smootherstep01(");
+  const edgeEnd = shader.indexOf("\n}\n\nfn spatialDot", edgeStart);
+  const edge = shader.slice(edgeStart, edgeEnd);
+  assert.match(edge, /x \* x \* x \* \(x \* \(x \* 6\.0 - 15\.0\) \+ 10\.0\)/);
+  assert.match(edge, /innerCoverage \* outerCoverage/);
+
+  const transferStart = shader.indexOf("fn diskTransferAtIntersection(");
+  const transferEnd = shader.indexOf("\n}\n\nfn applyDiskIntersection", transferStart);
+  const transfer = shader.slice(transferStart, transferEnd);
+  assert.equal((transfer.match(/edgeCoverage/g) || []).length, 3);
+  assert.match(
+    transfer,
+    /let opacity = clamp\([\s\S]*activeWeight \* edgeCoverage \* opaqueSurfaceFraction/,
+  );
+  assert.doesNotMatch(transfer, /tauFace = tauPeak \* activeWeight/);
+  assert.doesNotMatch(transfer, /structuredFluxShape[\s\S]*\* activeWeight/);
+});
+
+test("dual-disk emissivity texture is bounded, continuous, and transport-only", () => {
+  const shader = strongFieldBinaryDualDiskTraceFragmentWGSL;
+  const structureStart = shader.indexOf("fn analyticDiskSurfaceStructure(");
+  const structureEnd = shader.indexOf("\n}\n\nfn diskTransferAtIntersection", structureStart);
+  assert.ok(structureStart >= 0 && structureEnd > structureStart);
+  const structure = shader.slice(structureStart, structureEnd);
+  assert.match(structure, /let tidal = 0\.16 \* cos/);
+  assert.match(structure, /let referenceRadius = \(49\.0 \/ 36\.0\) \* innerRadius/);
+  assert.match(structure, /let omegaPeak = sqrt/);
+  assert.match(structure, /wrapDiskPatternAngle\(0\.82 \* omegaPeak \* time\)/);
+  assert.match(structure, /wrapDiskPatternAngle\(1\.21 \* omegaPeak \* time\)/);
+  assert.match(structure, /0\.032 \* sin\(5\.0 \* \(azimuth - phase5\)/);
+  assert.match(structure, /0\.024 \* sin\(9\.0 \* \(azimuth - phase9\)/);
+  assert.match(structure, /0\.016 \* sin\(14\.0 \* \(azimuth - phase14\)/);
+  assert.match(structure, /0\.010 \* sin\(21\.0 \* \(azimuth - phase21\)/);
+  assert.match(structure, /0\.008 \* sin\(31\.0 \* \(azimuth - phase31\)/);
+  assert.match(structure, /return 1\.0 \+ tidal \+ emissivityTexture/);
+  assert.doesNotMatch(structure, /time \* sqrt\([^\n]*radius|clamp\(/);
+  assert.doesNotMatch(structure, /position =|momentum =|spatialMetric =|opacity =/);
+  assert.match(shader, /deterministic finite-correlation emissivity proxy/i);
+});
+
+test("dual-disk photographic mode preserves foreground emission for every ray outcome", () => {
+  const shader = strongFieldBinaryDualDiskTraceFragmentWGSL;
+  const shadeStart = shader.indexOf("fn shadeResult(");
+  const shadeEnd = shader.indexOf("\n}\n\nfn radicalInverse", shadeStart);
+  const shade = shader.slice(shadeStart, shadeEnd);
+  assert.match(
+    shade,
+    /RAY_CAPTURED\) \{\s*return result\.diskRadiance;/,
+  );
+  assert.match(
+    shade,
+    /RAY_UNRESOLVED\)[\s\S]*return result\.diskRadiance[\s\S]*result\.diskTransmittance[\s\S]*unresolvedLevel \* hatch/,
+  );
+  assert.match(
+    shade,
+    /return result\.diskRadiance[\s\S]*result\.diskTransmittance \* sampleEnvironment\(result\.escapeDirection\)[\s\S]*shiftRadiance/,
+  );
+  const diagnosticPrefix = shade.slice(0, shade.indexOf("if (result.outcome == RAY_CAPTURED)"));
+  assert.doesNotMatch(diagnosticPrefix, /diskRadiance|diskTransmittance/);
 });
 
 test("WGSL exposes the strong-field provider and complete ray-result contract", () => {

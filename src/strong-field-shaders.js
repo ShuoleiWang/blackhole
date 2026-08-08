@@ -39,6 +39,8 @@ import { STRONG_FIELD_UNIFORM_ABI } from "./strong-field-spacetime.js";
 
 export const STRONG_FIELD_UNIFORM_FLOATS = 96;
 export const STRONG_FIELD_UNIFORM_TAIL_FLOATS = 60;
+export const STRONG_FIELD_ACCRETION_UNIFORM_FLOATS = 116;
+export const STRONG_FIELD_ACCRETION_UNIFORM_TAIL_FLOATS = 80;
 // A single symplectic-Euler kick above 3.5 M is not yet safe near the
 // overlapping binary strong field. Keep the shader-side ceiling explicit and
 // align every host tier with it until segment event localisation or an
@@ -56,6 +58,11 @@ export const STRONG_FIELD_UNIFORM_LAYOUT = Object.freeze({
   sceneStrongDomain: Object.freeze({ offset: 84, floats: 4 }),
   sceneStrongDiagnostics: Object.freeze({ offset: 88, floats: 4 }),
   sceneStrongQuality: Object.freeze({ offset: 92, floats: 4 }),
+});
+
+export const STRONG_FIELD_ACCRETION_UNIFORM_LAYOUT = Object.freeze({
+  ...STRONG_FIELD_UNIFORM_LAYOUT,
+  sceneStrongAccretion: Object.freeze({ offset: 96, floats: 20 }),
 });
 
 export const STRONG_FIELD_OUTCOMES = Object.freeze({
@@ -190,7 +197,762 @@ export function writeStrongFieldUniformTail(target, frame) {
   return target;
 }
 
-export const strongFieldBinaryTraceFragmentWGSL = /* wgsl */ `
+/**
+ * Append the dual-mini-disk emission contract without changing the 44-float
+ * spacetime provider or the 96-float vacuum tracer ABI.
+ *
+ * Layout at absolute offsets 96..115:
+ *   control: active, tidal truncation factor, thermal scale, peak optical depth
+ *   disk A:  normal.xyz, ISCO; outer radius, Eddington ratio, C2 weight, sign
+ *   disk B:  normal.xyz, ISCO; outer radius, Eddington ratio, C2 weight, sign
+ */
+export function writeStrongFieldAccretionUniformTail(target, frame) {
+  if (
+    !target
+    || typeof target.set !== "function"
+    || typeof target.subarray !== "function"
+    || target.length < STRONG_FIELD_ACCRETION_UNIFORM_TAIL_FLOATS
+  ) {
+    throw new Error(
+      `Strong-field accretion tail needs ${STRONG_FIELD_ACCRETION_UNIFORM_TAIL_FLOATS} floats`,
+    );
+  }
+  writeStrongFieldUniformTail(
+    target.subarray(0, STRONG_FIELD_UNIFORM_TAIL_FLOATS),
+    frame,
+  );
+  const accretion = frame?.sceneStrongAccretionUniforms;
+  if (
+    !accretion
+    || typeof accretion.length !== "number"
+    || accretion.length !== 20
+    || Array.from(accretion).some((entry) => !Number.isFinite(Number(entry)))
+  ) {
+    throw new Error(
+      "sceneStrongAccretionUniforms must contain exactly 20 finite numbers",
+    );
+  }
+  const active = Number(accretion[0]);
+  if (active !== 0 && active !== 1) {
+    throw new Error("Strong-field accretion active flag must be 0 or 1");
+  }
+  const tidalTruncation = Number(accretion[1]);
+  const thermalScale = Number(accretion[2]);
+  const peakOpticalDepth = Number(accretion[3]);
+  if (
+    tidalTruncation <= 0
+    || tidalTruncation > 1
+    || thermalScale <= 0
+    || thermalScale > 16
+    || peakOpticalDepth < 0
+    || peakOpticalDepth > 100
+  ) {
+    throw new Error("Strong-field accretion control parameters are out of range");
+  }
+  const transitionWeight = Number(frame.sceneStrongFieldUniforms[1]);
+  if (
+    transitionWeight > 0
+    && (Number(accretion[10]) > 0 || Number(accretion[18]) > 0)
+  ) {
+    throw new Error(
+      "Individual strong-field accretion disks must be dark during merger transition and remnant phases",
+    );
+  }
+  for (const offset of [4, 12]) {
+    const normalLength = Math.hypot(
+      Number(accretion[offset]),
+      Number(accretion[offset + 1]),
+      Number(accretion[offset + 2]),
+    );
+    const innerRadius = Number(accretion[offset + 3]);
+    const outerRadius = Number(accretion[offset + 4]);
+    const eddingtonRatio = Number(accretion[offset + 5]);
+    const weight = Number(accretion[offset + 6]);
+    const rotationSign = Number(accretion[offset + 7]);
+    if (
+      active === 1
+      && (
+        Math.abs(normalLength - 1) > 1e-5
+        || innerRadius <= 0
+        || innerRadius > 1.0e5
+        || outerRadius < 0
+        || outerRadius > 1.0e5
+        || eddingtonRatio <= 0
+        || eddingtonRatio > 1.0e3
+        || weight < 0
+        || weight > 1
+        || Math.abs(rotationSign) !== 1
+        || (weight > 0 && outerRadius <= innerRadius)
+      )
+    ) {
+      throw new Error("Strong-field accretion disk parameters are out of range");
+    }
+  }
+  target.set(accretion, STRONG_FIELD_UNIFORM_TAIL_FLOATS);
+  return target;
+}
+
+// Analytic, frame-frozen radiative-transfer layer for the dual-mini-disk
+// scene. This is deliberately an emission prescription on top of the
+// approximate vacuum metric: it neither evolves matter nor claims GRMHD/NR.
+// The functions are injected only into the 116-float dual-disk WGSL module, so
+// the production 96-float vacuum shader retains its original code path.
+const STRONG_FIELD_DUAL_DISK_FUNCTIONS_WGSL = /* wgsl */ `
+struct DiskIntersection {
+  fraction: f32,
+  radius: f32,
+  position: vec3<f32>,
+  restPosition: vec3<f32>,
+  valid: f32,
+};
+
+struct DiskTransferSample {
+  radiance: vec3<f32>,
+  opacity: f32,
+  valid: f32,
+};
+
+fn emptyDiskIntersection() -> DiskIntersection {
+  var result: DiskIntersection;
+  result.fraction = 2.0;
+  result.radius = 0.0;
+  result.position = vec3<f32>(0.0);
+  result.restPosition = vec3<f32>(0.0);
+  result.valid = 0.0;
+  return result;
+}
+
+fn bodyRestDisplacement(
+  position: vec3<f32>,
+  centre: vec3<f32>,
+  velocity: vec3<f32>
+) -> vec3<f32> {
+  let displacement = position - centre;
+  let speedSquared = dot(velocity, velocity);
+  if (speedSquared <= 1.0e-12) {
+    return displacement;
+  }
+  if (speedSquared >= 0.9999) {
+    return vec3<f32>(1.0e19);
+  }
+  let gamma = inverseSqrt(1.0 - speedSquared);
+  return displacement + velocity * (
+    (gamma - 1.0) * dot(displacement, velocity) / speedSquared
+  );
+}
+
+// Locate a crossing on the accepted kick-drift segment. Body locations are
+// frozen for the complete ray, matching the metric provider's fast-light
+// contract. A small positive lower bound prevents an endpoint hit from being
+// counted again at the beginning of the next segment.
+fn segmentDiskIntersection(
+  segmentStart: vec3<f32>,
+  segmentEnd: vec3<f32>,
+  centre: vec3<f32>,
+  velocity: vec3<f32>,
+  normalInput: vec3<f32>,
+  innerRadius: f32,
+  outerRadius: f32,
+  activeWeight: f32
+) -> DiskIntersection {
+  var result = emptyDiskIntersection();
+  if (
+    params.sceneDiskControl.x < 0.5
+    || activeWeight <= 1.0e-6
+    || innerRadius <= 0.0
+    || outerRadius <= innerRadius
+  ) {
+    return result;
+  }
+  let normalLength = length(normalInput);
+  if (!finiteScalar(normalLength) || normalLength < 0.999 || normalLength > 1.001) {
+    return result;
+  }
+  let normal = normalInput / normalLength;
+  let restStart = bodyRestDisplacement(segmentStart, centre, velocity);
+  let restEnd = bodyRestDisplacement(segmentEnd, centre, velocity);
+  if (!finiteVector(restStart) || !finiteVector(restEnd)) {
+    return result;
+  }
+  let sideStart = dot(restStart, normal);
+  let sideEnd = dot(restEnd, normal);
+  let denominator = sideStart - sideEnd;
+  if (
+    !finiteScalar(denominator)
+    || abs(denominator) <= 1.0e-7
+    || sideStart * sideEnd > 0.0
+  ) {
+    return result;
+  }
+  let fraction = sideStart / denominator;
+  if (fraction <= 1.0e-5 || fraction > 1.0) {
+    return result;
+  }
+  let restHit = mix(restStart, restEnd, fraction);
+  let planarHit = restHit - normal * dot(restHit, normal);
+  let radius = length(planarHit);
+  if (
+    !finiteScalar(radius)
+    || radius < innerRadius
+    || radius > outerRadius
+  ) {
+    return result;
+  }
+  result.fraction = fraction;
+  result.radius = radius;
+  result.position = mix(segmentStart, segmentEnd, fraction);
+  result.restPosition = planarHit;
+  result.valid = 1.0;
+  return result;
+}
+
+fn visibleBlackbodyLinearSrgbPerBolometric(
+  temperatureKelvin: f32
+) -> vec3<f32> {
+  // Fifteen uniformly spaced samples spanning 380-780 nm. The XYZ weights are the
+  // fixed Wyman-Sloan-Shirley approximation to the CIE 1931 2-degree observer.
+  // Unlike the previous three-point, unit-luminance colour proxy, this keeps
+  // the fraction of bolometric power that actually lands in the visible band.
+  let cieSamples = array<vec4<f32>, 15>(
+    vec4<f32>(0.38000000, 0.000101768, 0.000126361, 0.003342521),
+    vec4<f32>(0.40857143, 0.041103205, 0.002427076, 0.171379214),
+    vec4<f32>(0.43714286, 0.345374934, 0.016094588, 1.694938040),
+    vec4<f32>(0.46571429, 0.231835560, 0.073791241, 1.489866541),
+    vec4<f32>(0.49428571, 0.013837655, 0.256028875, 0.368248028),
+    vec4<f32>(0.52285714, 0.091902156, 0.761894395, 0.070519050),
+    vec4<f32>(0.55142857, 0.457097020, 0.996550478, 0.007724523),
+    vec4<f32>(0.58000000, 0.920460516, 0.872133791, 0.000450337),
+    vec4<f32>(0.60857143, 1.014443172, 0.519281599, 0.000013971),
+    vec4<f32>(0.63714286, 0.510206266, 0.198321624, 0.000000231),
+    vec4<f32>(0.66571429, 0.109492500, 0.046801697, 0.000000002),
+    vec4<f32>(0.69428571, 0.010026499, 0.006733690, 0.000000000),
+    vec4<f32>(0.72285714, 0.000391779, 0.000589022, 0.000000000),
+    vec4<f32>(0.75142857, 0.000006532, 0.000031314, 0.000000000),
+    vec4<f32>(0.78000000, 0.000000023, 0.000000506, 0.000000000)
+  );
+  let temperature = max(temperatureKelvin, 2.0);
+  var xyz = vec3<f32>(0.0);
+  for (var sampleIndex: i32 = 0; sampleIndex < 15; sampleIndex = sampleIndex + 1) {
+    let sample = cieSamples[sampleIndex];
+    let wavelength = sample.x;
+    let wavelength2 = wavelength * wavelength;
+    let wavelength5 = wavelength2 * wavelength2 * wavelength;
+    let exponent = min(80.0, 14387.77 / (temperature * wavelength));
+    let spectralRadiance = 1.0 / (
+      wavelength5 * max(exp(exponent) - 1.0, 1.0e-12)
+    );
+    xyz = xyz + spectralRadiance * sample.yzw;
+  }
+  let linearSrgb = vec3<f32>(
+     3.2406 * xyz.x - 1.5372 * xyz.y - 0.4986 * xyz.z,
+    -0.9689 * xyz.x + 1.8758 * xyz.y + 0.0415 * xyz.z,
+     0.0557 * xyz.x - 0.2040 * xyz.y + 1.0570 * xyz.z
+  );
+  let referenceRatio = 6500.0 / temperature;
+  let referenceRatio2 = referenceRatio * referenceRatio;
+  let bolometricNormalization = (
+    referenceRatio2 * referenceRatio2 / 1.3256608705
+  );
+  // A small channel calibration makes the 6500 K reference neutral in the
+  // renderer's D65 linear-sRGB working space without changing temperature
+  // ordering or inventing identity colours for the two equal-mass disks.
+  return max(
+    linearSrgb
+      * bolometricNormalization
+      * vec3<f32>(0.9662282813, 1.0159099238, 0.9498410897),
+    vec3<f32>(0.0)
+  );
+}
+
+fn smootherstep01(value: f32) -> f32 {
+  let x = clamp(value, 0.0, 1.0);
+  return x * x * x * (x * (x * 6.0 - 15.0) + 10.0);
+}
+
+fn annulusEdgeCoverage(
+  radius: f32,
+  innerRadius: f32,
+  outerRadius: f32,
+  bodyMassM: f32
+) -> f32 {
+  let width = max(outerRadius - innerRadius, 1.0e-6);
+  let edgeWidth = min(
+    max(0.12 * width, 0.08 * bodyMassM),
+    0.45 * width
+  );
+  let innerCoverage = smootherstep01((radius - innerRadius) / edgeWidth);
+  let outerCoverage = smootherstep01((outerRadius - radius) / edgeWidth);
+  return innerCoverage * outerCoverage;
+}
+
+fn spatialDot(fields: ADMFields, a: vec3<f32>, b: vec3<f32>) -> f32 {
+  return dot(a, fields.spatialMetric * b);
+}
+
+// Relativistically compose the hole's Eulerian velocity with a circular
+// orbital velocity supplied in the hole's instantaneous rest frame. The
+// spatial metric defines all local dot products. Invalid/superluminal states
+// fail closed in diskTransferAtIntersection().
+fn composeEulerianVelocities(
+  fields: ADMFields,
+  bodyCoordinateVelocity: vec3<f32>,
+  orbitalRestVelocity: vec3<f32>
+) -> vec3<f32> {
+  let bodyVelocity = (
+    bodyCoordinateVelocity + fields.shift
+  ) / max(fields.lapse, 1.0e-6);
+  let bodySpeedSquared = spatialDot(fields, bodyVelocity, bodyVelocity);
+  if (bodySpeedSquared <= 1.0e-12) {
+    return orbitalRestVelocity;
+  }
+  if (bodySpeedSquared >= 0.999) {
+    return vec3<f32>(1.0e19);
+  }
+  let projection = spatialDot(
+    fields,
+    orbitalRestVelocity,
+    bodyVelocity
+  );
+  let parallel = bodyVelocity * (projection / bodySpeedSquared);
+  let perpendicular = orbitalRestVelocity - parallel;
+  let gammaBody = inverseSqrt(1.0 - bodySpeedSquared);
+  let denominator = 1.0 + projection;
+  if (!finiteScalar(denominator) || denominator <= 1.0e-5) {
+    return vec3<f32>(1.0e19);
+  }
+  return (bodyVelocity + parallel + perpendicular / gammaBody) / denominator;
+}
+
+fn invalidDiskTransfer() -> DiskTransferSample {
+  var result: DiskTransferSample;
+  result.radiance = vec3<f32>(0.0);
+  result.opacity = 1.0;
+  result.valid = 0.0;
+  return result;
+}
+
+fn wrapDiskPatternAngle(angle: f32) -> f32 {
+  return TWO_PI * fract(angle / TWO_PI);
+}
+
+// Bounded analytic surface modulation. A pure m=2 term with amplitude 0.16 is
+// locked to the instantaneous binary axis. Five zero-mean emissivity modes
+// have total amplitude 0.09 and use wrapped pattern phases calibrated to the
+// Kepler frequency at the zero-torque flux peak. The wrap is continuous under
+// every integer mode and prevents the radial phase from accumulating an
+// unbounded time*dOmega/dr winding over the 9,330 M protocol. This is a
+// deterministic finite-correlation emissivity proxy, not evolved GRMHD matter.
+// It changes dissipated flux only; geometry, velocity, optical depth, metric,
+// and ray paths remain unchanged. The analytic mean is exactly 1 and the
+// multiplier remains in [0.75, 1.25] without a clipping bias.
+fn analyticDiskSurfaceStructure(
+  restPosition: vec3<f32>,
+  normalInput: vec3<f32>,
+  binaryAxisInput: vec3<f32>,
+  radius: f32,
+  innerRadius: f32,
+  bodyMassM: f32
+) -> f32 {
+  let normal = safeNormalize(normalInput);
+  let radial = restPosition / max(radius, 1.0e-6);
+  var binaryAxis = binaryAxisInput
+    - normal * dot(binaryAxisInput, normal);
+  if (length(binaryAxis) <= 1.0e-6) {
+    binaryAxis = cross(normal, vec3<f32>(1.0, 0.0, 0.0));
+    if (length(binaryAxis) <= 1.0e-6) {
+      binaryAxis = cross(normal, vec3<f32>(0.0, 0.0, 1.0));
+    }
+  }
+  let axisX = safeNormalize(binaryAxis);
+  let axisY = safeNormalize(cross(normal, axisX));
+  let azimuth = atan2(dot(radial, axisY), dot(radial, axisX));
+  let logarithmicRadius = log(max(radius / max(innerRadius, 1.0e-5), 1.0));
+  let tidal = 0.16 * cos(
+    2.0 * (azimuth - 0.42 * logarithmicRadius)
+  );
+  let referenceRadius = (49.0 / 36.0) * innerRadius;
+  let referenceRadius3 = max(
+    referenceRadius * referenceRadius * referenceRadius,
+    1.0e-8
+  );
+  let omegaPeak = sqrt(max(bodyMassM, 1.0e-6) / referenceRadius3);
+  let time = params.spacetimeControl.x;
+  let phase5 = wrapDiskPatternAngle(0.82 * omegaPeak * time);
+  let phase9 = wrapDiskPatternAngle(0.93 * omegaPeak * time);
+  let phase14 = wrapDiskPatternAngle(1.04 * omegaPeak * time);
+  let phase21 = wrapDiskPatternAngle(1.13 * omegaPeak * time);
+  let phase31 = wrapDiskPatternAngle(1.21 * omegaPeak * time);
+  let emissivityTexture =
+      0.032 * sin(5.0 * (azimuth - phase5) + 1.2 * logarithmicRadius)
+    + 0.024 * sin(9.0 * (azimuth - phase9) - 2.1 * logarithmicRadius + 1.7)
+    + 0.016 * sin(14.0 * (azimuth - phase14) + 3.6 * logarithmicRadius + 3.1)
+    + 0.010 * sin(21.0 * (azimuth - phase21) - 5.4 * logarithmicRadius + 0.8)
+    + 0.008 * sin(31.0 * (azimuth - phase31) + 7.1 * logarithmicRadius + 2.4);
+  return 1.0 + tidal + emissivityTexture;
+}
+
+fn diskTransferAtIntersection(
+  intersection: DiskIntersection,
+  normalInput: vec3<f32>,
+  binaryAxis: vec3<f32>,
+  bodyVelocity: vec3<f32>,
+  bodyMassM: f32,
+  innerRadius: f32,
+  outerRadius: f32,
+  eddingtonRatio: f32,
+  activeWeight: f32,
+  rotationSign: f32,
+  momentum: vec3<f32>,
+  conservedEnergy: f32,
+  observerFrequency: f32,
+  capturePadding: f32
+) -> DiskTransferSample {
+  var invalid = invalidDiskTransfer();
+  if (intersection.valid < 0.5) {
+    invalid.opacity = 0.0;
+    return invalid;
+  }
+  let fields = sampleSpacetime(
+    params.spacetimeControl.x,
+    intersection.position
+  );
+  // Direct evaluation at the event orders a disk crossing against capture
+  // without paying for an additional metric sample on segments with no hit.
+  if (
+    fields.valid < 0.5
+    || fields.horizonDistance <= capturePadding
+    || bodyMassM <= 0.0
+    || eddingtonRatio <= 0.0
+    || activeWeight <= 0.0
+  ) {
+    return invalid;
+  }
+
+  let normal = safeNormalize(normalInput);
+  let radial = intersection.restPosition / max(intersection.radius, 1.0e-6);
+  var tangent = rotationSign * cross(normal, radial);
+  let tangentNormSquared = spatialDot(fields, tangent, tangent);
+  if (!finiteScalar(tangentNormSquared) || tangentNormSquared <= 1.0e-10) {
+    return invalid;
+  }
+  tangent = tangent * inverseSqrt(tangentNormSquared);
+
+  // Schwarzschild circular-orbit speed measured by a local static observer.
+  // The CPU model supplies r >= 6m; retaining the explicit denominator makes
+  // malformed states fail rather than silently manufacture a subluminal disk.
+  let orbitalDenominator = intersection.radius - 2.0 * bodyMassM;
+  if (orbitalDenominator <= 0.0) {
+    return invalid;
+  }
+  let orbitalSpeedSquared = bodyMassM / orbitalDenominator;
+  if (
+    !finiteScalar(orbitalSpeedSquared)
+    || orbitalSpeedSquared <= 0.0
+    || orbitalSpeedSquared >= 0.95
+  ) {
+    return invalid;
+  }
+  let orbitalVelocity = tangent * sqrt(orbitalSpeedSquared);
+  let emitterVelocity = composeEulerianVelocities(
+    fields,
+    bodyVelocity,
+    orbitalVelocity
+  );
+  let emitterSpeedSquared = spatialDot(
+    fields,
+    emitterVelocity,
+    emitterVelocity
+  );
+  if (
+    !finiteVector(emitterVelocity)
+    || !finiteScalar(emitterSpeedSquared)
+    || emitterSpeedSquared < 0.0
+    || emitterSpeedSquared >= 0.999
+  ) {
+    return invalid;
+  }
+  let emitterGamma = inverseSqrt(1.0 - emitterSpeedSquared);
+  let emitterTime = emitterGamma / max(fields.lapse, 1.0e-6);
+  let emitterSpatial = emitterGamma * (
+    emitterVelocity - fields.shift / max(fields.lapse, 1.0e-6)
+  );
+  let emitterFrequency = (
+    conservedEnergy * emitterTime - dot(momentum, emitterSpatial)
+  );
+  if (
+    !finiteScalar(emitterFrequency)
+    || emitterFrequency <= 1.0e-6
+    || !finiteScalar(observerFrequency)
+    || observerFrequency <= 0.0
+  ) {
+    return invalid;
+  }
+  let rawFrequencyShift = observerFrequency / emitterFrequency;
+  if (!finiteScalar(rawFrequencyShift) || rawFrequencyShift <= 0.0) {
+    return invalid;
+  }
+  // Bound only the display-oriented RGB chromaticity. The invariant
+  // bolometric amplitude below uses the unmodified frequency ratio, so g^4 is
+  // never silently replaced by a clipped transfer factor.
+  let chromaticFrequencyShift = clamp(rawFrequencyShift, 0.02, 8.0);
+
+  let x = innerRadius / max(intersection.radius, innerRadius);
+  let fluxRaw = x * x * x * max(1.0 - sqrt(x), 0.0);
+  let xPeak = 36.0 / 49.0;
+  let fluxPeak = xPeak * xPeak * xPeak * (1.0 - sqrt(xPeak));
+  let fluxShape = max(fluxRaw / fluxPeak, 0.0);
+  let edgeCoverage = annulusEdgeCoverage(
+    intersection.radius,
+    innerRadius,
+    outerRadius,
+    bodyMassM
+  );
+  let surfaceStructure = analyticDiskSurfaceStructure(
+    intersection.restPosition,
+    normal,
+    binaryAxis,
+    intersection.radius,
+    innerRadius,
+    bodyMassM
+  );
+  let structuredFluxShape = fluxShape * surfaceStructure;
+  let totalMassSolar = max(params.resolutionTimeMass.w, 1.0);
+  let bodyMassSolar = max(totalMassSolar * bodyMassM, 1.0);
+  let thermalScale = max(params.sceneDiskControl.z, 1.0e-4);
+  let peakTemperature = 1.43e5 * pow(
+    eddingtonRatio * 1.0e8 / bodyMassSolar,
+    0.25
+  );
+  let emittedTemperature = max(
+    100.0,
+    thermalScale * peakTemperature
+      * pow(max(structuredFluxShape, 1.0e-12), 0.25)
+  );
+
+  let normalMetricNorm = sqrt(max(spatialDot(fields, normal, normal), 1.0e-10));
+  let metricUnitNormal = normal / normalMetricNorm;
+  let muEmitter = clamp(
+    abs(dot(momentum, metricUnitNormal)) / emitterFrequency,
+    0.03,
+    1.0
+  );
+  let peakRadius = (49.0 / 36.0) * innerRadius;
+  let tauPeak = max(params.sceneDiskControl.w, 0.0);
+  let tauFace = tauPeak
+    * pow(max(intersection.radius / max(peakRadius, 1.0e-5), 0.1), -0.60);
+  let lineOfSightTau = min(tauFace / muEmitter, 30.0);
+  let opaqueSurfaceFraction = clamp(
+    1.0 - exp(-lineOfSightTau),
+    0.0,
+    1.0
+  );
+  // activeWeight and the C2 radial edge are covering fractions. Applying
+  // their product once to opacity makes both emission and occultation fade
+  // linearly instead of accidentally squaring the transition in optically
+  // thin edge pixels.
+  let opacity = clamp(
+    activeWeight * edgeCoverage * opaqueSurfaceFraction,
+    0.0,
+    1.0
+  );
+  let limbDarkening = (1.0 + 2.06 * muEmitter) / 3.06;
+  let g2 = rawFrequencyShift * rawFrequencyShift;
+  let bolometricTransfer = g2 * g2;
+  let thermalFluxScale = thermalScale * thermalScale
+    * thermalScale * thermalScale;
+  // The bolometric surface flux retains T_eff^4 proportional to
+  // (Mdot / M^2): for an Eddington-scaled rate this is eddingtonRatio /
+  // bodyMassSolar, not rate alone. activeWeight and edgeCoverage are applied
+  // once through opacity above rather than being multiplied into the source.
+  let intrinsicFlux = eddingtonRatio * 1.0e8 / bodyMassSolar
+    * structuredFluxShape * thermalFluxScale;
+  // The fixed gain anchors a 6500 K visible blackbody to the shared linear-HDR
+  // scene scale. The spectral function retains the temperature-dependent
+  // visible fraction, so UV-dominated hot disks no longer map all bolometric
+  // power into a featureless white surface. control.z remains a physical
+  // thermal normalisation with baseline 1, not a per-scene exposure.
+  let visibleSceneGain = 4200.0;
+  let radiance = visibleBlackbodyLinearSrgbPerBolometric(
+    emittedTemperature * chromaticFrequencyShift
+  )
+    * intrinsicFlux * bolometricTransfer * limbDarkening * visibleSceneGain;
+  if (!finiteVector(radiance) || !finiteScalar(opacity)) {
+    return invalid;
+  }
+  var result: DiskTransferSample;
+  result.radiance = max(radiance, vec3<f32>(0.0));
+  result.opacity = opacity;
+  result.valid = 1.0;
+  return result;
+}
+
+fn applyDiskIntersection(
+  ray: RayResult,
+  intersection: DiskIntersection,
+  normal: vec3<f32>,
+  binaryAxis: vec3<f32>,
+  bodyVelocity: vec3<f32>,
+  bodyMassM: f32,
+  innerRadius: f32,
+  diskParameters: vec4<f32>,
+  momentum: vec3<f32>,
+  conservedEnergy: f32,
+  observerFrequency: f32,
+  capturePadding: f32
+) -> RayResult {
+  var result = ray;
+  if (intersection.valid < 0.5 || result.diskTransmittance <= 1.0e-5) {
+    return result;
+  }
+  let sample = diskTransferAtIntersection(
+    intersection,
+    normal,
+    binaryAxis,
+    bodyVelocity,
+    bodyMassM,
+    innerRadius,
+    diskParameters.x,
+    diskParameters.y,
+    diskParameters.z,
+    diskParameters.w,
+    momentum,
+    conservedEnergy,
+    observerFrequency,
+    capturePadding
+  );
+  if (sample.valid < 0.5) {
+    // A real geometric interception with invalid local transfer must block the
+    // unknown background instead of becoming a fabricated transparent gap.
+    result.diskTransmittance = 0.0;
+    result.diskTransferFailure = 1.0;
+    return result;
+  }
+  result.diskRadiance = result.diskRadiance
+    + result.diskTransmittance * sample.radiance * sample.opacity;
+  result.diskTransmittance = result.diskTransmittance * (1.0 - sample.opacity);
+  return result;
+}
+
+fn accumulateDualDiskEmission(
+  ray: RayResult,
+  segmentStart: vec3<f32>,
+  segmentEnd: vec3<f32>,
+  momentum: vec3<f32>,
+  conservedEnergy: f32,
+  observerFrequency: f32,
+  capturePadding: f32
+) -> RayResult {
+  var result = ray;
+  if (
+    params.sceneDiskControl.x < 0.5
+    || result.diskTransmittance <= 1.0e-5
+  ) {
+    return result;
+  }
+  let hitA = segmentDiskIntersection(
+    segmentStart,
+    segmentEnd,
+    params.bodyAPositionMass.xyz,
+    params.bodyAVelocityActive.xyz,
+    params.diskANormalInner.xyz,
+    params.diskANormalInner.w,
+    params.diskAOuterAccretionWeight.x,
+    params.diskAOuterAccretionWeight.z
+  );
+  let hitB = segmentDiskIntersection(
+    segmentStart,
+    segmentEnd,
+    params.bodyBPositionMass.xyz,
+    params.bodyBVelocityActive.xyz,
+    params.diskBNormalInner.xyz,
+    params.diskBNormalInner.w,
+    params.diskBOuterAccretionWeight.x,
+    params.diskBOuterAccretionWeight.z
+  );
+  // Apply both intersections in observer-to-source order. The first surface's
+  // finite opacity attenuates the second, providing mutual occlusion without a
+  // screen-space mask. Invalid entries carry fraction 2 and naturally sort last.
+  let firstIsA = hitA.fraction <= hitB.fraction;
+  if (firstIsA) {
+    result = applyDiskIntersection(
+      result, hitA, params.diskANormalInner.xyz,
+      params.bodyBPositionMass.xyz - params.bodyAPositionMass.xyz,
+      params.bodyAVelocityActive.xyz, params.bodyAPositionMass.w,
+      params.diskANormalInner.w, params.diskAOuterAccretionWeight,
+      momentum, conservedEnergy,
+      observerFrequency, capturePadding
+    );
+    result = applyDiskIntersection(
+      result, hitB, params.diskBNormalInner.xyz,
+      params.bodyAPositionMass.xyz - params.bodyBPositionMass.xyz,
+      params.bodyBVelocityActive.xyz, params.bodyBPositionMass.w,
+      params.diskBNormalInner.w, params.diskBOuterAccretionWeight,
+      momentum, conservedEnergy,
+      observerFrequency, capturePadding
+    );
+  } else {
+    result = applyDiskIntersection(
+      result, hitB, params.diskBNormalInner.xyz,
+      params.bodyAPositionMass.xyz - params.bodyBPositionMass.xyz,
+      params.bodyBVelocityActive.xyz, params.bodyBPositionMass.w,
+      params.diskBNormalInner.w, params.diskBOuterAccretionWeight,
+      momentum, conservedEnergy,
+      observerFrequency, capturePadding
+    );
+    result = applyDiskIntersection(
+      result, hitA, params.diskANormalInner.xyz,
+      params.bodyBPositionMass.xyz - params.bodyAPositionMass.xyz,
+      params.bodyAVelocityActive.xyz, params.bodyAPositionMass.w,
+      params.diskANormalInner.w, params.diskAOuterAccretionWeight,
+      momentum, conservedEnergy,
+      observerFrequency, capturePadding
+    );
+  }
+  return result;
+}
+`;
+
+function createStrongFieldBinaryTraceFragmentWGSL({ dualDisk = false } = {}) {
+  const diskParams = dualDisk ? /* wgsl */ `
+  sceneDiskControl: vec4<f32>,
+  diskANormalInner: vec4<f32>,
+  diskAOuterAccretionWeight: vec4<f32>,
+  diskBNormalInner: vec4<f32>,
+  diskBOuterAccretionWeight: vec4<f32>,` : "";
+  const diskFunctions = dualDisk ? STRONG_FIELD_DUAL_DISK_FUNCTIONS_WGSL : "";
+  const diskResultFields = dualDisk ? /* wgsl */ `
+  diskRadiance: vec3<f32>,
+  diskTransmittance: f32,
+  diskTransferFailure: f32,` : "";
+  const diskResultInitialization = dualDisk ? /* wgsl */ `
+  result.diskRadiance = vec3<f32>(0.0);
+  result.diskTransmittance = 1.0;
+  result.diskTransferFailure = 0.0;` : "";
+  const diskBeforeDrift = dualDisk ? /* wgsl */ `
+    let previousPosition = position;` : "";
+  const diskStep = dualDisk ? /* wgsl */ `
+    result = accumulateDualDiskEmission(
+      result,
+      previousPosition,
+      position,
+      momentum,
+      conservedEnergy,
+      observerQ,
+      capturePadding
+    );` : "";
+  const capturedPhotographicResult = dualDisk
+    ? "return result.diskRadiance;"
+    : "return vec3<f32>(0.0);";
+  const unresolvedPhotographicResult = dualDisk ? /* wgsl */ `return result.diskRadiance
+      + result.diskTransmittance * vec3<f32>(0.050, 0.036, 0.024)
+      * unresolvedLevel * hatch;`
+    : /* wgsl */ `return vec3<f32>(0.050, 0.036, 0.024)
+      * unresolvedLevel * hatch;`;
+  const escapedPhotographicResult = dualDisk ? /* wgsl */ `return result.diskRadiance
+    + result.diskTransmittance * sampleEnvironment(result.escapeDirection)
+      * shiftRadiance;`
+    : "return sampleEnvironment(result.escapeDirection) * shiftRadiance;";
+  return /* wgsl */ `
 diagnostic(off, derivative_uniformity);
 
 const PI: f32 = 3.14159265358979323846;
@@ -229,7 +991,7 @@ struct Params {
   sceneStrongIntegrator: vec4<f32>,
   sceneStrongDomain: vec4<f32>,
   sceneStrongDiagnostics: vec4<f32>,
-  sceneStrongQuality: vec4<f32>,
+  sceneStrongQuality: vec4<f32>,${diskParams}
 };
 
 struct FragmentInput {
@@ -312,7 +1074,7 @@ struct RayResult {
   hamiltonianResidual: f32,
   iterations: f32,
   minimumHorizonDistance: f32,
-  terminationReason: f32,
+  terminationReason: f32,${diskResultFields}
 };
 
 @group(0) @binding(0) var<uniform> params: Params;
@@ -1106,9 +1868,9 @@ fn unresolvedResult() -> RayResult {
   result.hamiltonianResidual = 1.0;
   result.iterations = 0.0;
   result.minimumHorizonDistance = 1.0e6;
-  result.terminationReason = 0.0;
+  result.terminationReason = 0.0;${diskResultInitialization}
   return result;
-}
+}${diskFunctions}
 
 fn spatialMetricDot(
   fields: ADMFields,
@@ -1494,8 +2256,8 @@ fn traceStrongField(screen: vec2<f32>, tanHalfFov: f32) -> RayResult {
       return result;
     }
     momentum = momentum * rawEnergyScale;
-    let driftKinematics = hamiltonianKinematics(fields, momentum);
-    position = position - acceptedStepSize * driftKinematics.velocity;
+    let driftKinematics = hamiltonianKinematics(fields, momentum);${diskBeforeDrift}
+    position = position - acceptedStepSize * driftKinematics.velocity;${diskStep}
     lookback = lookback + acceptedStepSize;
     if (!finiteVector(position) || !finiteVector(momentum)) {
       result.terminationReason = 2.0;
@@ -1694,7 +2456,7 @@ fn shadeResult(result: RayResult, pixel: vec2<f32>) -> vec3<f32> {
     return viridis(result.iterations / f32(MAX_STRONG_STEPS));
   }
   if (result.outcome == RAY_CAPTURED) {
-    return vec3<f32>(0.0);
+    ${capturedPhotographicResult}
   }
   if (result.outcome == RAY_UNRESOLVED) {
     // Keep the failure mask visible without leaking a saturated diagnostic
@@ -1710,14 +2472,13 @@ fn shadeResult(result: RayResult, pixel: vec2<f32>) -> vec3<f32> {
       0.02,
       0.25
     );
-    return vec3<f32>(0.050, 0.036, 0.024)
-      * unresolvedLevel * hatch;
+    ${unresolvedPhotographicResult}
   }
   let shiftRadiance = pow(
     clamp(result.frequencyShift, 0.20, 2.5),
     3.0
   );
-  return sampleEnvironment(result.escapeDirection) * shiftRadiance;
+  ${escapedPhotographicResult}
 }
 
 fn radicalInverse(indexInput: u32, base: u32) -> f32 {
@@ -1779,6 +2540,13 @@ fn fsMain(input: FragmentInput) -> @location(0) vec4<f32> {
   return vec4<f32>(max(colour, vec3<f32>(0.0)), 1.0);
 }
 `;
+}
+
+export const strongFieldBinaryTraceFragmentWGSL =
+  createStrongFieldBinaryTraceFragmentWGSL();
+
+export const strongFieldBinaryDualDiskTraceFragmentWGSL =
+  createStrongFieldBinaryTraceFragmentWGSL({ dualDisk: true });
 
 export const strongFieldBinaryShaderBundle = Object.freeze({
   id: "binary-strong-field-v1",
@@ -1834,6 +2602,84 @@ export const strongFieldBinaryShaderBundle = Object.freeze({
     requiredFloatCount: STRONG_FIELD_UNIFORM_FLOATS,
     writeWebGPUExtras(tail, frame) {
       writeStrongFieldUniformTail(tail, frame);
+    },
+    createWebGLExtras(THREE) {
+      return {
+        uSceneBinaryState: { value: new THREE.Vector4() },
+        uSceneBinaryMasses: { value: new THREE.Vector4() },
+      };
+    },
+    writeWebGLExtras(uniforms, frame) {
+      const state = finiteVec4(
+        frame?.sceneBinaryState,
+        "sceneBinaryState",
+      );
+      const masses = finiteVec4(
+        frame?.sceneBinaryMasses,
+        "sceneBinaryMasses",
+      );
+      uniforms.uSceneBinaryState.value.fromArray(state);
+      uniforms.uSceneBinaryMasses.value.fromArray(masses);
+    },
+  }),
+});
+
+export const strongFieldBinaryDualDiskShaderBundle = Object.freeze({
+  id: "binary-dual-disk-strong-field-v1",
+  labels: Object.freeze({
+    uniforms: "Strong-field binary frame plus analytic dual thin-disk uniforms",
+    trace: "WebGPU 3+1 Hamiltonian tracer with frame-frozen dual thin-disk transfer",
+    webglFallback: "Legacy WebGL2 weak-field vacuum fallback without disk parity",
+  }),
+  backendPolicy: Object.freeze({
+    production: "webgpu",
+    webgpuModel: "boosted-superposed-kerr-schild-fast-light-plus-analytic-thin-disks",
+    webgl2Model: "legacy-weak-field-fast-light-vacuum",
+    physicalParityRequired: false,
+    matterBackreaction: false,
+    scientificStatus: "analytic thin-disk transfer with a bounded phenomenological emissivity texture; not GRMHD or NR matter evolution",
+  }),
+  accumulation: Object.freeze({
+    mode: "linear-hdr-running-average-v1",
+    sampleIndexField: "strongFieldQuality.accumulationIndex",
+    resetField: "strongFieldQuality.historyReset",
+    jitter: "deterministic-bounded-halton-2-3",
+  }),
+  wgsl: Object.freeze({
+    trace: strongFieldBinaryDualDiskTraceFragmentWGSL,
+    traceSpecializations: Object.freeze([
+      Object.freeze({
+        id: "binary",
+        constants: Object.freeze({ SPACETIME_PHASE_MODE: 0 }),
+      }),
+      Object.freeze({
+        id: "transition",
+        constants: Object.freeze({ SPACETIME_PHASE_MODE: 2 }),
+      }),
+      Object.freeze({
+        id: "remnant",
+        constants: Object.freeze({ SPACETIME_PHASE_MODE: 1 }),
+      }),
+    ]),
+    selectTraceSpecialization(frame) {
+      const blend = Number(frame?.sceneStrongFieldUniforms?.[1]);
+      if (blend === 0) {
+        return "binary";
+      }
+      if (blend === 1) {
+        return "remnant";
+      }
+      return "transition";
+    },
+  }),
+  glsl: Object.freeze({
+    // Deliberate vacuum fallback. It is surfaced as a different physical model.
+    trace: binaryTraceFragmentGLSL,
+  }),
+  uniforms: Object.freeze({
+    requiredFloatCount: STRONG_FIELD_ACCRETION_UNIFORM_FLOATS,
+    writeWebGPUExtras(tail, frame) {
+      writeStrongFieldAccretionUniformTail(tail, frame);
     },
     createWebGLExtras(THREE) {
       return {

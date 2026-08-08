@@ -99,8 +99,18 @@ test("English and Chinese catalogs have exact key parity and preserve native sky
   assert.deepEqual(catalogKeys("en"), catalogKeys("zh-CN"));
   const english = createI18n("en", null);
   const chinese = createI18n("zh-CN", null);
-  assert.equal(english.t("scene.binary"), "Live binary");
-  assert.equal(chinese.t("scene.binary"), "实时双黑洞");
+  assert.equal(english.t("scene.binary"), "Vacuum binary");
+  assert.equal(chinese.t("scene.binary"), "真空双黑洞");
+  assert.equal(english.t("scene.binaryDualDisk"), "Dual-disk binary");
+  assert.equal(chinese.t("scene.binaryDualDisk"), "双吸积盘双黑洞");
+  assert.match(
+    english.t("dualDisk.physicsHtml", { sourceLink: "SXS" }),
+    /C² transition.*strictly zero after the common horizon.*not full NR/s,
+  );
+  assert.match(
+    chinese.t("dualDisk.physicsHtml", { sourceLink: "SXS" }),
+    /C² 过渡关闭.*共同视界后严格为零.*非完整 NR/s,
+  );
   for (const translator of [english, chinese]) {
     const sky = [
       translator.t("sky.eso"),
@@ -177,7 +187,7 @@ test("document translation updates text, HTML, metadata, accessibility, and sele
 
   applyDocumentI18n(documentRef, createI18n("zh-CN", null));
   assert.equal(documentRef.documentElement.lang, "zh-CN");
-  assert.equal(text.textContent, "实时双黑洞");
+  assert.equal(text.textContent, "真空双黑洞");
   assert.match(html.innerHTML, /Schwarzschild 度规/);
   assert.match(aria.attributes.get("aria-label"), /深空观测画面/);
   assert.equal(title.attributes.get("title"), "重置观测视角");

@@ -516,10 +516,12 @@ test("diagnostic modes have stable query identities and preserve reference selec
 
 test("reference workbench keeps realtime navigation primary and advanced diagnostics layered", () => {
   const binaryPosition = indexHtml.indexOf('id="sceneBinary"');
+  const dualDiskPosition = indexHtml.indexOf('id="sceneBinaryDualDisk"');
   const singlePosition = indexHtml.indexOf('id="sceneSchwarzschild"');
   const referencePosition = indexHtml.indexOf('id="sceneTransferMap"');
   assert.ok(binaryPosition >= 0);
-  assert.ok(binaryPosition < singlePosition);
+  assert.ok(binaryPosition < dualDiskPosition);
+  assert.ok(dualDiskPosition < singlePosition);
   assert.ok(singlePosition < referencePosition);
   assert.match(indexHtml, /Schwarzschild \(non-rotating\)/);
   assert.match(indexHtml, /Kerr \(rotating remnant\)/);

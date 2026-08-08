@@ -48,6 +48,14 @@ function frame(overrides = {}) {
   };
 }
 
+function accretionUniforms() {
+  return Float32Array.of(
+    1, 0.8, 1, 1,
+    0, 1, 0, 3, 8, 0.01, 1, 1,
+    0, 1, 0, 3, 8, 0.01, 1, -1,
+  );
+}
+
 function renderHarness(overrides = {}) {
   const passes = [];
   const queueWrites = [];
@@ -238,6 +246,90 @@ test("history signature changes for every ray-domain input but not sample index"
     })),
     signature,
   );
+});
+
+test("vacuum history uses one stable missing-accretion sentinel", () => {
+  const absent = progressiveHistorySignature(frame());
+  assert.equal(
+    progressiveHistorySignature(frame({
+      sceneStrongAccretionUniforms: undefined,
+    })),
+    absent,
+  );
+  assert.equal(
+    progressiveHistorySignature(frame({
+      sceneStrongAccretionUniforms: null,
+    })),
+    absent,
+  );
+  assert.match(absent, /\|sceneStrongAccretionUniforms=vacuum$/);
+  assert.notEqual(
+    progressiveHistorySignature(frame({
+      sceneStrongAccretionUniforms: new Float32Array(20),
+    })),
+    absent,
+  );
+});
+
+test("history signature includes every dual-disk accretion scalar", () => {
+  const baseUniforms = accretionUniforms();
+  const signature = progressiveHistorySignature(frame({
+    sceneStrongAccretionUniforms: baseUniforms,
+  }));
+  for (let index = 0; index < baseUniforms.length; index += 1) {
+    const changed = baseUniforms.slice();
+    changed[index] = index === 0 ? 0 : changed[index] + 0.125;
+    assert.notEqual(
+      progressiveHistorySignature(frame({
+        sceneStrongAccretionUniforms: changed,
+      })),
+      signature,
+      `accretion uniform ${index} must invalidate history`,
+    );
+  }
+});
+
+test("dual-disk radius, accretion, weight, and active changes restart sample zero", () => {
+  const baseUniforms = accretionUniforms();
+  const changes = [
+    ["active", 0, 0],
+    ["disk A inner radius", 7, 3.25],
+    ["disk A outer radius", 8, 7.5],
+    ["disk A accretion ratio", 9, 0.02],
+    ["disk A weight", 10, 0.75],
+    ["disk B inner radius", 15, 3.25],
+    ["disk B outer radius", 16, 7.5],
+    ["disk B accretion ratio", 17, 0.02],
+    ["disk B weight", 18, 0.75],
+  ];
+
+  for (const [label, index, value] of changes) {
+    const renderer = Object.create(WebGPURenderer.prototype);
+    renderer.progressiveAccumulation = {
+      mode: "linear-hdr-running-average-v1",
+    };
+    renderer.progressiveHistoryValid = true;
+    renderer.progressiveHistorySignature = progressiveHistorySignature(frame({
+      sceneStrongAccretionUniforms: baseUniforms,
+    }));
+    renderer.progressiveHistoryEpoch = 1;
+
+    const changed = baseUniforms.slice();
+    changed[index] = value;
+    const prepared = renderer.prepareProgressiveFrame(frame({
+      sceneStrongAccretionUniforms: changed,
+      strongFieldQuality: {
+        accumulationIndex: 2,
+        accumulationWeight: 1 / 3,
+        historyEpoch: 1,
+        historyReset: false,
+      },
+    }));
+    assert.equal(prepared.state.historyReset, true, label);
+    assert.equal(prepared.state.accumulationIndex, 0, label);
+    assert.equal(prepared.state.accumulationWeight, 1, label);
+    assert.equal(prepared.frame.frame, 0, label);
+  }
 });
 
 test("renderer independently forces sample zero after a stale camera history", () => {
@@ -742,5 +834,13 @@ test("main runtime routes WebGPU failures through recovery and always reschedule
   assert.doesNotMatch(
     source,
     /webgpu\.onLost[\s\S]{0,260}showFatalError/,
+  );
+  const startPrefix = source.slice(
+    source.indexOf("async function start()"),
+    source.indexOf("activeScene = await loadRequestedScene()"),
+  );
+  assert.match(
+    startPrefix,
+    /configureSceneLinks\(requestedNavigationSceneId\(\)\)/,
   );
 });

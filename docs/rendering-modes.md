@@ -10,7 +10,8 @@ claims.
 
 | Layer | Status | What it does | Permitted claim |
 | --- | --- | --- | --- |
-| Interactive binary scene at the root URL | Implemented | Reconstructs the camera and integrates a 3+1 null Hamiltonian through a frame-frozen boosted-superposed Kerr-Schild approximation on WebGPU | Real-time approximate strong-field fast-light rendering; not NR |
+| Interactive vacuum binary scene at the root URL | Implemented | Reconstructs the camera and integrates a 3+1 null Hamiltonian through a frame-frozen boosted-superposed Kerr-Schild approximation on WebGPU, sampling the distant sky in vacuum | Real-time approximate strong-field fast-light vacuum rendering; not NR |
+| Interactive dual-disk binary scene at `?scene=binary-dual-disk` | Implemented as an independent product | Reuses the declared binary lensing path and adds two idealized geometrically thin mini-disk emission surfaces with finite analytic surface optical depth | Exploratory emission visualization; no SXS matter data, GRMHD, or self-consistent spectral radiative transfer; not full NR; post-merger emission unmodeled |
 | Interactive Schwarzschild scene at `?scene=schwarzschild` | Implemented | Reconstructs the camera and numerically traces its Schwarzschild rays on the GPU for every rendered frame | Real-time single-hole Schwarzschild visualization with an idealized disk |
 | Stationary Schwarzschild/Kerr workbench | Implemented | Plays authenticated fixed-camera analytic vacuum maps and exposes record-level diagnostics | Stationary analytic calibration, delivery validation, and regression oracle |
 | WebGL2 binary compatibility path | Implemented | Runs the previous two-centre weak-field shader when WebGPU is unavailable or forced off | Explicit weak-field preview; no physical-parity claim with WebGPU |
@@ -37,15 +38,21 @@ sky / declared emission model
 HDR or SDR display transform
 ```
 
-The root binary scene and the explicit `?scene=schwarzschild` scene recompute
-their GPU ray paths for each rendered frame; they do not look up a fixed-camera
-transfer map. The legacy `?scene=binary-approx` URL remains an alias for the
-root binary scene. Their physics are different:
+The root binary scene, independent `?scene=binary-dual-disk` scene, and explicit
+`?scene=schwarzschild` scene recompute their GPU ray paths for each rendered
+frame; they do not look up a fixed-camera transfer map. The legacy
+`?scene=binary-approx` URL remains an alias for the root vacuum binary scene.
+Their physics are different:
 
 - the Schwarzschild scene integrates a reduced null-geodesic equation;
 - the WebGPU binary scene freezes a declared boosted-superposed Kerr-Schild
   spacetime for each ray, evaluates its lapse, shift, spatial metric, and
   analytic spatial derivatives, and integrates a reduced 3+1 null Hamiltonian;
+- the dual-disk route adds two idealized thin emission surfaces to that declared
+  lensing model, closes their emission with a C² transition when Roche/ISCO
+  truncation leaves no stable mini-disk annulus, keeps it strictly zero after
+  the common horizon, and leaves post-merger emission unmodeled; it does not add
+  matter dynamics or upgrade the spacetime to full NR;
 - the WebGL2 binary fallback remains the old two-centre weak-field deflection
   and is labelled as a distinct model.
 
@@ -166,6 +173,9 @@ The repository currently provides:
 - interactive per-frame WebGPU strong-field approximate fast-light tracing for
   the root binary scene, with SXS waveform/event/remnant anchors and analytic
   renderer coordinates that exclude gauge-dependent SXS centroids;
+- an independent dual-disk route that adds two idealized Roche/ISCO-truncated
+  thin emission surfaces with finite analytic optical depth, explicitly not
+  GRMHD, self-consistent spectral radiative transfer, or post-merger emission;
 - documented past-directed ray conventions, isolated-Kerr excision semantics,
   independent analytic-limit oracles, and adaptive M3 Pro convergence tiers;
 - an explicit WebGL2 weak-field binary compatibility path;

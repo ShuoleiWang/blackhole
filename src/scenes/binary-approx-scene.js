@@ -1,6 +1,14 @@
 import { createStrongFieldOrbitRuntime } from "../strong-field-orbit.js";
-import { strongFieldBinaryShaderBundle } from "../strong-field-shaders.js";
+import {
+  strongFieldBinaryDualDiskShaderBundle,
+  strongFieldBinaryShaderBundle,
+} from "../strong-field-shaders.js";
 import { createI18n } from "../i18n.js";
+import {
+  TIDAL_TRUNCATION_FACTOR,
+  createBinaryAccretionState,
+  stableAnnulusWeight,
+} from "./binary-accretion-model.js";
 import { loadBinaryDynamics } from "./binary-dynamics-adapter.js";
 import { createPlaybackClock } from "./binary-playback-clock.js";
 
@@ -12,6 +20,26 @@ const DEG = 180 / Math.PI;
 const WAVEFORM_WIDTH = 280;
 const MAX_STRONG_FIELD_STEPS = 320;
 const STRONG_FIELD_ACCUMULATION_MODE = "linear-hdr-running-average-v1";
+const DUAL_DISK_DEFAULT_LOG_ACCRETION = -1.70;
+const DUAL_DISK_MAXIMUM_OUTER_RADIUS_M = 10;
+const DUAL_DISK_FADE_WIDTH_PER_BODY_M = 0.75;
+const DUAL_DISK_OPTICAL_DEPTH = 6;
+const SCENE_VARIANTS = Object.freeze({
+  vacuum: Object.freeze({
+    id: "binary-approx",
+    dualDisk: false,
+    rootClass: "scene-binary-approx",
+    i18nPrefix: "binary",
+    shaderBundle: strongFieldBinaryShaderBundle,
+  }),
+  "dual-disk": Object.freeze({
+    id: "binary-dual-disk",
+    dualDisk: true,
+    rootClass: "scene-binary-dual-disk",
+    i18nPrefix: "dualDisk",
+    shaderBundle: strongFieldBinaryDualDiskShaderBundle,
+  }),
+});
 const STRONG_FIELD_TIER_POLICY = Object.freeze({
   emergency: Object.freeze({
     integrator: Object.freeze([0.065, 3.50, 2.7, 0.34]),
@@ -84,6 +112,16 @@ function cross(a, b) {
 
 function scale(vector, factor) {
   return [vector[0] * factor, vector[1] * factor, vector[2] * factor];
+}
+
+function distance(a, b) {
+  return Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]);
+}
+
+function accretionPercent(rate) {
+  const percent = rate * 100;
+  const digits = percent < 0.1 ? 3 : percent < 1 ? 2 : 1;
+  return percent.toFixed(digits);
 }
 
 function waveformPath(evaluate, firstTime, finalTime) {
@@ -167,7 +205,11 @@ function restoreElement(element, snapshot) {
   }
 }
 
-export async function createBinaryApproxScene({
+export function createBinaryApproxScene(options) {
+  return createBinaryScene(options, "vacuum");
+}
+
+export async function createBinaryScene({
   document: documentRef,
   ui,
   state,
@@ -175,7 +217,11 @@ export async function createBinaryApproxScene({
   formatMass,
   formatGravitationalRadius,
   controls,
-}) {
+}, variantId = "vacuum") {
+  const variant = SCENE_VARIANTS[variantId];
+  if (!variant) {
+    throw new RangeError(`Unknown binary scene variant ${JSON.stringify(variantId)}`);
+  }
   if (
     typeof controls?.setRunning !== "function"
     || typeof controls?.requestRender !== "function"
@@ -237,6 +283,8 @@ export async function createBinaryApproxScene({
     massLabel: requiredElement(documentRef, "massLabel"),
     massValue: ui.massValue,
     accretionControl: requiredElement(documentRef, "accretionControl"),
+    accretionLabel: requiredElement(documentRef, "accretionLabel"),
+    accretionInput: ui.accretion,
     accretionValue: ui.accretionValue,
     exposureValue: ui.exposureValue,
     timeScaleValue: ui.timeScaleValue,
@@ -267,8 +315,11 @@ export async function createBinaryApproxScene({
   };
   const original = {
     documentTitle: documentRef.title,
-    rootHadClass: documentRef.documentElement.classList.contains(
-      "scene-binary-approx",
+    rootHadSharedClass: documentRef.documentElement.classList.contains(
+      "scene-binary",
+    ),
+    rootHadVariantClass: documentRef.documentElement.classList.contains(
+      variant.rootClass,
     ),
     elements: new Map(
       Object.values(elements).map((element) => [
@@ -282,6 +333,7 @@ export async function createBinaryApproxScene({
       ]),
     ),
     accretionDisabled: ui.accretion.disabled,
+    accretionValue: ui.accretion.value,
     exposureValue: ui.exposure.value,
     timeScale: {
       min: ui.timeScale.min,
@@ -294,6 +346,7 @@ export async function createBinaryApproxScene({
       distance: state.distance,
       phase: state.phase,
       orbitTilt: state.orbitTilt,
+      accretion: state.accretion,
       exposure: state.exposure,
       timeScale: state.timeScale,
     },
@@ -309,6 +362,7 @@ export async function createBinaryApproxScene({
   let actualRateMPerSecond = 0;
   let transportRevision = 0;
   let transportSignature = null;
+  let dualDiskEmissionRendered = null;
 
   const advancedDiagnosticElements = Object.freeze([
     elements.modeLookback,
@@ -334,10 +388,12 @@ export async function createBinaryApproxScene({
     // comparing the full exact signature locally.
     const signature = [
       frame.mode,
+      frame.massSolar,
       frame.exposure,
       frame.skyRotation,
       frame.accretion,
       frame.diskOuterRadius,
+      revisionVector(frame.sceneStrongAccretionUniforms),
       revisionVector(frame.sceneStrongIntegrator),
       revisionVector(frame.sceneStrongDomain),
       revisionVector(frame.sceneStrongDiagnostics),
@@ -347,6 +403,86 @@ export async function createBinaryApproxScene({
       bumpTransportRevision();
     }
     return transportRevision;
+  }
+
+  function dualDiskStateAt(strongFieldFrame, accretionRatio = state.accretion) {
+    if (!variant.dualDisk) {
+      return null;
+    }
+    const bodies = strongFieldFrame?.orbitState?.bodies;
+    if (!Array.isArray(bodies) || bodies.length !== 2) {
+      throw new Error("Dual-disk scene requires two provider-owned orbit bodies");
+    }
+    const massFractions = bodies.map((body) => Number(body.massM));
+    const separationM = distance(bodies[0].positionM, bodies[1].positionM);
+    const geometry = createBinaryAccretionState({
+      separationM,
+      massFractions,
+      maximumOuterRadiusM: DUAL_DISK_MAXIMUM_OUTER_RADIUS_M,
+    });
+    const transitionWeight = clamp(
+      Number(strongFieldFrame.uniforms?.[1]) || 0,
+      0,
+      1,
+    );
+    const rawMergerBlend = clamp(
+      Number(strongFieldFrame.orbitState.mergerBlend) || 0,
+      0,
+      1,
+    );
+    const weights = geometry.disks.map((disk) => {
+      // A common apparent horizon ends the two-body mini-disk model. The fixed
+      // equal-mass source is already tidally disrupted before this boundary,
+      // but keep the zero-after-horizon rule explicit rather than accidental.
+      if (rawMergerBlend > 0) {
+        return 0;
+      }
+      return (
+        stableAnnulusWeight(
+          disk.widthM,
+          disk.massFraction,
+          DUAL_DISK_FADE_WIDTH_PER_BODY_M,
+        )
+        * (1 - transitionWeight)
+      );
+    });
+    const rate = Number(accretionRatio);
+    if (!Number.isFinite(rate) || rate <= 0) {
+      throw new RangeError("Dual-disk accretion proxy must be finite and positive");
+    }
+    const uniforms = new Float32Array([
+      1,
+      TIDAL_TRUNCATION_FACTOR,
+      1,
+      DUAL_DISK_OPTICAL_DEPTH,
+      0, 1, 0, geometry.disks[0].innerRadiusM,
+      geometry.disks[0].outerRadiusM,
+      rate,
+      weights[0],
+      1,
+      0, 1, 0, geometry.disks[1].innerRadiusM,
+      geometry.disks[1].outerRadiusM,
+      rate,
+      weights[1],
+      1,
+    ]);
+    const maximumWeight = Math.max(...weights);
+    let emissionKey;
+    if (rawMergerBlend > 0) {
+      emissionKey = "dualDisk.readout.emissionUnmodeled";
+    } else if (maximumWeight <= 0) {
+      emissionKey = "dualDisk.readout.emissionTidallyDisrupted";
+    } else if (maximumWeight < 0.999) {
+      emissionKey = "dualDisk.readout.emissionFading";
+    } else {
+      emissionKey = "dualDisk.readout.emissionActive";
+    }
+    return Object.freeze({
+      geometry,
+      weights: Object.freeze(weights),
+      uniforms,
+      emissionKey,
+    });
   }
 
   function updateMotionButton(running) {
@@ -363,9 +499,21 @@ export async function createBinaryApproxScene({
   }
 
   function configureDiagnosticControls(strongWebGPU) {
-    elements.modeScience.textContent = strongWebGPU
-      ? i18n.t("binary.mode.sky")
-      : i18n.t("binary.mode.weakField");
+    elements.modeScience.textContent = variant.dualDisk
+      ? strongWebGPU
+        ? i18n.t("dualDisk.mode.sky")
+        : i18n.t("dualDisk.mode.weakField")
+      : strongWebGPU
+        ? i18n.t("binary.mode.sky")
+        : i18n.t("binary.mode.weakField");
+    if (variant.dualDisk && strongWebGPU) {
+      elements.modeScience.setAttribute(
+        "title",
+        i18n.t("dualDisk.mode.skyTitle"),
+      );
+    } else if (variant.dualDisk) {
+      elements.modeScience.removeAttribute("title");
+    }
     // Outcome classification and frequency shift remain part of the traced
     // ray record and the scientific reference workbench, but they are not
     // useful as primary display modes in the interactive binary scene.
@@ -406,6 +554,17 @@ export async function createBinaryApproxScene({
       "is-strong-field",
       "is-fallback",
     );
+    if (variant.dualDisk && strongWebGPU) {
+      elements.sceneStatus.classList.add("is-strong-field");
+      elements.sceneStatus.textContent = [
+        rendererView?.backend || capabilities.backend || "WebGPU",
+        i18n.t("dualDisk.initialStatus.strong"),
+        i18n.t("dualDisk.initialStatus.emission"),
+        i18n.t("dualDisk.status.tidalShutdown"),
+        i18n.t("dualDisk.initialStatus.boundary"),
+      ].join(" · ");
+      return;
+    }
     if (strongWebGPU) {
       elements.sceneStatus.classList.add("is-strong-field");
       elements.sceneStatus.textContent = [
@@ -418,6 +577,14 @@ export async function createBinaryApproxScene({
       return;
     }
     elements.sceneStatus.classList.add("is-fallback");
+    if (variant.dualDisk) {
+      elements.sceneStatus.textContent = [
+        rendererView?.backend || capabilities.backend || "WebGL2",
+        i18n.t("dualDisk.mode.weakField"),
+        i18n.t("dualDisk.initialStatus.fallback"),
+      ].join(" · ");
+      return;
+    }
     elements.sceneStatus.textContent = [
       rendererView?.backend || capabilities.backend || "WebGL2",
       i18n.t("binary.status.compatibility"),
@@ -464,7 +631,11 @@ export async function createBinaryApproxScene({
       : i18n.t("binary.playback.slowOff");
   }
 
-  function updateDynamicReadouts(sample) {
+  function updateDynamicReadouts(
+    sample,
+    strongFieldFrame = null,
+    providedDualDiskState = null,
+  ) {
     const phaseDegrees = (
       (sample.orbitalPhaseRad * DEG) % 360 + 360
     ) % 360;
@@ -482,7 +653,23 @@ export async function createBinaryApproxScene({
     } else {
       ui.observerValue.textContent = i18n.t("binary.readout.remnant");
     }
-    ui.shadowValue.textContent = regimeLabel(sample, i18n);
+    if (variant.dualDisk) {
+      const providerFrame = strongFieldFrame
+        ?? strongFieldRuntime.frameAt(sample.tM);
+      const diskState = providedDualDiskState
+        ?? dualDiskStateAt(providerFrame);
+      ui.rsValue.textContent = i18n.t("dualDisk.readout.radiiValue", {
+        radiusA: diskState.geometry.disks[0].outerRadiusM.toFixed(2),
+        radiusB: diskState.geometry.disks[1].outerRadiusM.toFixed(2),
+      });
+      ui.shadowValue.textContent = i18n.t(
+        dualDiskEmissionRendered === false
+          ? "dualDisk.readout.emissionUnavailable"
+          : diskState.emissionKey,
+      );
+    } else {
+      ui.shadowValue.textContent = regimeLabel(sample, i18n);
+    }
     elements.binaryRegime.textContent = [
       regimeLabel(sample, i18n),
       `|rh₂₂| ${sample.waveform.amplitude.toFixed(3)}`,
@@ -582,7 +769,7 @@ export async function createBinaryApproxScene({
   }
 
   return Object.freeze({
-    id: "binary-approx",
+    id: variant.id,
     qualityPolicy: Object.freeze({
       id: "m3-pro-strong-field-v1",
     }),
@@ -596,7 +783,7 @@ export async function createBinaryApproxScene({
     }),
     startsRunning,
     rendererOptions: Object.freeze({
-      shaderBundle: strongFieldBinaryShaderBundle,
+      shaderBundle: variant.shaderBundle,
     }),
     manifest,
 
@@ -617,6 +804,7 @@ export async function createBinaryApproxScene({
         throw new Error("Binary renderer capability views must be identical");
       }
       const strongWebGPU = capabilities.api === "webgpu";
+      dualDiskEmissionRendered = variant.dualDisk ? strongWebGPU : null;
       if (
         strongWebGPU
         && capabilities.progressiveAccumulation
@@ -632,6 +820,13 @@ export async function createBinaryApproxScene({
         capabilities,
         rendererView,
       );
+      ui.accretion.disabled = !variant.dualDisk || !strongWebGPU;
+      if (variant.dualDisk && !strongWebGPU) {
+        ui.accretion.setAttribute("aria-describedby", "sceneStatus");
+      } else {
+        ui.accretion.removeAttribute("aria-describedby");
+      }
+      updateDynamicReadouts(evaluate(state.time));
     },
 
     initialize() {
@@ -646,12 +841,21 @@ export async function createBinaryApproxScene({
       rateAwaitingAdvance = false;
       transportSignature = null;
       bumpTransportRevision();
-      documentRef.documentElement.classList.add("scene-binary-approx");
-      documentRef.title = i18n.t("binary.documentTitle");
+      documentRef.documentElement.classList.add(
+        "scene-binary",
+        variant.rootClass,
+      );
+      documentRef.title = i18n.t(
+        `${variant.i18nPrefix}.documentTitle`,
+      );
       state.time = playbackClock.seek(initialTime);
       state.distance = defaults.observerRadiusM;
       state.phase = 0.58;
       state.orbitTilt = initialViewLatitude;
+      if (variant.dualDisk) {
+        ui.accretion.value = DUAL_DISK_DEFAULT_LOG_ACCRETION.toFixed(2);
+        state.accretion = 10 ** Number(ui.accretion.value);
+      }
       ui.exposure.value = defaults.exposure.toFixed(2);
       state.exposure = Number(ui.exposure.value);
       ui.timeScale.min = "0";
@@ -666,20 +870,43 @@ export async function createBinaryApproxScene({
         )
       );
 
-      elements.eyebrow.textContent = i18n.t("binary.eyebrow");
-      elements.title.textContent = i18n.t("binary.title");
-      elements.observerLabel.textContent = i18n.t("binary.observerLabel");
-      elements.radiusLabel.textContent = i18n.t("binary.radiusLabel");
-      elements.shadowLabel.textContent = i18n.t("binary.segmentLabel");
-      elements.massLabel.textContent = i18n.t("binary.massLabel");
+      elements.eyebrow.textContent = i18n.t(
+        `${variant.i18nPrefix}.eyebrow`,
+      );
+      elements.title.textContent = i18n.t(`${variant.i18nPrefix}.title`);
+      elements.observerLabel.textContent = i18n.t(
+        `${variant.i18nPrefix}.observerLabel`,
+      );
+      elements.radiusLabel.textContent = i18n.t(
+        `${variant.i18nPrefix}.radiusLabel`,
+      );
+      elements.shadowLabel.textContent = i18n.t(
+        `${variant.i18nPrefix}.segmentLabel`,
+      );
+      elements.massLabel.textContent = i18n.t(
+        `${variant.i18nPrefix}.massLabel`,
+      );
+      if (variant.dualDisk) {
+        elements.accretionLabel.textContent = i18n.t(
+          "dualDisk.accretionLabel",
+        );
+      }
       elements.sceneStatus.hidden = false;
-      elements.sceneStatus.textContent = [
-        i18n.t("binary.initialStatus.strong"),
-        "boosted superposed Kerr–Schild",
-        i18n.t("binary.initialStatus.anchor"),
-        i18n.t("binary.status.fastLight"),
-        i18n.t("binary.initialStatus.fallback"),
-      ].join(" · ");
+      elements.sceneStatus.textContent = variant.dualDisk
+        ? [
+          i18n.t("dualDisk.initialStatus.strong"),
+          i18n.t("dualDisk.initialStatus.emission"),
+          i18n.t("dualDisk.status.tidalShutdown"),
+          i18n.t("dualDisk.initialStatus.boundary"),
+          i18n.t("dualDisk.initialStatus.fallback"),
+        ].join(" · ")
+        : [
+          i18n.t("binary.initialStatus.strong"),
+          "boosted superposed Kerr–Schild",
+          i18n.t("binary.initialStatus.anchor"),
+          i18n.t("binary.status.fastLight"),
+          i18n.t("binary.initialStatus.fallback"),
+        ].join(" · ");
       elements.binaryTimeline.hidden = false;
       elements.waveformLabel.innerHTML = (
         "SXS Extrapolated N=2 · (ℓ,m)=(2,2) · "
@@ -695,11 +922,18 @@ export async function createBinaryApproxScene({
       elements.desktopHint.textContent = (
         i18n.t("binary.desktopHint")
       );
-      elements.physicsNote.innerHTML = i18n.t("binary.physicsHtml", {
+      elements.physicsNote.innerHTML = i18n.t(
+        `${variant.i18nPrefix}.physicsHtml`, {
         sourceLink: '<a href="https://doi.org/10.5281/zenodo.3273935" target="_blank" rel="noreferrer">SXS:BBH:0001 Lev5</a>',
-      });
-      elements.accretionControl.setAttribute("aria-hidden", "true");
-      ui.accretion.disabled = true;
+        },
+      );
+      if (variant.dualDisk) {
+        elements.accretionControl.removeAttribute("aria-hidden");
+        ui.accretion.disabled = false;
+      } else {
+        elements.accretionControl.setAttribute("aria-hidden", "true");
+        ui.accretion.disabled = true;
+      }
       bindPlaybackControls();
       updateMotionButton(state.running);
       updateDynamicReadouts(evaluate(state.time));
@@ -732,11 +966,25 @@ export async function createBinaryApproxScene({
         );
       }
       ui.massValue.textContent = formatMass(state.massSolar);
-      ui.accretionValue.textContent = i18n.t("binary.vacuum");
+      if (variant.dualDisk) {
+        const rate = accretionPercent(state.accretion);
+        ui.accretionValue.textContent = i18n.t(
+          "dualDisk.accretionValue",
+          { rate },
+        );
+        ui.accretion.setAttribute(
+          "aria-valuetext",
+          i18n.t("dualDisk.accretionAriaValue", { rate }),
+        );
+      } else {
+        ui.accretionValue.textContent = i18n.t("binary.vacuum");
+      }
       ui.exposureValue.textContent = `${state.exposure.toFixed(2)}×`;
       ui.timeScaleValue.textContent = `${state.timeScale.toFixed(0)} M/s`;
       ui.qualityValue.textContent = `${state.quality.toFixed(2)}×`;
-      ui.rsValue.textContent = formatGravitationalRadius(state.massSolar);
+      if (!variant.dualDisk) {
+        ui.rsValue.textContent = formatGravitationalRadius(state.massSolar);
+      }
       updateDynamicReadouts(evaluate(state.time));
       return true;
     },
@@ -780,24 +1028,42 @@ export async function createBinaryApproxScene({
     extendFrame(baseFrame) {
       const sample = evaluate(state.time);
       const strongFieldFrame = strongFieldRuntime.frameAt(sample.tM);
-      updateDynamicReadouts(sample);
-      return {
-        ...baseFrame,
-        accretion: 0,
-        fov: Math.max(baseFrame.fov, defaults.fieldOfViewDeg / DEG),
-        diskOuterRadius: 0,
-        observerVelocity: [0, 0, 0],
-        observerBeta: 0,
-        sceneStrongFieldUniforms: strongFieldFrame.uniforms,
-        // Deliberate WebGL2-only compatibility payload.  The WebGPU strong
-        // tracer consumes sceneStrongFieldUniforms above and never reads these
-        // gauge-dependent SXS centroid proxies.
-        sceneBinaryState: [
+      const diskState = dualDiskStateAt(
+        strongFieldFrame,
+        baseFrame.accretion,
+      );
+      updateDynamicReadouts(sample, strongFieldFrame, diskState);
+      const providerBinaryState = variant.dualDisk
+        ? [
+          strongFieldFrame.kinematics.separationM,
+          strongFieldFrame.kinematics.orbitalPhaseRad,
+          strongFieldFrame.kinematics.transitionWeight,
+          0,
+        ]
+        : [
           sample.separationM,
           sample.orbitalPhaseRad,
           sample.renderTopologyBlend,
           0,
-        ],
+        ];
+      return {
+        ...baseFrame,
+        accretion: variant.dualDisk ? baseFrame.accretion : 0,
+        fov: Math.max(baseFrame.fov, defaults.fieldOfViewDeg / DEG),
+        diskOuterRadius: diskState
+          ? Math.max(...diskState.geometry.disks.map((disk) => disk.outerRadiusM))
+          : 0,
+        observerVelocity: [0, 0, 0],
+        observerBeta: 0,
+        sceneStrongFieldUniforms: strongFieldFrame.uniforms,
+        ...(diskState
+          ? { sceneStrongAccretionUniforms: diskState.uniforms }
+          : {}),
+        // Deliberate WebGL2-only compatibility payload. Vacuum preserves the
+        // legacy SXS-coordinate preview; the dual-disk route instead sends the
+        // same provider-owned analytic orbit used by its disk geometry. WebGPU
+        // consumes sceneStrongFieldUniforms and never reads this weak-field ABI.
+        sceneBinaryState: providerBinaryState,
         sceneBinaryMasses: binaryMasses,
       };
     },
@@ -887,19 +1153,24 @@ export async function createBinaryApproxScene({
       rateAwaitingAdvance = false;
       actualRateMPerSecond = 0;
       transportSignature = null;
+      dualDiskEmissionRendered = null;
       bumpTransportRevision();
       elements.sceneStatus.classList.remove(
         "is-strong-field",
         "is-fallback",
       );
-      if (!original.rootHadClass) {
-        documentRef.documentElement.classList.remove("scene-binary-approx");
+      if (!original.rootHadVariantClass) {
+        documentRef.documentElement.classList.remove(variant.rootClass);
+      }
+      if (!original.rootHadSharedClass) {
+        documentRef.documentElement.classList.remove("scene-binary");
       }
       documentRef.title = original.documentTitle;
       for (const [element, snapshot] of original.elements) {
         restoreElement(element, snapshot);
       }
       ui.accretion.disabled = original.accretionDisabled;
+      ui.accretion.value = original.accretionValue;
       ui.exposure.value = original.exposureValue;
       Object.assign(ui.timeScale, original.timeScale);
       Object.assign(state, original.state);

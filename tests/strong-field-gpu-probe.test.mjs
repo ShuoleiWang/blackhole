@@ -1,21 +1,37 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
+import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 import {
+  STRONG_FIELD_DUAL_DISK_GPU_PROBE_OUTPUT_BYTES,
+  STRONG_FIELD_DUAL_DISK_GPU_PROBE_SCHEMA,
   STRONG_FIELD_GPU_PROBE_OUTPUT_BYTES,
   STRONG_FIELD_GPU_PROBE_SCHEMA,
   compareStrongFieldGpuProbeRuns,
   createStrongFieldProbeGrid,
   createStrongFieldProbeUniforms,
+  decodeStrongFieldDualDiskProbeOutputs,
   decodeStrongFieldProbeOutputs,
   encodeStrongFieldProbeInputs,
   runStrongFieldGpuProbe,
+  strongFieldDualDiskGpuProbeWGSL,
   strongFieldGpuProbeWGSL,
 } from "../src/strong-field-gpu-probe.js";
 import {
+  STRONG_FIELD_ACCRETION_UNIFORM_FLOATS,
   STRONG_FIELD_UNIFORM_FLOATS,
+  strongFieldBinaryDualDiskTraceFragmentWGSL,
   strongFieldBinaryTraceFragmentWGSL,
 } from "../src/strong-field-shaders.js";
+
+const dualDiskUniforms = Object.freeze([
+  1, 0.8, 1, 6,
+  0, 1, 0, 3,
+  8.5, 0.02, 1, 1,
+  0, 1, 0, 3,
+  8.5, 0.02, 1, 1,
+]);
 
 function frame(overrides = {}) {
   const provider = new Float32Array(44);
@@ -65,6 +81,15 @@ function record(overrides = {}) {
   };
 }
 
+function dualDiskRecord(overrides = {}) {
+  return record({
+    diskTransferFailure: 0,
+    diskRadiance: [2.5, 1.25, 0.5],
+    diskTransmittance: 0.125,
+    ...overrides,
+  });
+}
+
 function run(records, overrides = {}) {
   return {
     schema: STRONG_FIELD_GPU_PROBE_SCHEMA,
@@ -76,8 +101,20 @@ function run(records, overrides = {}) {
   };
 }
 
+function dualDiskRun(records, overrides = {}) {
+  return run(records, {
+    schema: STRONG_FIELD_DUAL_DISK_GPU_PROBE_SCHEMA,
+    ...overrides,
+  });
+}
+
 test("GPU probe appends a compute entry to the exact production tracer", () => {
   assert.ok(strongFieldGpuProbeWGSL.startsWith(strongFieldBinaryTraceFragmentWGSL));
+  assert.equal(strongFieldGpuProbeWGSL.length, 50531);
+  assert.equal(
+    createHash("sha256").update(strongFieldGpuProbeWGSL).digest("hex"),
+    "b0856b7ff0c1cb10a6cb5fff97a15d7b4e95654ed376125de8c21bb9ce26226f",
+  );
   assert.match(strongFieldGpuProbeWGSL, /fn strongFieldProbeMain/);
   assert.match(
     strongFieldGpuProbeWGSL,
@@ -94,6 +131,30 @@ test("GPU probe appends a compute entry to the exact production tracer", () => {
     "terminationReason",
   ]) {
     assert.match(strongFieldGpuProbeWGSL, new RegExp(`result\\.${field}`));
+  }
+});
+
+test("dual-disk GPU probe appends readback to the exact 116-float tracer", () => {
+  assert.ok(
+    strongFieldDualDiskGpuProbeWGSL.startsWith(
+      strongFieldBinaryDualDiskTraceFragmentWGSL,
+    ),
+  );
+  assert.match(strongFieldDualDiskGpuProbeWGSL, /fn strongFieldProbeMain/);
+  assert.match(
+    strongFieldDualDiskGpuProbeWGSL,
+    /let result = traceStrongField\(probe\.xy, probe\.z\)/,
+  );
+  for (const field of [
+    "diskRadiance",
+    "diskTransmittance",
+    "diskTransferFailure",
+  ]) {
+    assert.match(
+      strongFieldDualDiskGpuProbeWGSL,
+      new RegExp(`result\\.${field}`),
+    );
+    assert.doesNotMatch(strongFieldGpuProbeWGSL, new RegExp(`result\\.${field}`));
   }
 });
 
@@ -115,6 +176,29 @@ test("probe uniforms preserve the production 96-float ABI", () => {
   assert.ok(Math.abs(controls[1] - 0.46) < 1e-7);
   assert.equal(controls[2], 3.5);
   assert.ok(Math.abs(controls[3] - 0.08) < 1e-8);
+});
+
+test("dual-disk probe parameterization preserves 96 floats then appends 20", () => {
+  const dualFrame = frame({
+    sceneStrongAccretionUniforms: dualDiskUniforms,
+  });
+  const vacuum = createStrongFieldProbeUniforms(dualFrame, {
+    resolution: [2560, 1440],
+  });
+  const dualDisk = createStrongFieldProbeUniforms(dualFrame, {
+    resolution: [2560, 1440],
+    variant: "dual-disk",
+  });
+  assert.equal(vacuum.length, STRONG_FIELD_UNIFORM_FLOATS);
+  assert.equal(dualDisk.length, STRONG_FIELD_ACCRETION_UNIFORM_FLOATS);
+  assert.deepEqual(
+    Array.from(dualDisk.slice(0, STRONG_FIELD_UNIFORM_FLOATS)),
+    Array.from(vacuum),
+  );
+  assert.deepEqual(
+    Array.from(dualDisk.slice(STRONG_FIELD_UNIFORM_FLOATS)),
+    dualDiskUniforms.map(Math.fround),
+  );
 });
 
 test("probe grid encodes the same aspect-corrected pixel centres as fsMain", () => {
@@ -155,6 +239,40 @@ test("readback decoder follows the mixed u32/f32 48-byte output ABI", () => {
   assert.ok(Math.abs(decoded.minimumHorizonDistance - 2.4) < 1e-6);
 });
 
+test("dual-disk readback appends deterministic radiance and transfer fields", () => {
+  assert.equal(STRONG_FIELD_DUAL_DISK_GPU_PROBE_OUTPUT_BYTES, 64);
+  const bytes = new ArrayBuffer(STRONG_FIELD_DUAL_DISK_GPU_PROBE_OUTPUT_BYTES);
+  const view = new DataView(bytes);
+  view.setUint32(0, 1, true);
+  [
+    [4, 0],
+    [8, 0.75],
+    [12, 72.5],
+    [16, 0.1],
+    [20, -0.2],
+    [24, 0.97],
+    [28, 4e-4],
+    [32, 63],
+    [36, 1.75],
+    [40, 1],
+    [48, 2.5],
+    [52, 1.25],
+    [56, 0.5],
+    [60, 0.125],
+  ].forEach(([offset, value]) => view.setFloat32(offset, value, true));
+  const [decoded] = decodeStrongFieldDualDiskProbeOutputs(
+    bytes,
+    [{ id: "disk-crossing" }],
+  );
+  assert.equal(decoded.id, "disk-crossing");
+  assert.equal(decoded.outcome, 1);
+  assert.equal(decoded.diskTransferFailure, 1);
+  assert.deepEqual(decoded.diskRadiance, [2.5, 1.25, 0.5]);
+  assert.equal(decoded.diskTransmittance, 0.125);
+  assert.equal(decoded.iterations, 63);
+  assert.equal(decoded.minimumHorizonDistance, 1.75);
+});
+
 test("baseline comparison accepts bounded drift and rejects every guarded channel", () => {
   const baseline = run([record()]);
   const acceptable = run([record({
@@ -183,6 +301,32 @@ test("baseline comparison accepts bounded drift and rejects every guarded channe
     assert.equal(report.pass, false, field);
     assert.ok(report.failures.some((failure) => failure.field === field), field);
   }
+});
+
+test("dual-disk baseline comparison guards radiance, transmittance, and failure", () => {
+  const baseline = dualDiskRun([dualDiskRecord()]);
+  const acceptable = dualDiskRun([dualDiskRecord({
+    diskRadiance: [2.5001, 1.25, 0.5],
+    diskTransmittance: 0.125005,
+  })]);
+  assert.equal(compareStrongFieldGpuProbeRuns(baseline, acceptable).pass, true);
+
+  for (const [field, change] of [
+    ["diskRadiance[0]", { diskRadiance: [2.6, 1.25, 0.5] }],
+    ["diskTransmittance", { diskTransmittance: 0.15 }],
+    ["diskTransferFailure", { diskTransferFailure: 1 }],
+  ]) {
+    const report = compareStrongFieldGpuProbeRuns(
+      baseline,
+      dualDiskRun([dualDiskRecord(change)]),
+    );
+    assert.equal(report.pass, false, field);
+    assert.ok(report.failures.some((failure) => failure.field === field));
+  }
+  assert.throws(
+    () => compareStrongFieldGpuProbeRuns(baseline, run([record()])),
+    /schema mismatch/,
+  );
 });
 
 test("baseline comparison refuses mismatched probe or uniform inputs", () => {
@@ -218,4 +362,53 @@ test("probe rejects non-finite pipeline specialization constants before GPU allo
     }),
     /pipeline constants must be finite numbers/,
   );
+});
+
+test("probe variants reject the wrong uniform ABI before GPU allocation", async () => {
+  const device = {
+    queue: {},
+    createBuffer() {
+      throw new Error("must not allocate");
+    },
+  };
+  const probes = createStrongFieldProbeGrid({ columns: 1, rows: 1 });
+  const dualFrame = frame({
+    sceneStrongAccretionUniforms: dualDiskUniforms,
+  });
+  const vacuum = createStrongFieldProbeUniforms(dualFrame);
+  const dualDisk = createStrongFieldProbeUniforms(dualFrame, {
+    variant: "dual-disk",
+  });
+  await assert.rejects(
+    runStrongFieldGpuProbe(device, { uniforms: dualDisk, probes }),
+    /Probe uniforms must contain 96 floats/,
+  );
+  await assert.rejects(
+    runStrongFieldGpuProbe(device, {
+      uniforms: vacuum,
+      probes,
+      variant: "dual-disk",
+    }),
+    /Probe uniforms for dual-disk must contain 116 floats/,
+  );
+  await assert.rejects(
+    runStrongFieldGpuProbe(device, {
+      uniforms: vacuum,
+      probes,
+      variant: "not-a-variant",
+    }),
+    /Unknown strong-field GPU probe variant/,
+  );
+});
+
+test("browser corpus exposes an explicit Apple Metal acceptance gate", async () => {
+  const source = await readFile(
+    new URL("./strong-field-gpu-probe-browser.mjs", import.meta.url),
+    "utf8",
+  );
+  assert.match(source, /requireAdapter/);
+  assert.match(source, /REQUIRED_ADAPTER === "apple-metal"/);
+  assert.match(source, /adapterIdentity\.includes\("apple"\)/);
+  assert.match(source, /adapterIdentity\.includes\("metal"\)/);
+  assert.match(source, /Unknown required adapter gate/);
 });

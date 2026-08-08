@@ -5,8 +5,9 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
 
 基于 **WebGPU / WebGL2** 的交互式相对论黑洞实时成像实验。根 URL 进入实时
-双黑洞场景；旧 `?scene=binary-approx` URL 继续兼容，
-`?scene=schwarzschild` 则进入交互式单黑洞场景。
+真空双黑洞场景；独立 `?scene=binary-dual-disk` 路由增加两个理想化微型盘，
+旧 `?scene=binary-approx` URL 继续兼容，`?scene=schwarzschild` 则进入交互式
+单黑洞场景。
 
 根场景现在是面向实际运行的 **WebGPU 强场双黑洞光追器**。每个像素都在
 逐帧冻结的 boosted superposed Kerr-Schild 近似度规中积分过去指向的零
@@ -23,6 +24,13 @@ WebGPU 中的黑洞位置**。
 数值相对论时空。它不读取 SXS 近区度规，不沿单条光线演化时空，也不模拟
 发光等离子体，因此不是 full-NR slow-light、GRMHD 或完整辐射转移。
 WebGL2 会明确回退到旧 weak-field 预览，不以双后端一致为由限制 WebGPU/Metal。
+
+双盘路由不会扩大上述科学声明。它在生产强场光线上加入两个逐帧冻结、有限
+表面光深的解析薄盘：ISCO、Eggleton Roche-lobe 截断、零扭矩温度轮廓、局部
+圆轨道运动、频移、`g⁴` 强度变换与相互遮挡均显式计算。它仍只是理想化发射
+处方。可见颜色通过 15 个 380–780 nm 波段样本积分 CIE 响应，不给盘指定固定
+RGB，也不再把以 UV 为主的全部功率映射成显示白色。它不是 SXS 物质数据或
+GRMHD；稳定微型盘会在合并前关闭，也不会虚构合并后的余留盘。
 
 显式 Schwarzschild 场景会在 GPU 上反向积分过去指向零测地线，并用同一条
 光路计算视界捕获、理想薄盘交点、频移和全天球银河背景透镜成像。
@@ -42,7 +50,8 @@ stationary analytic **Schwarzschild 与 Kerr** 参考图验证 transfer-map
 
 | 产品层 | 状态 | 科学边界 |
 | --- | --- | --- |
-| 根 URL 实时双黑洞 | 已实现 | WebGPU 在 boosted superposed Kerr-Schild fast-light 近似中积分 3+1 Hamiltonian 光线；SXS 只锚定波形/事件/余留体 |
+| 根 URL 实时真空双黑洞 | 已实现 | WebGPU 在 boosted superposed Kerr-Schild fast-light 近似中积分 3+1 Hamiltonian 光线；SXS 只锚定波形/事件/余留体 |
+| `?scene=binary-dual-disk` | 已实现 | 同一强场透镜加两个理想化 Roche/ISCO 截断薄微型盘；无 GRMHD、自洽光谱辐射转移或合并后发射模型 |
 | `?scene=schwarzschild` | 已实现 | 交互式单黑洞 Schwarzschild 测地线与理想薄盘 |
 | Stationary Schwarzschild/Kerr 工作台 | 已实现 | 固定相机解析真空校准、认证交付和回归 oracle；不是 merger renderer |
 | WebGL2 双黑洞回退 | 已实现 | 明确标注的旧 weak-field 兼容预览，不声称与 WebGPU 强场路径物理等价 |
@@ -108,7 +117,10 @@ python3 -m http.server 4173
 
 打开 <http://localhost:4173>。WebGPU 需要 `localhost` 或 HTTPS 安全上下文；不支持 WebGPU 时程序会自动尝试 WebGL2。
 
-根 URL 直接进入实时双黑洞场景，旧
+界面严格默认英文，可在观测面板切换为简体中文；选择会跨场景保存。
+
+根 URL 直接进入实时真空双黑洞场景；
+<http://localhost:4173/?scene=binary-dual-disk> 进入独立双微型盘发射场景。旧
 <http://localhost:4173/?scene=binary-approx> 选择同一场景。
 打开 <http://localhost:4173/?scene=schwarzschild> 可进入交互式单黑洞场景；
 打开 <http://localhost:4173/?scene=transfer-map-reference> 可进入固定相机
@@ -154,6 +166,12 @@ time；“合并慢放”可在
 `t = 0`。暂停时间线和相机后，WebGPU 会逐档细化并累积带 sub-pixel jitter
 的线性 HDR 结果。由于来源是真空双黑洞，吸积率控件会被禁用。
 
+双盘路由复用相机、SXS 证据、时间轴与强场质量策略。单盘发射参数只在
+WebGPU 启用；每个盘跟随 provider 自有的解析 body state，外缘按
+`r_out=min(10M, 0.8R_L)` 收缩，并在 Roche 截断外缘抵达 `6m_i` ISCO 时
+通过 C² 过渡关闭。WebGL2 仍是明确标注的真空 weak-field 预览，并禁用发射
+控制。
+
 Transfer-map 工作台的相机与投影固定，因此拖动、缩放、重置、运动、质量、
 吸积率和时间控件均禁用。它可以切换 Schwarzschild / Kerr 参考，并显示天空、
 outcome、回溯时间、频移、null residual 或投影误差。点击画面可检查一条
@@ -165,7 +183,9 @@ outcome、回溯时间、频移、null residual 或投影误差。点击画面�
 | URL 参数 | 用途 |
 | --- | --- |
 | 根 URL | 打开交互式 WebGPU strong-field approximate 双黑洞光追 |
+| `?lang=en\|zh-CN` | 选择英文或简体中文；严格默认英文，并在场景链接间保留选择 |
 | `?scene=binary-approx` | 根双黑洞场景的旧版兼容别名 |
+| `?scene=binary-dual-disk` | 打开带两个理想化 Roche/ISCO 截断微型盘的 WebGPU 强场双黑洞；无 GRMHD 或合并后发射模型 |
 | `?scene=schwarzschild` | 打开交互式单黑洞 Schwarzschild 测地线与理想薄盘场景 |
 | `?scene=transfer-map-reference` | 打开固定相机 stationary analytic Schwarzschild transfer-map 参考；非 NR、无吸积盘 |
 | `?scene=transfer-map-reference&reference=kerr-remnant` | 打开 stationary analytic Kerr 余留体自旋参考；非 NR、无吸积盘 |
@@ -243,7 +263,11 @@ bundles 与独立版本的辐射产品，而不会扩张 v1 32-byte vacuum ABI �
   交互与动态画质编排
 - [`src/shaders.js`](./src/shaders.js)：显式单黑洞场景的 WGSL / GLSL Schwarzschild 测地线、薄盘辐射、天空采样与后处理
 - [`src/scenes/binary-approx-scene.js`](./src/scenes/binary-approx-scene.js)：
-  根双黑洞生命周期、证据标签化 SXS 时间线、后端策略与强场逐帧参数
+  共享真空/双盘双黑洞生命周期、证据标签化 SXS 时间线、后端策略与强场逐帧参数
+- [`src/scenes/binary-dual-disk-scene.js`](./src/scenes/binary-dual-disk-scene.js)：
+  隔离的双微型盘路由包装
+- [`src/scenes/binary-accretion-model.js`](./src/scenes/binary-accretion-model.js)：
+  Eggleton 截断、Schwarzschild ISCO、零扭矩通量、温标与 C² 环带关闭的 CPU 参考
 - [`src/scenes/binary-dynamics-adapter.js`](./src/scenes/binary-dynamics-adapter.js)：失败即拒绝的浏览器加载、完整性检查和确定性动力学插值
 - [`src/scenes/binary-playback-clock.js`](./src/scenes/binary-playback-clock.js)：拖动、帧率无关播放、末尾停留、循环与仅展示慢放
 - [`src/strong-field-orbit.js`](./src/strong-field-orbit.js)：波形相位展开、
@@ -306,7 +330,8 @@ bundles 与独立版本的辐射产品，而不会扩张 v1 32-byte vacuum ABI �
 | 双黑洞波形 | CoM 修正 `Extrapolated_N2` 复数 `h22`，最大振幅对齐到 protocol `t = 0` | 远区波形不是近区度规，不能决定相机光线传播 |
 | 双黑洞合并/余留体数据 | 共同视在视界事件 `t = -6.072285 M`；精确元数据余留质量 `0.951609417715 M`、自旋向量 `(-7.29520687012e-10, 7.40468371215e-10, 0.686461676493)` | C² metric removal 是解析过渡，不是重建的 NR 视界几何或 recoil |
 | 双黑洞透镜 | 在 boosted superposed Kerr-Schild 项中逐像素积分 3+1 null Hamiltonian；合并后精确单 Kerr 极限包含 frame dragging | 强场但仍为逐帧冻结、未解约束的近似；capture surface 是 isolated-Kerr excision proxy |
-| 双黑洞发射 | 无吸积盘的真空天空透镜 | 若加入发光等离子体，需要物理气体初始条件、GRMHD 与辐射转移 |
+| 根双黑洞发射 | 无吸积盘的真空天空透镜 | 若加入发光等离子体，需要物理气体初始条件、GRMHD 与辐射转移 |
+| 双盘双黑洞发射 | 两个移动薄表面，含 `6m_i` ISCO、`0.8R_L` 潮汐截断、零扭矩温度、CIE 可见波段响应、局域频移、`g⁴`、C² 光球覆盖、有界解析潮汐结构与有限光深 | 理想化发射处方；无 SXS 物质数据、GRMHD、体吸收、偏振、自洽光谱转移或合并后盘 |
 | Stationary Schwarzschild 参考 | 固定 1024×576 解析真空 map、认证 chunk、WebGPU/WebGL2 最近 texel playback | 固定相机；无吸积盘、NR 来源、时间插值或双黑洞 slow-light 光线 |
 | Stationary Kerr 余留体参考 | 在 `a/M = 0.686461676493` 的精确解析 Kerr 度规中数值积分真空零测地线，并使用有限 BL-ZAMO、扁球 Kerr-r 捕获面、认证 playback 与诊断 | 只使用 SXS 余留体自旋参数；无 SXS 近区度规、双黑洞时间依赖、发射模型或 NR 派生像素 |
 | NR transfer-map 协议 | 版本化 schema、合成 fixture、失败即拒绝验证器、参考 consumer 与回归测试 | consumer 只由解析数据验证；仓库仍无 NR 派生 transfer map |
@@ -386,6 +411,18 @@ Lorentz covector boost、C² 余留过渡、3+1 null 构造、Hamiltonian 导数
 regularization、失败即拒绝 outcome、GPU ABI、局部 ADM 相机 tetrad、有限球
 远场接续、revision-safe 累积与单帧 WebGPU submission gate。另有测试把 SXS
 质心分离/相位改写或设置为不可读取，证明它们不能改变强场黑洞坐标。
+
+双盘套件还会检查 Eggleton 交换对称性与潮汐上限、`6m_i` ISCO、零扭矩通量
+在 `49r_in/36` 的峰值、四次根温标、C² 环带关闭、隔离的 116-float shader
+ABI、15 样本可见黑体响应、C² 光球覆盖、数值表面交点顺序与光深合成、局域
+Doppler 符号、失败即拒绝的辐射合成、64-byte 生产 GPU readback、白片与 HDR
+头间门槛、真实入口路由、共同视界关闭，以及全部盘参数对渐进历史的失效。
+
+在 M3 Pro 上启动静态服务器后，打开
+<http://localhost:4173/tests/strong-field-gpu-probe-browser.html> 可把精确的
+116-float 双盘 production WGSL 作为 WebGPU compute corpus 执行，并读回双盘
+辐射、透射率与 fail-closed 状态。它会分别验证双盘、仅 A、仅 B、重复运行和
+全暗盘；页面通过表示原生后端数值检查通过，而不是截图相似性检查。
 
 Legacy 双黑洞回归只服务 WebGL2 兼容 shader，不能验证 WebGPU 强场模型；
 反之，新 oracle 与浏览器检查通过也只验证声明的解析/数值性质，不代表 NR

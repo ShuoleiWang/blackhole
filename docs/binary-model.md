@@ -1,8 +1,10 @@
 # Binary black-hole model
 
-This document defines the scientific scope of the real-time binary black-hole
-scene at the root URL. The legacy `?scene=binary-approx` URL remains an alias;
-the interactive single-hole renderer is explicit at `?scene=schwarzschild`.
+This document defines the scientific scope of the vacuum real-time binary
+black-hole scene at the root URL and the independent idealized-emission scene
+at `?scene=binary-dual-disk`. The legacy `?scene=binary-approx` URL remains an
+alias for the vacuum scene; the interactive single-hole renderer is explicit
+at `?scene=schwarzschild`.
 This document is intentionally stricter than a visual feature list: a
 convincing image is not, by itself, evidence that the underlying spacetime is a
 solution of Einstein's field equations. The repository-wide product layers and
@@ -21,7 +23,8 @@ two development routes are defined in
 | Playback | Scrubbing, shared pause/resume, end hold/loop, and optional merger slow motion | Deterministic presentation mapping; slow motion is not gravitational time dilation |
 | WebGPU light propagation | Real-time 3+1 null-Hamiltonian integration through a frame-frozen boosted-superposed Kerr-Schild metric and analytic Kerr remnant | Approximate strong-field fast-light; **not constraint-solved NR or slow-light** |
 | WebGL2 light propagation | Retained multi-centre weak-field shader | Explicit compatibility preview with no physical-parity claim |
-| Emission | Lensed all-sky background in vacuum | No accretion disks, plasma, GRMHD, or radiative transfer |
+| Root-scene emission | Lensed all-sky background in vacuum | No accretion disks, plasma, GRMHD, or radiative transfer |
+| Independent dual-disk emission | The same declared binary lensing contract plus two idealized geometrically thin mini-disks at `?scene=binary-dual-disk` | Exploratory visualization proxy with analytic surface optical depth; no SXS matter data, GRMHD, volumetric absorption, polarization, or self-consistent spectral radiative transfer; not full NR |
 | Display | One-frame WebGPU backpressure, adaptive M3 Pro tiers, stationary FP16 accumulation, HDR/SDR output | Display fidelity and accumulation do not increase metric accuracy |
 | Transfer-map interface | Versioned schema, synthetic fixture, fail-closed validators, plus fixed-camera stationary Schwarzschild and Kerr reference consumers | The consumer is proven with analytic data only; no NR-derived transfer map or binary slow-light playback |
 
@@ -287,6 +290,76 @@ accretion disks. A defensible luminous merger would additionally require gas
 initial data, GRMHD, electron/emissivity prescriptions, and time-dependent
 polarized radiative transfer.
 
+## Independent idealized dual-disk scene
+
+The explicit `?scene=binary-dual-disk` route is a separate visualization
+product. It reuses the vacuum scene's SXS-anchored dynamics and declared
+boosted-superposed Kerr-Schild fast-light lensing, then adds two idealized,
+geometrically thin mini-disk emission surfaces. The emission control is a
+per-disk visualization proxy, not a measured Eddington ratio or an SXS/GRMHD
+matter quantity. The route therefore remains **approximate strong-field
+fast-light rendering, not full NR or self-consistent radiative transfer**.
+
+The mini-disks follow the strong-field renderer's analytic body state rather
+than the gauge-dependent SXS horizon-centroid coordinates shown in the UI.
+For body `i`, the implemented Schwarzschild thin-disk geometry is
+
+```text
+r_in,i = 6 m_i
+R_L,i / a = 0.49 q_i^(2/3) / (0.6 q_i^(2/3) + ln(1 + q_i^(1/3)))
+r_out,i = min(10 M, 0.8 R_L,i)
+```
+
+where `q_i=m_i/m_companion`, `a` is the separation produced by the same
+analytic strong-field orbit provider, and `0.8` is a declared tidal-truncation
+prescription rather than an SXS matter measurement. For this equal-mass,
+nearly nonspinning source, `r_in=3 M` and `r_out≈0.303 a`, so the stable
+mini-disk annulus disappears near `a≈9.9 M`; keeping two ordinary thin disks
+luminous all the way through contact would be less physical, not more. As the
+outer edge approaches the component ISCO, emission closes through the
+quintic C² stability weight. It is strictly zero after the common horizon. The
+scene then renders the declared vacuum remnant lensing state and reports that
+post-merger emission is unmodeled; it does not invent a remnant disk.
+
+The local zero-torque surface-flux shape is
+`F(r) ∝ (r_in/r)^3 [1-sqrt(r_in/r)]`, with its analytic maximum at
+`r=49 r_in/36`; `T_eff∝F^(1/4)` and the per-body peak temperature scales as
+`(lambda_Edd/M_i)^(1/4)`. Each accepted strong-field ray segment tests both
+moving disk planes, orders their intersections from observer to source, and
+accumulates finite optical depth. The local invariant frequency ratio is used
+for Doppler/gravitational colour shift and the bolometric transfer is `g^4`.
+The true-colour proxy samples the redshifted blackbody at 15 wavelengths from
+380–780 nm, integrates the CIE 1931 observer response, and retains the visible
+fraction of bolometric power instead of normalizing every temperature to the
+same visible luminance. Its compact table is checked against the official
+[CIE 1931 2-degree 1 nm corpus](https://cie.co.at/datatable/cie-1931-colour-matching-functions-2-degree-observer),
+independently of the production approximation. A quintic C² covering fraction
+is applied once to both emission and occultation, avoiding the previous squared
+hard-edge fade. A pure `m=2` tidal term has amplitude `0.16`; five zero-mean
+emissivity modes have total amplitude `0.09` and wrapped pattern phases
+calibrated at the zero-torque peak's Kepler frequency. Their combined analytic
+mean is one and their range is `[0.75,1.25]`, without clipping or an unbounded
+`time*dOmega/dr` winding. They alter dissipated flux only and never the ray,
+metric, velocity, or optical depth. These remain physically constrained
+analytic surfaces, not a substitute for evolving magnetized gas.
+
+The Roche-lobe fit is the smooth approximation from
+[Eggleton (1983)](https://doi.org/10.1086/160960). The decision to remove the
+stable mini-disks once tidal truncation reaches the effective ISCO follows the
+physical boundary emphasized by fully relativistic mini-disk studies such as
+[Paschalidis et al. (2021)](https://doi.org/10.3847/2041-8213/abee21). Tidal
+spiral structure and time variability motivate only the shader's explicitly
+bounded emissivity texture; they do not turn it into the hydrodynamic models of
+[Bowen et al. (2018)](https://arxiv.org/abs/1712.05451) or
+[Ryan and MacFadyen (2017)](https://arxiv.org/abs/1611.00341).
+
+Native ESO 6000×3000 and Gaia 16000×8000 panoramas retain their existing locked
+upload policy. A quality tier may change numerical convergence policy, but it
+must not silently remove disk emission or downsample those sources. WebGPU is
+the strong-field production path. Any WebGL2 presentation is an explicitly
+labelled weak-field compatibility preview with no dual-disk physical-parity
+claim.
+
 ## Explicit WebGL2 weak-field fallback
 
 The previous multi-centre potential shader remains available only when WebGPU
@@ -347,11 +420,17 @@ interpolation error, and comparisons against known limits.
 
 ## Scene routing and isolation
 
-The root URL selects the real-time binary scene. The legacy URL remains
-compatible:
+The root URL selects the real-time vacuum binary scene. The legacy vacuum URL
+remains compatible:
 
 ```text
 http://localhost:4173/?scene=binary-approx
+```
+
+The idealized dual-mini-disk visualization is isolated at:
+
+```text
+http://localhost:4173/?scene=binary-dual-disk
 ```
 
 The existing single, non-rotating Schwarzschild renderer and its geodesic
@@ -371,10 +450,11 @@ delivery, and regression oracles. See
 [`nr-transfer-map-v1.md`](./nr-transfer-map-v1.md) for its exact claims,
 nearest-texel sampling rule, and validation metrics.
 
-Each route owns its scene descriptor, shader assumptions, controls, and
-validation. Scene switching uses a page reload rather than mutating GPU
-pipelines in place, and scene lifecycles restore shared UI state when disposed.
-Changing which route owns the root URL does not merge their physical models.
+Each route owns its scene descriptor, shader assumptions, controls, scientific
+status, and validation. Scene switching uses a page reload rather than mutating
+GPU pipelines in place, and scene lifecycles restore shared UI state when
+disposed. Sharing binary dynamics or renderer infrastructure does not merge the
+vacuum and idealized-emission product claims.
 
 The validation suites have different meanings:
 
@@ -461,6 +541,7 @@ The project status is deliberately reported by layer:
 | Phase 2 SXS horizon diagnostics, waveform, events, and remnant metadata | Implemented | Source-backed evidence; centroid coordinates remain gauge-dependent |
 | Waveform-anchored analytic renderer coordinates | Implemented | Quasi-circular PN/EOB-like adapter; not calibrated EOB or SXS centroid positions |
 | Root interactive WebGPU binary scene | Implemented | Per-frame approximate strong-field fast-light Hamiltonian rays with explicit outcomes |
+| Independent dual-disk WebGPU scene | Implemented | Two idealized Roche/ISCO-truncated thin surfaces with finite analytic optical depth; no GRMHD, self-consistent spectral transfer, or post-merger disk |
 | Root WebGL2 compatibility scene | Implemented | Labelled legacy weak-field fast-light fallback |
 | Stationary Schwarzschild and Kerr reference maps and runtime consumer | Implemented | Analytic fixed-camera calibration, authenticated playback, diagnostics, and regression oracles; not NR |
 | Slow-light ray bundles through a time-dependent NR spacetime | Not implemented | No `NR-backed` pixel or image path |

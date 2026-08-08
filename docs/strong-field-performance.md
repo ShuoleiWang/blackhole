@@ -167,6 +167,48 @@ ray is painted as escaped sky -- but they are not claimed as bitwise
 equivalence. The paused fine tier reached all 32 accumulation samples; two
 full-page captures two seconds apart were byte identical after `steady`.
 
+#### Controlled dual-disk result (2026-08-08)
+
+The independent dual-disk scene was exercised on the local Apple M3 Pro at the
+native `2560x1440` internal raster. The browser reported `WebGPU · Metal`,
+`apple · metal-3`, and `HDR · P3 · FP16`; both the locked ESO `6000x3000` and
+Gaia `16000x8000` textures were observed without resolution substitution. The
+binary, transition, and remnant specializations rendered without console or
+shader-compilation errors. The paused fine dual-disk view reported about
+`3 FPS`; this is an observed UI sample rather than a throughput promise.
+
+The reusable browser probe at
+`tests/strong-field-gpu-probe-browser.html?requireAdapter=apple-metal` ran the exact 116-float production
+WGSL over a deterministic `64x36` corpus (`2,304` rays) at the same nominal
+`2560x1440` raster. The combined disks produced 79 radiative/absorptive hits,
+the A-only and B-only runs produced 47 and 32 respectively, and none reported a
+disk-transfer failure. A repeated combined run was identical in every decoded
+channel. With both weights zero, all 2,304 records had zero disk radiance,
+unit transmittance, and zero transfer failure. The ray outcomes were 2,270
+escaped and 34 fail-closed unresolved.
+
+The final probe pipeline compilation took `463.1 ms`; its queue-completion
+sample was `6.1 ms`. The warm repeated corpus compiled from cache in `1.1 ms`
+and completed in `4.7 ms`. These timings cover a small compute/readback corpus,
+not a complete displayed frame or present latency.
+
+The visible-realism pass replaced the unit-luminance three-wavelength proxy
+with a 15-sample CIE visible response and applied the C² edge/active covering
+fraction once. On the same deterministic M3 Pro corpus, maximum scene-linear
+disk radiance fell from `16.5708466` to `1.1574888`; maximum luminance was
+`0.6080606`, all 79 transfer hits remained present, all 79 retained measurable
+chromatic response, and zero records had all RGB channels at or above display
+white. There were still zero transfer failures, the repeated readback remained
+identical, and FP16 peak headroom exceeded `56,591×`. This is a radiometric
+regression gate before the shared HDR/SDR post transform, not a claim of GRMHD
+spectral accuracy.
+
+The `requireAdapter=apple-metal` query is an explicit vendor/backend gate: it
+fails before allocation unless exposed adapter metadata contains both Apple and
+Metal. The compute corpus still ends before the shared post stage; the separate
+full application smoke above is what exercised the HDR/P3 `rgba16float` canvas
+and native sky uploads. Neither check is silently substituted for the other.
+
 ## Progressive sequence
 
 After input stops, the scheduler progresses through:

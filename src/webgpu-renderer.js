@@ -312,6 +312,18 @@ function appendHistoryValues(target, name, value) {
   throw new Error(`Progressive history ${name} has an unsupported value`);
 }
 
+const STRONG_ACCRETION_VACUUM_HISTORY_SENTINEL = (
+  "sceneStrongAccretionUniforms=vacuum"
+);
+
+function appendStrongAccretionHistory(target, value) {
+  if (value == null) {
+    target.push(STRONG_ACCRETION_VACUUM_HISTORY_SENTINEL);
+    return;
+  }
+  appendHistoryValues(target, "sceneStrongAccretionUniforms", value);
+}
+
 export function progressiveHistorySignature(frame) {
   if (!frame || typeof frame !== "object" || Array.isArray(frame)) {
     throw new TypeError("Progressive history requires a frame object");
@@ -346,6 +358,13 @@ export function progressiveHistorySignature(frame) {
   ]) {
     appendHistoryValues(values, name, frame[name]);
   }
+  // Keep the pre-accretion signature fields and ordering unchanged. Vacuum
+  // bundles receive one stable sentinel, while an accreting frame contributes
+  // every scalar so no disk-state change can reuse stale HDR history.
+  appendStrongAccretionHistory(
+    values,
+    frame.sceneStrongAccretionUniforms,
+  );
   return values.join("|");
 }
 

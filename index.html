@@ -123,8 +123,15 @@
             aria-label="Spacetime scene"
             data-i18n-aria-label="scene.navigation"
           >
-            <a id="sceneBinary" class="scene-link is-active" href="./" aria-current="page">
-              <span data-i18n="scene.binary">Live binary</span>
+            <a id="sceneBinary" class="scene-link" href="./">
+              <span data-i18n="scene.binary">Vacuum binary</span>
+            </a>
+            <a
+              id="sceneBinaryDualDisk"
+              class="scene-link"
+              href="./?scene=binary-dual-disk"
+            >
+              <span data-i18n="scene.binaryDualDisk">Dual-disk binary</span>
             </a>
             <a id="sceneSchwarzschild" class="scene-link" href="./?scene=schwarzschild">
               <span data-i18n="scene.single">Single black hole</span>
@@ -417,7 +424,9 @@
               </label>
 
               <label id="accretionControl" class="control" for="accretion">
-                <span class="control-name" data-i18n="control.accretion">Accretion rate</span>
+                <span id="accretionLabel" class="control-name" data-i18n="control.accretion">
+                  Accretion rate
+                </span>
                 <output id="accretionValue" for="accretion">0.006% Edd</output>
                 <input
                   id="accretion"

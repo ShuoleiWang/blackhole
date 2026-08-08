@@ -5,9 +5,10 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
 
 An interactive, real-time black-hole renderer built with **WebGPU and WebGL2**.
-The root URL opens the real-time binary scene; the legacy
-`?scene=binary-approx` URL remains compatible, and
-`?scene=schwarzschild` opens the interactive single-hole scene.
+The root URL opens the real-time vacuum binary scene; the independent
+`?scene=binary-dual-disk` route adds two idealized mini-disks, the legacy
+`?scene=binary-approx` URL remains compatible, and `?scene=schwarzschild`
+opens the interactive single-hole scene.
 
 The root scene is a production-oriented **WebGPU strong-field binary ray
 tracer**. Each pixel follows a past-directed null Hamiltonian ray through a
@@ -30,6 +31,17 @@ near-zone metric, evolve the metric along each ray, or model luminous plasma.
 Accordingly, it is not full-NR slow-light ray tracing, GRMHD, or complete
 radiative transfer. WebGL2 deliberately falls back to the previous weak-field
 preview instead of limiting the WebGPU/Metal implementation to backend parity.
+
+The dual-disk route keeps that scientific boundary explicit. It adds two
+frame-frozen analytic thin-disk surfaces with finite surface optical depth;
+their ISCO, Eggleton
+Roche-lobe truncation, zero-torque temperature profile, local orbital motion,
+frequency transfer, `g⁴` intensity transfer, and mutual opacity are evaluated
+along the production strong-field rays. Visible colour is integrated over a
+15-sample 380–780 nm CIE response rather than assigning a fixed RGB or mapping
+all UV-dominated power into display white. It is an idealized emission proxy,
+not SXS matter data or GRMHD; stable mini-disks shut off before merger and no
+post-merger disk is invented.
 
 The explicit Schwarzschild scene numerically integrates past-directed null
 geodesics on the GPU. A single ray path determines horizon capture, idealized
@@ -54,7 +66,8 @@ renderers.
 
 | Product layer | Status | Scientific boundary |
 | --- | --- | --- |
-| Root real-time binary scene | Implemented | WebGPU 3+1 Hamiltonian rays through a boosted, superposed Kerr-Schild fast-light approximation; SXS anchors waveform/events/remnant, not body coordinates |
+| Root real-time vacuum binary scene | Implemented | WebGPU 3+1 Hamiltonian rays through a boosted, superposed Kerr-Schild fast-light approximation; SXS anchors waveform/events/remnant, not body coordinates |
+| `?scene=binary-dual-disk` | Implemented | Same strong-field lensing plus two idealized Roche/ISCO-truncated thin mini-disks; no GRMHD, self-consistent spectral radiative transfer, or post-merger emission model |
 | `?scene=schwarzschild` | Implemented | Interactive single-hole Schwarzschild geodesics and an idealized disk |
 | Stationary Schwarzschild/Kerr workbench | Implemented | Fixed-camera analytic vacuum calibration, authenticated delivery, and regression oracles; not a merger renderer |
 | WebGL2 binary fallback | Implemented | Explicit legacy weak-field preview with no claim of physical parity with the WebGPU strong-field path |
@@ -132,9 +145,12 @@ python3 -m http.server 4173
 
 Open <http://localhost:4173>. WebGPU requires a secure context such as `localhost` or HTTPS; the application automatically attempts the WebGL2 fallback when WebGPU is unavailable.
 
-The current application interface is in Simplified Chinese; this does not affect the rendering controls or URL parameters documented below.
+The interface defaults to English and can be switched to Simplified Chinese
+from the observation panel. The choice persists across all scene routes.
 
-The root URL opens the real-time binary scene. The legacy
+The root URL opens the real-time vacuum binary scene. Open
+<http://localhost:4173/?scene=binary-dual-disk> for the independent dual
+mini-disk emission scene. The legacy
 <http://localhost:4173/?scene=binary-approx> URL selects the same scene.
 Open <http://localhost:4173/?scene=schwarzschild> for the interactive
 single-hole renderer, or open
@@ -189,6 +205,13 @@ Pausing the timeline and camera allows WebGPU to refine and accumulate a
 sub-pixel-jittered linear-HDR result. The accretion control is disabled because
 the source is a vacuum binary.
 
+The dual-disk route shares the same camera, SXS evidence, timeline, and
+strong-field quality policy. Its per-disk emission-proxy control is enabled
+only on WebGPU. Each disk follows the provider-owned body state, shrinks with
+`r_out=min(10M, 0.8 R_L)`, and turns off through a C² transition when its
+Roche-truncated outer edge reaches the `6m_i` ISCO. WebGL2 remains a labelled
+vacuum weak-field preview and disables the emission control.
+
 The transfer-map workbench has a fixed camera and projection, so drag, zoom,
 reset, motion, mass, accretion, and time controls are disabled. It can switch
 between the Schwarzschild and Kerr references and display sky composition,
@@ -202,7 +225,9 @@ inspector. Exposure and display quality remain presentation controls.
 | Parameter | Purpose |
 | --- | --- |
 | root URL | Open the interactive WebGPU strong-field approximate binary tracer |
+| `?lang=en\|zh-CN` | Select English or Simplified Chinese; English is the strict default and the choice is preserved across scene links |
 | `?scene=binary-approx` | Legacy-compatible alias for the root binary scene |
+| `?scene=binary-dual-disk` | Open the WebGPU strong-field binary with two idealized Roche/ISCO-truncated mini-disks; no GRMHD or post-merger emission model |
 | `?scene=schwarzschild` | Open the interactive single-hole Schwarzschild geodesic and idealized-disk scene |
 | `?scene=transfer-map-reference` | Open the fixed-camera stationary analytic Schwarzschild transfer-map reference; not NR and no accretion disk |
 | `?scene=transfer-map-reference&reference=kerr-remnant` | Open the stationary analytic Kerr remnant-spin reference; not NR and no accretion disk |
@@ -298,8 +323,13 @@ Primary implementation files:
   single-frame GPU backpressure, interaction, and adaptive quality orchestration
 - [`src/shaders.js`](./src/shaders.js) — Explicit-scene WGSL/GLSL Schwarzschild geodesics, disk emission, sky sampling, and post-processing
 - [`src/scenes/binary-approx-scene.js`](./src/scenes/binary-approx-scene.js) —
-  Root binary-scene lifecycle, evidence-labelled SXS timeline, backend policy,
-  and strong-field frame parameters
+  Shared vacuum/dual-disk binary lifecycle, evidence-labelled SXS timeline,
+  backend policy, and strong-field frame parameters
+- [`src/scenes/binary-dual-disk-scene.js`](./src/scenes/binary-dual-disk-scene.js) —
+  Isolated dual-mini-disk route wrapper
+- [`src/scenes/binary-accretion-model.js`](./src/scenes/binary-accretion-model.js) —
+  CPU reference for Eggleton truncation, Schwarzschild ISCO, zero-torque flux,
+  temperature scaling, and C² annulus shutdown
 - [`src/scenes/binary-dynamics-adapter.js`](./src/scenes/binary-dynamics-adapter.js) — Fail-closed browser loader, integrity checks, and deterministic dynamics interpolation
 - [`src/scenes/binary-playback-clock.js`](./src/scenes/binary-playback-clock.js) — Scrubbing, frame-rate-independent playback, end hold, looping, and presentation-only slow motion
 - [`src/strong-field-orbit.js`](./src/strong-field-orbit.js) — Waveform-phase
@@ -370,7 +400,8 @@ Primary implementation files:
 | Binary waveform | CoM-corrected `Extrapolated_N2` complex `h22`, aligned so its maximum amplitude is protocol `t = 0` | A far-zone waveform is not a near-zone metric and cannot determine camera-ray propagation |
 | Binary merger/remnant data | Common apparent horizon at `t = -6.072285 M`; exact metadata remnant mass `0.951609417715 M` and spin vector `(-7.29520687012e-10, 7.40468371215e-10, 0.686461676493)` | The C² metric removal is an analytic transition, not reconstructed NR horizon geometry or recoil |
 | Binary lensing | Per-pixel 3+1 null-Hamiltonian integration through boosted superposed Kerr-Schild terms; exact single-Kerr post-merger limit includes frame dragging | Strong-field but approximate, frame-frozen, and not constraint-solved NR; the capture surfaces remain isolated-Kerr excision proxies |
-| Binary emission | Vacuum sky lensing with no accretion disk | Adding luminous plasma would require physical gas initial data, GRMHD, and radiative transfer |
+| Root binary emission | Vacuum sky lensing with no accretion disk | Adding luminous plasma would require physical gas initial data, GRMHD, and radiative transfer |
+| Dual-disk binary emission | Two moving thin surfaces with `6m_i` ISCOs, `0.8R_L` tidal truncation, zero-torque temperature, CIE visible-band response, invariant frequency transfer, `g⁴`, C² photospheric coverage, bounded analytic tidal structure, and finite optical depth | Idealized emission proxy; no SXS matter data, GRMHD, volumetric absorption, polarization, self-consistent spectral transfer, or post-merger disk |
 | Stationary Schwarzschild reference | Fixed 1024×576 analytic vacuum map, authenticated chunks, nearest-texel WebGPU/WebGL2 playback | Fixed camera; no disk, NR source, time interpolation, or binary slow-light rays |
 | Stationary Kerr remnant reference | Numerically integrated vacuum geodesics of the exact analytic Kerr metric at `a/M = 0.686461676493`, finite BL-ZAMO camera, oblate Kerr-r capture surface, authenticated playback and diagnostics | Uses only the SXS remnant spin parameter; no SXS near-zone metric, binary time dependence, emission, or NR-derived pixels |
 | NR transfer-map protocol | Versioned schema, deterministic synthetic fixture, fail-closed validators, reference consumer, and regression tests | The runtime is proven with analytic data only; no NR-derived transfer map is bundled |
@@ -429,6 +460,13 @@ PYTHONDONTWRITEBYTECODE=1 python3 -m unittest tests/test_kerr_transfer_map.py
 node --test tests/transfer-map-runtime.test.mjs
 ```
 
+With the static server running on an M3 Pro, open
+<http://localhost:4173/tests/strong-field-gpu-probe-browser.html> to execute
+the exact 116-float dual-disk production WGSL as a WebGPU compute corpus. The
+harness reads back both disk radiance, transmittance, and fail-closed state for
+combined, A-only, B-only, repeated, and dark-disk cases; a passing page is a
+native-backend numerical check, not a screenshot comparison.
+
 Regenerate the bundled reference deterministically with:
 
 ```bash
@@ -462,6 +500,15 @@ tetrad, finite-sphere asymptotic continuation, revision-safe accumulation, and
 single-frame WebGPU submission gate. Separate tests prove that changing or
 making the SXS centroid separation/phase unreadable cannot change the
 strong-field body coordinates.
+
+The dual-disk suite additionally checks Eggleton exchange symmetry and tidal
+caps, the `6m_i` ISCO, zero-torque flux maximum at `49r_in/36`, fourth-root
+temperature scaling, C² annulus shutdown, the isolated 116-float shader ABI,
+15-sample visible blackbody response, C² photospheric coverage, numerical
+surface-event ordering and optical-depth composition, local Doppler signs,
+fail-closed transfer, a 64-byte production GPU readback record, white-plate and
+HDR-headroom gates, common-horizon shutdown, real entry-point routing, and full
+progressive-history invalidation for every disk scalar.
 
 The legacy binary regression remains for the WebGL2 compatibility shader. It
 does not validate the WebGPU strong-field model. Conversely, passing the new
