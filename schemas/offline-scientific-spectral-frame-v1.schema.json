@@ -1,0 +1,700 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/ShuoleiWang/blackhole/schemas/offline-scientific-spectral-frame-v1.schema.json",
+  "title": "Blackhole scientific spectral frame manifest v1",
+  "description": "Authenticated adaptive scalar spectral pixels. Contract conformance does not independently rerun geodesics or establish NR, GRMHD, polarization, returning radiation, or caustic completeness.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "adaptivePixelOptions",
+    "frame",
+    "id",
+    "integrity",
+    "observerFrequencyBinsHz",
+    "pixelLayout",
+    "producer",
+    "runtimeNumericBackend",
+    "sampler",
+    "schema",
+    "scientificStatus",
+    "summary",
+    "tiles"
+  ],
+  "properties": {
+    "adaptivePixelOptions": {
+      "$ref": "#/$defs/adaptivePixelOptions"
+    },
+    "frame": {
+      "$ref": "#/$defs/frame"
+    },
+    "id": {
+      "type": "string",
+      "pattern": "^scientific-spectral-frame-[0-9a-f]{24}$"
+    },
+    "integrity": {
+      "$ref": "#/$defs/integrity"
+    },
+    "observerFrequencyBinsHz": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "number",
+        "exclusiveMinimum": 0
+      }
+    },
+    "pixelLayout": {
+      "$ref": "#/$defs/pixelLayout"
+    },
+    "producer": {
+      "$ref": "#/$defs/producer"
+    },
+    "runtimeNumericBackend": {
+      "$ref": "#/$defs/describedObject"
+    },
+    "sampler": {
+      "$ref": "#/$defs/describedObject"
+    },
+    "schema": {
+      "const": "blackhole.scientific-spectral-frame/v1"
+    },
+    "scientificStatus": {
+      "$ref": "#/$defs/scientificStatus"
+    },
+    "summary": {
+      "$ref": "#/$defs/summary"
+    },
+    "tiles": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/$defs/tileEntry"
+      }
+    }
+  },
+  "$defs": {
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "scientificStatus": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "classification",
+        "description",
+        "isDisplayImage",
+        "isGeneralRelativisticRadiativeTransfer",
+        "isNumericalRelativitySolver",
+        "isPhysicsRecomputedByArtifactVerifier",
+        "isPolarized",
+        "prohibitedClaim"
+      ],
+      "properties": {
+        "classification": {
+          "const": "authenticated adaptive scalar spectral frame"
+        },
+        "description": {
+          "const": "Linear observer-frame I_nu pixels in a fixed binary64 ABI with finite-stencil convergence diagnostics."
+        },
+        "isDisplayImage": {
+          "const": false
+        },
+        "isGeneralRelativisticRadiativeTransfer": {
+          "const": false
+        },
+        "isNumericalRelativitySolver": {
+          "const": false
+        },
+        "isPhysicsRecomputedByArtifactVerifier": {
+          "const": false
+        },
+        "isPolarized": {
+          "const": false
+        },
+        "prohibitedClaim": {
+          "const": "Artifact conformance authenticates records and declared provenance; it does not independently rerun geodesics, prove caustic completeness, or establish NR, GRMHD, polarization, or returning radiation."
+        }
+      }
+    },
+    "adaptivePixelOptions": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "maximumDepth",
+        "maximumRayEvaluations",
+        "minimumDepth",
+        "radianceAbsoluteTolerances",
+        "radianceGuardCeilings",
+        "radianceRelativeTolerance",
+        "stencilVersion",
+        "unresolvedSolidAngleFractionTolerance",
+        "weightedDirectionToleranceRad",
+        "weightedLogGTolerance"
+      ],
+      "properties": {
+        "maximumDepth": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "maximumRayEvaluations": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "minimumDepth": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "radianceAbsoluteTolerances": {
+          "$ref": "#/$defs/nonNegativeNumberArray"
+        },
+        "radianceGuardCeilings": {
+          "$ref": "#/$defs/nonNegativeNumberArray"
+        },
+        "radianceRelativeTolerance": {
+          "type": "number",
+          "minimum": 0
+        },
+        "stencilVersion": {
+          "type": "string",
+          "minLength": 1
+        },
+        "unresolvedSolidAngleFractionTolerance": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "weightedDirectionToleranceRad": {
+          "type": "number",
+          "minimum": 0
+        },
+        "weightedLogGTolerance": {
+          "type": "number",
+          "minimum": 0
+        }
+      }
+    },
+    "nonNegativeNumberArray": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "number",
+        "minimum": 0
+      }
+    },
+    "frame": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "heightPixels",
+        "imageOrigin",
+        "pixelOrder",
+        "projection",
+        "sampleIndices",
+        "screenBounds",
+        "widthPixels"
+      ],
+      "properties": {
+        "heightPixels": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "imageOrigin": {
+          "const": "lower-left"
+        },
+        "pixelOrder": {
+          "const": "sample-then-row-major-y-then-x"
+        },
+        "projection": {
+          "const": "pinhole-screen-z-equals-one"
+        },
+        "sampleIndices": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "screenBounds": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "xMax",
+            "xMin",
+            "yMax",
+            "yMin"
+          ],
+          "properties": {
+            "xMax": {
+              "type": "number"
+            },
+            "xMin": {
+              "type": "number"
+            },
+            "yMax": {
+              "type": "number"
+            },
+            "yMin": {
+              "type": "number"
+            }
+          }
+        },
+        "widthPixels": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    },
+    "pixelLayout": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "endianness",
+        "errorSemantics",
+        "floatEncoding",
+        "frequencyCount",
+        "id",
+        "meanErrorOffsetBytes",
+        "meanIntensityOffsetBytes",
+        "pixelSolidAngleOffsetBytes",
+        "recordBytes",
+        "tailBytes"
+      ],
+      "properties": {
+        "endianness": {
+          "const": "little"
+        },
+        "errorSemantics": {
+          "const": "finite-stencil-estimate-not-rigorous-bound"
+        },
+        "floatEncoding": {
+          "const": "IEEE-754-binary64"
+        },
+        "frequencyCount": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "id": {
+          "const": "blackhole.scientific-spectral-pixel/le-f64-v1"
+        },
+        "meanErrorOffsetBytes": {
+          "type": "integer",
+          "minimum": 8
+        },
+        "meanIntensityOffsetBytes": {
+          "const": 0
+        },
+        "pixelSolidAngleOffsetBytes": {
+          "type": "integer",
+          "minimum": 16
+        },
+        "recordBytes": {
+          "type": "integer",
+          "minimum": 176
+        },
+        "tailBytes": {
+          "const": 160
+        }
+      }
+    },
+    "describedObject": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "descriptor",
+        "descriptorSha256"
+      ],
+      "properties": {
+        "descriptor": {
+          "type": "object",
+          "minProperties": 1
+        },
+        "descriptorSha256": {
+          "$ref": "#/$defs/sha256"
+        }
+      }
+    },
+    "producer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "algorithmVersion",
+        "id",
+        "jobKey",
+        "jobSpec"
+      ],
+      "properties": {
+        "algorithmVersion": {
+          "type": "string",
+          "minLength": 1
+        },
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "jobKey": {
+          "$ref": "#/$defs/sha256"
+        },
+        "jobSpec": {
+          "$ref": "#/$defs/jobSpec"
+        }
+      }
+    },
+    "jobSpec": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "algorithmVersion",
+        "inputs",
+        "parameters",
+        "producer",
+        "producerSourceHashes",
+        "recordBytes",
+        "schema",
+        "tasks"
+      ],
+      "properties": {
+        "algorithmVersion": {
+          "type": "string",
+          "minLength": 1
+        },
+        "inputs": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/inputArtifact"
+          }
+        },
+        "parameters": {
+          "type": "object",
+          "minProperties": 1
+        },
+        "producer": {
+          "type": "string",
+          "minLength": 1
+        },
+        "producerSourceHashes": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/sha256"
+          }
+        },
+        "recordBytes": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "schema": {
+          "const": "blackhole.offline-job/v1"
+        },
+        "tasks": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/task"
+          }
+        }
+      }
+    },
+    "inputArtifact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "byteLength",
+        "sha256",
+        "uri"
+      ],
+      "properties": {
+        "byteLength": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "uri": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "task": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "height",
+        "sampleIndex",
+        "width",
+        "x",
+        "y"
+      ],
+      "properties": {
+        "height": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "sampleIndex": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "width": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "x": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "y": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "integrity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "configurationSha256",
+        "manifestSidecar",
+        "productSha256"
+      ],
+      "properties": {
+        "configurationSha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "manifestSidecar": {
+          "const": "manifest.sha256"
+        },
+        "productSha256": {
+          "$ref": "#/$defs/sha256"
+        }
+      }
+    },
+    "hashedArtifact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "byteLength",
+        "sha256",
+        "uri"
+      ],
+      "properties": {
+        "byteLength": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "uri": {
+          "type": "string",
+          "pattern": "^tiles/t[0-9]{6}-y[0-9]{6}-x[0-9]{6}-w[0-9]{6}-h[0-9]{6}[.]spx$"
+        }
+      }
+    },
+    "tileEntry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "payload",
+        "recordCount",
+        "recordOrder",
+        "sampleIndex",
+        "tile"
+      ],
+      "properties": {
+        "payload": {
+          "$ref": "#/$defs/hashedArtifact"
+        },
+        "recordCount": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "recordOrder": {
+          "const": "row-major-local-y-then-x"
+        },
+        "sampleIndex": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "tile": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "height",
+            "width",
+            "x",
+            "y"
+          ],
+          "properties": {
+            "height": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "width": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "x": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "y": {
+              "type": "integer",
+              "minimum": 0
+            }
+          }
+        }
+      }
+    },
+    "summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "estimatedAbsoluteErrorNuSr",
+        "integratedSpecificIntensityNuSr",
+        "maximumAcceptedSteps",
+        "maximumAdaptiveDepth",
+        "maximumDiskRadiusDifferenceM",
+        "maximumEscapeDirectionSpanRad",
+        "maximumFrequencyShiftG",
+        "maximumMetricInterpolationError",
+        "maximumNullResidual",
+        "maximumRejectedSteps",
+        "maximumRelativeGDifference",
+        "maximumSurfaceBracketAffineWidth",
+        "maximumTerminalCovectorRelativeDifference",
+        "maximumTerminalEventDifferenceM",
+        "maximumWeightedDirectionVariationRad",
+        "maximumWeightedLogGVariation",
+        "minimumFrequencyShiftG",
+        "recordCount",
+        "requiredConvergenceMask",
+        "sourceMaskUnion",
+        "sourceSolidAngleSr",
+        "totalPixelSolidAngleSr",
+        "totalRaySamples",
+        "unresolvedSolidAngleSr"
+      ],
+      "properties": {
+        "estimatedAbsoluteErrorNuSr": {
+          "$ref": "#/$defs/nonNegativeNumberArray"
+        },
+        "integratedSpecificIntensityNuSr": {
+          "$ref": "#/$defs/nonNegativeNumberArray"
+        },
+        "maximumAcceptedSteps": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "maximumAdaptiveDepth": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "maximumDiskRadiusDifferenceM": {
+          "type": "number",
+          "minimum": 0
+        },
+        "maximumEscapeDirectionSpanRad": {
+          "type": "number",
+          "minimum": 0
+        },
+        "maximumFrequencyShiftG": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "maximumMetricInterpolationError": {
+          "type": "number",
+          "minimum": 0
+        },
+        "maximumNullResidual": {
+          "type": "number",
+          "minimum": 0
+        },
+        "maximumRejectedSteps": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "maximumRelativeGDifference": {
+          "type": "number",
+          "minimum": 0
+        },
+        "maximumSurfaceBracketAffineWidth": {
+          "type": "number",
+          "minimum": 0
+        },
+        "maximumTerminalCovectorRelativeDifference": {
+          "type": "number",
+          "minimum": 0
+        },
+        "maximumTerminalEventDifferenceM": {
+          "type": "number",
+          "minimum": 0
+        },
+        "maximumWeightedDirectionVariationRad": {
+          "type": "number",
+          "minimum": 0
+        },
+        "maximumWeightedLogGVariation": {
+          "type": "number",
+          "minimum": 0
+        },
+        "minimumFrequencyShiftG": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "recordCount": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "requiredConvergenceMask": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "sourceMaskUnion": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "sourceSolidAngleSr": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "capturedBoundary",
+            "disk",
+            "escapedBoundary"
+          ],
+          "properties": {
+            "capturedBoundary": {
+              "type": "number",
+              "minimum": 0
+            },
+            "disk": {
+              "type": "number",
+              "minimum": 0
+            },
+            "escapedBoundary": {
+              "type": "number",
+              "minimum": 0
+            }
+          }
+        },
+        "totalPixelSolidAngleSr": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "totalRaySamples": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "unresolvedSolidAngleSr": {
+          "type": "number",
+          "minimum": 0
+        }
+      }
+    }
+  }
+}

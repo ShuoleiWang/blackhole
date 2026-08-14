@@ -1,0 +1,624 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/ShuoleiWang/blackhole/schemas/offline-vacuum-spectral-v1.schema.json",
+  "title": "Blackhole offline vacuum spectral product manifest v1",
+  "description": "A deterministic observer-frequency float32 product composed from an authenticated v1 vacuum transfer map. This contract is not an NR solver, GRRT plasma calculation, or OpenEXR scientific master.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "id",
+    "scientificStatus",
+    "inputTransferMap",
+    "compositor",
+    "environment",
+    "observerFrequencyBinsHz",
+    "transport",
+    "projection",
+    "sampling",
+    "recordLayout",
+    "outcomes",
+    "integrity",
+    "chunks"
+  ],
+  "properties": {
+    "schema": {
+      "const": "blackhole.offline-vacuum-spectral/v1"
+    },
+    "id": {
+      "type": "string",
+      "pattern": "^offline-vacuum-[0-9a-f]{20}$"
+    },
+    "scientificStatus": {
+      "$ref": "#/$defs/scientificStatus"
+    },
+    "inputTransferMap": {
+      "$ref": "#/$defs/inputTransferMap"
+    },
+    "compositor": {
+      "$ref": "#/$defs/compositor"
+    },
+    "environment": {
+      "$ref": "#/$defs/environment"
+    },
+    "observerFrequencyBinsHz": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "number",
+        "exclusiveMinimum": 0
+      }
+    },
+    "transport": {
+      "$ref": "#/$defs/transport"
+    },
+    "projection": {
+      "$ref": "#/$defs/projection"
+    },
+    "sampling": {
+      "$ref": "#/$defs/sampling"
+    },
+    "recordLayout": {
+      "$ref": "#/$defs/recordLayout"
+    },
+    "outcomes": {
+      "$ref": "#/$defs/outcomes"
+    },
+    "integrity": {
+      "$ref": "#/$defs/integrity"
+    },
+    "chunks": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/$defs/chunk"
+      }
+    }
+  },
+  "$defs": {
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "scientificStatus": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "classification",
+        "description",
+        "isGeneralRelativisticRadiativeTransfer",
+        "isNumericalRelativitySolver",
+        "isOpenExrScientificMaster",
+        "prohibitedClaim"
+      ],
+      "properties": {
+        "classification": {
+          "const": "validated vacuum endpoint spectral composition"
+        },
+        "description": {
+          "const": "Observer-frequency I_nu bins composed from an authenticated v1 vacuum transfer map and a declared spectral environment."
+        },
+        "isGeneralRelativisticRadiativeTransfer": {
+          "const": false
+        },
+        "isNumericalRelativitySolver": {
+          "const": false
+        },
+        "isOpenExrScientificMaster": {
+          "const": false
+        },
+        "prohibitedClaim": {
+          "const": "Do not describe this compositor as an NR spacetime solver, GRRT plasma calculation, or OpenEXR scientific master."
+        }
+      }
+    },
+    "inputTransferMap": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "datasetKind",
+        "id",
+        "manifestSha256",
+        "schema",
+        "scientificStatus",
+        "validationStatus"
+      ],
+      "properties": {
+        "datasetKind": {
+          "enum": [
+            "nr-slow-light-transfer-map",
+            "stationary-reference-transfer-map"
+          ]
+        },
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9._-]{2,127}$"
+        },
+        "manifestSha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "schema": {
+          "const": "blackhole.nr-transfer-map/v1"
+        },
+        "scientificStatus": {
+          "type": "object",
+          "minProperties": 1
+        },
+        "validationStatus": {
+          "const": "protocol-conformant"
+        }
+      }
+    },
+    "compositor": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "algorithm",
+        "entryPoint",
+        "numericBackend",
+        "sourceSha256",
+        "sourceUri"
+      ],
+      "properties": {
+        "algorithm": {
+          "const": "vacuum-Liouville-specific-intensity/v1"
+        },
+        "entryPoint": {
+          "const": "scripts/render_offline_vacuum.py"
+        },
+        "numericBackend": {
+          "const": "CPython float64 evaluation with explicit little-endian IEEE-754 float32 output"
+        },
+        "sourceSha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "sourceUri": {
+          "const": "offline/vacuum.py"
+        }
+      }
+    },
+    "environment": {
+      "$ref": "#/$defs/planckEnvironment"
+    },
+    "planckEnvironment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "directionFrame",
+        "frequencyFrame",
+        "implementationId",
+        "kind",
+        "normalization",
+        "quantity",
+        "temperatureK",
+        "units"
+      ],
+      "properties": {
+        "directionFrame": {
+          "const": "ICRS-stored-escape-direction"
+        },
+        "frequencyFrame": {
+          "const": "transfer-map-escape-boundary-reference-observer"
+        },
+        "implementationId": {
+          "const": "Planck-B_nu-exact-SI-constants/v1"
+        },
+        "kind": {
+          "const": "isotropic-planck-blackbody"
+        },
+        "normalization": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "quantity": {
+          "const": "spectral-specific-intensity-I_nu"
+        },
+        "temperatureK": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "units": {
+          "const": "W m^-2 sr^-1 Hz^-1"
+        }
+      }
+    },
+    "transport": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "emittedFrequency",
+        "escapeBoundaryReferenceObserver",
+        "frequencyShiftConvention",
+        "mode",
+        "observedSpecificIntensity",
+        "samplingPolicy",
+        "storedEscapeDirection"
+      ],
+      "properties": {
+        "emittedFrequency": {
+          "const": "nu_emit=nu_obs/g"
+        },
+        "escapeBoundaryReferenceObserver": {
+          "type": "object",
+          "minProperties": 1
+        },
+        "frequencyShiftConvention": {
+          "type": "string",
+          "minLength": 1
+        },
+        "mode": {
+          "const": "vacuum-Liouville-specific-intensity/v1"
+        },
+        "observedSpecificIntensity": {
+          "const": "I_nu_obs=g^3*I_nu_emit"
+        },
+        "samplingPolicy": {
+          "const": "sample environment only for escaped records with valid ICRS direction and positive frequency shift"
+        },
+        "storedEscapeDirection": {
+          "type": "object",
+          "minProperties": 1
+        }
+      }
+    },
+    "projection": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "heightPixels",
+        "imageOrigin",
+        "pixelSampleLocation",
+        "widthPixels"
+      ],
+      "properties": {
+        "heightPixels": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "imageOrigin": {
+          "type": "string",
+          "minLength": 1
+        },
+        "pixelSampleLocation": {
+          "type": "string",
+          "minLength": 1
+        },
+        "widthPixels": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    },
+    "sampling": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "dimensionOrder",
+        "observationTimesM",
+        "pixelOrder"
+      ],
+      "properties": {
+        "dimensionOrder": {
+          "type": "array",
+          "minItems": 3,
+          "maxItems": 3,
+          "prefixItems": [
+            {
+              "const": "time"
+            },
+            {
+              "const": "y"
+            },
+            {
+              "const": "x"
+            }
+          ],
+          "items": false
+        },
+        "observationTimesM": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "number"
+          }
+        },
+        "pixelOrder": {
+          "const": "row-major"
+        }
+      }
+    },
+    "recordLayout": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "spectral",
+        "state"
+      ],
+      "properties": {
+        "spectral": {
+          "$ref": "#/$defs/spectralLayout"
+        },
+        "state": {
+          "$ref": "#/$defs/stateLayout"
+        }
+      }
+    },
+    "spectralLayout": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "byteOrder",
+        "componentType",
+        "componentsPerRecord",
+        "invalidEncoding",
+        "order",
+        "units"
+      ],
+      "properties": {
+        "byteOrder": {
+          "const": "little-endian"
+        },
+        "componentType": {
+          "const": "float32"
+        },
+        "componentsPerRecord": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "invalidEncoding": {
+          "const": "canonical-quiet-NaN-0x7fc00000"
+        },
+        "order": {
+          "const": "record-major-then-observer-frequency-bin"
+        },
+        "units": {
+          "const": "W m^-2 sr^-1 Hz^-1"
+        }
+      }
+    },
+    "stateLayout": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "byteOrder",
+        "policy",
+        "recordBytes",
+        "schema",
+        "structFormat"
+      ],
+      "properties": {
+        "byteOrder": {
+          "const": "little-endian"
+        },
+        "policy": {
+          "const": "byte-exact-authenticated-input-record-copy"
+        },
+        "recordBytes": {
+          "const": 32
+        },
+        "schema": {
+          "const": "blackhole.nr-transfer-map/v1"
+        },
+        "structFormat": {
+          "const": "<7fBBH"
+        }
+      }
+    },
+    "outcomes": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "counts",
+        "policy",
+        "recordCount",
+        "unusableRecordCount"
+      ],
+      "properties": {
+        "counts": {
+          "$ref": "#/$defs/outcomeCounts"
+        },
+        "policy": {
+          "$ref": "#/$defs/outcomePolicy"
+        },
+        "recordCount": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "unusableRecordCount": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "outcomeCounts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "captured",
+        "escaped",
+        "integrator-failure",
+        "missing",
+        "outside-domain",
+        "unresolved"
+      ],
+      "properties": {
+        "captured": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "escaped": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "integrator-failure": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "missing": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "outside-domain": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "unresolved": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "outcomePolicy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "captured",
+        "escaped",
+        "unusable"
+      ],
+      "properties": {
+        "captured": {
+          "const": "all spectral bins are positive float32 zero"
+        },
+        "escaped": {
+          "const": "vacuum spectral composition"
+        },
+        "unusable": {
+          "const": "all spectral bins are canonical float32 NaN"
+        }
+      }
+    },
+    "integrity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "configurationSha256",
+        "manifestSidecar",
+        "productSha256"
+      ],
+      "properties": {
+        "configurationSha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "manifestSidecar": {
+          "const": "manifest.sha256"
+        },
+        "productSha256": {
+          "$ref": "#/$defs/sha256"
+        }
+      }
+    },
+    "chunk": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "inputChunkSha256",
+        "recordCount",
+        "sampleIndex",
+        "spectral",
+        "state",
+        "tile"
+      ],
+      "properties": {
+        "inputChunkSha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "recordCount": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "sampleIndex": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "spectral": {
+          "$ref": "#/$defs/spectralArtifact"
+        },
+        "state": {
+          "$ref": "#/$defs/stateArtifact"
+        },
+        "tile": {
+          "$ref": "#/$defs/tile"
+        }
+      }
+    },
+    "hashedArtifact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "byteLength",
+        "sha256",
+        "uri"
+      ],
+      "properties": {
+        "byteLength": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "uri": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "spectralArtifact": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/hashedArtifact"
+        },
+        {
+          "properties": {
+            "uri": {
+              "pattern": "^spectral/t[0-9]{4,}-y[0-9]{6,}-x[0-9]{6,}[.]f32$"
+            }
+          }
+        }
+      ]
+    },
+    "stateArtifact": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/hashedArtifact"
+        },
+        {
+          "properties": {
+            "uri": {
+              "pattern": "^states/t[0-9]{4,}-y[0-9]{6,}-x[0-9]{6,}[.]bin$"
+            }
+          }
+        }
+      ]
+    },
+    "tile": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "height",
+        "width",
+        "x",
+        "y"
+      ],
+      "properties": {
+        "height": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "width": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "x": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "y": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    }
+  }
+}
