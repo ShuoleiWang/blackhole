@@ -16,6 +16,28 @@ The screenshot demonstrates this repository's renderer but incorporates and
 modifies the ESO panorama below. Redistribution outside the context of this
 README must be accompanied by the `ESO/S. Brunier` credit, source, and license.
 
+## `science/cie/CIE_xyz_1931_2deg.csv` (offline true-colour calibration)
+
+- Title: **Colour-matching functions of CIE 1931 standard colorimetric observer**
+- Creator and publisher: **International Commission on Illumination (CIE)**
+- Official dataset DOI: <https://doi.org/10.25039/CIE.DS.xvudnb9b>
+- Standard observer: CIE 1931 2 degree
+- Table: `x_bar`, `y_bar`, and `z_bar` from 360 to 830 nm at 1 nm spacing
+- License: [Creative Commons Attribution-ShareAlike 4.0 International](https://creativecommons.org/licenses/by-sa/4.0/)
+- CSV SHA-256: `fa663e3535a7e0763a745993a1f0a192eb0275ac46ad2d1befd7626841e713c1`
+- CSV MD5: `17cca777db64b17170f06f67ce9d3ab7`
+- Bundled official metadata SHA-256: `03abcaecf4e63d77045ef57c4514b52c8bb1a46dd18e1f93a50044a0f4f481c8`
+
+[`offline/cie_color.py`](../offline/cie_color.py) authenticates both bundled
+files before use, including the metadata DOI, license, checksums, 471-row
+1 nm grid, declared sample row, and column sums. It converts exact-grid
+observer-frame `I_nu` to increasing-wavelength `I_lambda` and performs the
+1 nm trapezoidal CIE XYZ integral. UV, X-ray, missing, extra, reordered, or
+rounded frequency bins fail closed rather than being folded into visible
+colour. Scientific XYZ and unclamped linear sRGB remain separate from the
+explicit exposure/tone-mapping display derivation. This is a standard-observer
+colourimetric calculation, not a camera-sensor or absolute-appearance model.
+
 ## `scenes/binary-sxs-bbh-0001-v2*` (SXS-derived Phase 2 dynamics)
 
 - Description: compact browser playback track derived from the official

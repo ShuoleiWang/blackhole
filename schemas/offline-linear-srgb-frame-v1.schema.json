@@ -1,0 +1,543 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/ShuoleiWang/blackhole/schemas/offline-linear-srgb-frame-v1.schema.json",
+  "title": "Blackhole scientific unclamped linear-sRGB frame v1",
+  "description": "Versioned scene-linear sRGB D65 coordinates derived from a verified CIE XYZ product. Negative channels are preserved; no display transform, clamp, gamut map, tone map, HDR transfer, transfer curve, or integer encoding is present.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "cieDataset",
+    "converter",
+    "frame",
+    "id",
+    "inputCieXyzProduct",
+    "inputSpectralProduct",
+    "integrity",
+    "pixelLayout",
+    "schema",
+    "scientificStatus",
+    "summary",
+    "tiles"
+  ],
+  "properties": {
+    "cieDataset": {
+      "type": "object",
+      "minProperties": 1
+    },
+    "converter": {
+      "$ref": "#/$defs/converterWrapper"
+    },
+    "frame": {
+      "$ref": "#/$defs/frame"
+    },
+    "id": {
+      "type": "string",
+      "pattern": "^scientific-linear-srgb-frame-[0-9a-f]{24}$"
+    },
+    "inputCieXyzProduct": {
+      "$ref": "#/$defs/inputCieXyzProduct"
+    },
+    "inputSpectralProduct": {
+      "type": "object",
+      "minProperties": 1
+    },
+    "integrity": {
+      "$ref": "#/$defs/integrity"
+    },
+    "pixelLayout": {
+      "$ref": "#/$defs/pixelLayout"
+    },
+    "schema": {
+      "const": "blackhole.scientific-linear-srgb-frame/v1"
+    },
+    "scientificStatus": {
+      "type": "object",
+      "minProperties": 1
+    },
+    "summary": {
+      "$ref": "#/$defs/summary"
+    },
+    "tiles": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/$defs/tileEntry"
+      }
+    }
+  },
+  "$defs": {
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "finiteTriplet": {
+      "type": "array",
+      "minItems": 3,
+      "maxItems": 3,
+      "items": {
+        "type": "number"
+      }
+    },
+    "nonNegativeTriplet": {
+      "type": "array",
+      "minItems": 3,
+      "maxItems": 3,
+      "items": {
+        "type": "number",
+        "minimum": 0
+      }
+    },
+    "converterWrapper": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "descriptor",
+        "descriptorSha256"
+      ],
+      "properties": {
+        "descriptor": {
+          "$ref": "#/$defs/converterDescriptor"
+        },
+        "descriptorSha256": {
+          "$ref": "#/$defs/sha256"
+        }
+      }
+    },
+    "converterDescriptor": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "errorPropagation",
+        "implementationId",
+        "matrix",
+        "numericBackend",
+        "operation",
+        "sourceFiles"
+      ],
+      "properties": {
+        "errorPropagation": {
+          "type": "string",
+          "minLength": 1
+        },
+        "implementationId": {
+          "const": "blackhole.cie-xyz-to-linear-srgb/v1"
+        },
+        "matrix": {
+          "type": "array",
+          "minItems": 3,
+          "maxItems": 3,
+          "items": {
+            "$ref": "#/$defs/finiteTriplet"
+          }
+        },
+        "numericBackend": {
+          "type": "object",
+          "minProperties": 1,
+          "required": [
+            "implementationId"
+          ],
+          "properties": {
+            "implementationId": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        },
+        "operation": {
+          "const": "unclamped CIE XYZ to scene-linear sRGB D65"
+        },
+        "sourceFiles": {
+          "type": "array",
+          "minItems": 22,
+          "maxItems": 22,
+          "items": {
+            "$ref": "#/$defs/sourceFile"
+          }
+        }
+      }
+    },
+    "sourceFile": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "byteLength",
+        "moduleUri",
+        "sha256"
+      ],
+      "properties": {
+        "byteLength": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "moduleUri": {
+          "enum": [
+            "assets/science/cie/CIE_xyz_1931_2deg.csv",
+            "assets/science/cie/CIE_xyz_1931_2deg.csv_metadata.json",
+            "offline/__init__.py",
+            "offline/adaptive_frame.py",
+            "offline/cie_color.py",
+            "offline/cie_product.py",
+            "offline/geodesic.py",
+            "offline/job.py",
+            "offline/kerr.py",
+            "offline/linear_rgb_product.py",
+            "offline/radiative_transfer.py",
+            "offline/spacetime.py",
+            "offline/spectral_frame.py",
+            "offline/spectral_product.py",
+            "schemas/offline-cie-xyz-frame-v1.schema.json",
+            "schemas/offline-linear-srgb-frame-v1.schema.json",
+            "schemas/offline-scientific-spectral-frame-v1.schema.json",
+            "scripts/convert_offline_cie_xyz_to_linear_srgb.py",
+            "scripts/verify_nr_contract.py",
+            "scripts/verify_offline_cie_xyz.py",
+            "scripts/verify_offline_linear_srgb.py",
+            "scripts/verify_offline_spectral_frame.py"
+          ]
+        },
+        "sha256": {
+          "$ref": "#/$defs/sha256"
+        }
+      }
+    },
+    "frame": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "heightPixels",
+        "imageOrigin",
+        "pixelOrder",
+        "projection",
+        "sampleIndices",
+        "screenBounds",
+        "widthPixels"
+      ],
+      "properties": {
+        "heightPixels": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "imageOrigin": {
+          "const": "lower-left"
+        },
+        "pixelOrder": {
+          "const": "sample-then-row-major-y-then-x"
+        },
+        "projection": {
+          "const": "pinhole-screen-z-equals-one"
+        },
+        "sampleIndices": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "screenBounds": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "xMax",
+            "xMin",
+            "yMax",
+            "yMin"
+          ],
+          "properties": {
+            "xMax": {
+              "type": "number"
+            },
+            "xMin": {
+              "type": "number"
+            },
+            "yMax": {
+              "type": "number"
+            },
+            "yMin": {
+              "type": "number"
+            }
+          }
+        },
+        "widthPixels": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    },
+    "inputCieXyzProduct": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "cieIntegrationVerified",
+        "colourAlgorithmOracleIndependent",
+        "id",
+        "inputPhysicsVerified",
+        "manifestSha256",
+        "maximumUlpDifference",
+        "productSha256",
+        "recordCount",
+        "schema",
+        "structuralStatus",
+        "tileCount"
+      ],
+      "properties": {
+        "cieIntegrationVerified": {
+          "const": true
+        },
+        "colourAlgorithmOracleIndependent": {
+          "const": false
+        },
+        "id": {
+          "type": "string",
+          "pattern": "^scientific-cie-xyz-frame-[0-9a-f]{24}$"
+        },
+        "inputPhysicsVerified": {
+          "const": false
+        },
+        "manifestSha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "maximumUlpDifference": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "productSha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "recordCount": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "schema": {
+          "const": "blackhole.scientific-cie-xyz-frame/v1"
+        },
+        "structuralStatus": {
+          "const": "scientific-cie-xyz-frame-contract-conformant"
+        },
+        "tileCount": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    },
+    "integrity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "configurationSha256",
+        "manifestSidecar",
+        "productSha256"
+      ],
+      "properties": {
+        "configurationSha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "manifestSidecar": {
+          "const": "manifest.sha256"
+        },
+        "productSha256": {
+          "$ref": "#/$defs/sha256"
+        }
+      }
+    },
+    "pixelLayout": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "convergenceMaskOffsetBytes",
+        "endianness",
+        "estimatedAbsoluteErrorLinearSrgbOffsetBytes",
+        "errorSemantics",
+        "floatEncoding",
+        "id",
+        "inputCieXyzRecordSha256OffsetBytes",
+        "inputSpectralRecordSha256OffsetBytes",
+        "linearSrgbOffsetBytes",
+        "recordBytes",
+        "sourceMaskOffsetBytes"
+      ],
+      "properties": {
+        "convergenceMaskOffsetBytes": {
+          "const": 116
+        },
+        "endianness": {
+          "const": "little"
+        },
+        "estimatedAbsoluteErrorLinearSrgbOffsetBytes": {
+          "const": 24
+        },
+        "errorSemantics": {
+          "const": "abs-D65-matrix-propagated-non-rigorous-estimate"
+        },
+        "floatEncoding": {
+          "const": "IEEE-754-binary64"
+        },
+        "id": {
+          "const": "blackhole.scientific-linear-srgb-pixel/le-f64-v1"
+        },
+        "inputCieXyzRecordSha256OffsetBytes": {
+          "const": 48
+        },
+        "inputSpectralRecordSha256OffsetBytes": {
+          "const": 80
+        },
+        "linearSrgbOffsetBytes": {
+          "const": 0
+        },
+        "recordBytes": {
+          "const": 120
+        },
+        "sourceMaskOffsetBytes": {
+          "const": 112
+        }
+      }
+    },
+    "summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "convergenceMaskIntersection",
+        "inputCieXyzRecordSha256Chain",
+        "inputSpectralRecordSha256Chain",
+        "maximumEstimatedAbsoluteErrorLinearSrgb",
+        "maximumLinearSrgb",
+        "minimumLinearSrgb",
+        "negativeChannelMaskUnion",
+        "recordCount",
+        "recordsWithNegativeChannel",
+        "requiredConvergenceMask",
+        "sourceMaskUnion"
+      ],
+      "properties": {
+        "convergenceMaskIntersection": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "inputCieXyzRecordSha256Chain": {
+          "$ref": "#/$defs/sha256"
+        },
+        "inputSpectralRecordSha256Chain": {
+          "$ref": "#/$defs/sha256"
+        },
+        "maximumEstimatedAbsoluteErrorLinearSrgb": {
+          "$ref": "#/$defs/nonNegativeTriplet"
+        },
+        "maximumLinearSrgb": {
+          "$ref": "#/$defs/finiteTriplet"
+        },
+        "minimumLinearSrgb": {
+          "$ref": "#/$defs/finiteTriplet"
+        },
+        "negativeChannelMaskUnion": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 7
+        },
+        "recordCount": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "recordsWithNegativeChannel": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "requiredConvergenceMask": {
+          "const": 255
+        },
+        "sourceMaskUnion": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    },
+    "artifact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "byteLength",
+        "sha256",
+        "uri"
+      ],
+      "properties": {
+        "byteLength": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "uri": {
+          "type": "string",
+          "pattern": "^tiles/t[0-9]{6}-y[0-9]{6}-x[0-9]{6}-w[0-9]{6}-h[0-9]{6}\\.(spx|cxyz|lsrgb)$"
+        }
+      }
+    },
+    "tileCoordinates": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "height",
+        "width",
+        "x",
+        "y"
+      ],
+      "properties": {
+        "height": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "width": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "x": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "y": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "tileEntry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "inputCieXyzPayload",
+        "inputSpectralPayload",
+        "outputPayload",
+        "recordCount",
+        "recordOrder",
+        "sampleIndex",
+        "tile"
+      ],
+      "properties": {
+        "inputCieXyzPayload": {
+          "$ref": "#/$defs/artifact"
+        },
+        "inputSpectralPayload": {
+          "$ref": "#/$defs/artifact"
+        },
+        "outputPayload": {
+          "$ref": "#/$defs/artifact"
+        },
+        "recordCount": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "recordOrder": {
+          "const": "row-major-local-y-then-x"
+        },
+        "sampleIndex": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "tile": {
+          "$ref": "#/$defs/tileCoordinates"
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,571 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/ShuoleiWang/blackhole/schemas/offline-sdr-display-quicklook-v1.schema.json",
+  "title": "Blackhole SDR display quicklook v1",
+  "description": "A deterministic, display-only PPM16 derivative of authenticated signed unclamped linear-sRGB. It is neither HDR nor a scientific primary product.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "displayStatus",
+    "displayTransform",
+    "encoding",
+    "frame",
+    "id",
+    "images",
+    "inputCieXyzProduct",
+    "inputLinearSrgbProduct",
+    "inputSpectralProduct",
+    "integrity",
+    "schema",
+    "summary",
+    "tiles"
+  ],
+  "properties": {
+    "displayStatus": {
+      "type": "object",
+      "minProperties": 1
+    },
+    "displayTransform": {
+      "$ref": "#/$defs/transformWrapper"
+    },
+    "encoding": {
+      "$ref": "#/$defs/encoding"
+    },
+    "frame": {
+      "$ref": "#/$defs/frame"
+    },
+    "id": {
+      "type": "string",
+      "pattern": "^sdr-display-quicklook-[0-9a-f]{24}$"
+    },
+    "images": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 64,
+      "items": {
+        "$ref": "#/$defs/frameImage"
+      }
+    },
+    "inputCieXyzProduct": {
+      "type": "object",
+      "minProperties": 1
+    },
+    "inputLinearSrgbProduct": {
+      "$ref": "#/$defs/inputLinearSrgbProduct"
+    },
+    "inputSpectralProduct": {
+      "type": "object",
+      "minProperties": 1
+    },
+    "integrity": {
+      "$ref": "#/$defs/integrity"
+    },
+    "schema": {
+      "const": "blackhole.sdr-display-quicklook/v1"
+    },
+    "summary": {
+      "$ref": "#/$defs/summary"
+    },
+    "tiles": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/$defs/tileEntry"
+      }
+    }
+  },
+  "$defs": {
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "uint16Triplet": {
+      "type": "array",
+      "minItems": 3,
+      "maxItems": 3,
+      "items": {
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 65535
+      }
+    },
+    "sourceFile": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "byteLength",
+        "moduleUri",
+        "sha256"
+      ],
+      "properties": {
+        "byteLength": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "moduleUri": {
+          "enum": [
+            "assets/science/cie/CIE_xyz_1931_2deg.csv",
+            "assets/science/cie/CIE_xyz_1931_2deg.csv_metadata.json",
+            "offline/__init__.py",
+            "offline/adaptive_frame.py",
+            "offline/cie_color.py",
+            "offline/cie_product.py",
+            "offline/display_product.py",
+            "offline/geodesic.py",
+            "offline/job.py",
+            "offline/kerr.py",
+            "offline/linear_rgb_product.py",
+            "offline/radiative_transfer.py",
+            "offline/spacetime.py",
+            "offline/spectral_frame.py",
+            "offline/spectral_product.py",
+            "schemas/offline-cie-xyz-frame-v1.schema.json",
+            "schemas/offline-linear-srgb-frame-v1.schema.json",
+            "schemas/offline-scientific-spectral-frame-v1.schema.json",
+            "schemas/offline-sdr-display-quicklook-v1.schema.json",
+            "scripts/convert_offline_linear_srgb_to_sdr_display.py",
+            "scripts/verify_nr_contract.py",
+            "scripts/verify_offline_cie_xyz.py",
+            "scripts/verify_offline_linear_srgb.py",
+            "scripts/verify_offline_sdr_display.py",
+            "scripts/verify_offline_spectral_frame.py"
+          ]
+        },
+        "sha256": {
+          "$ref": "#/$defs/sha256"
+        }
+      }
+    },
+    "transformWrapper": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "descriptor",
+        "descriptorSha256"
+      ],
+      "properties": {
+        "descriptor": {
+          "$ref": "#/$defs/transformDescriptor"
+        },
+        "descriptorSha256": {
+          "$ref": "#/$defs/sha256"
+        }
+      }
+    },
+    "transformDescriptor": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "colourspace",
+        "derivedDisplayOutput",
+        "exposure",
+        "exposureControl",
+        "gamutPolicy",
+        "implementationId",
+        "luminanceCoefficients",
+        "mappedLuminance",
+        "negativeLinearPolicy",
+        "nonNegativeLinearRgbRatioPreservedBeforeSrgbEncoding",
+        "numericBackend",
+        "resourceLimits",
+        "sourceFiles",
+        "toneMapper",
+        "toneMappingDomain",
+        "transferCurve",
+        "uniformRgbToneScale"
+      ],
+      "properties": {
+        "colourspace": {
+          "const": "sRGB-D65"
+        },
+        "derivedDisplayOutput": {
+          "const": true
+        },
+        "exposure": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "exposureControl": {
+          "const": "manual-fixed-scalar"
+        },
+        "gamutPolicy": {
+          "const": "uniform-max-channel-scale-if-needed"
+        },
+        "implementationId": {
+          "const": "blackhole.linear-srgb-to-sdr-display-quicklook/v1"
+        },
+        "luminanceCoefficients": {
+          "type": "array",
+          "minItems": 3,
+          "maxItems": 3,
+          "prefixItems": [
+            {"const": 0.2126},
+            {"const": 0.7152},
+            {"const": 0.0722}
+          ]
+        },
+        "mappedLuminance": {
+          "const": "Y/(1+Y)"
+        },
+        "negativeLinearPolicy": {
+          "const": "clip-to-zero-at-display-boundary"
+        },
+        "nonNegativeLinearRgbRatioPreservedBeforeSrgbEncoding": {
+          "const": true
+        },
+        "numericBackend": {
+          "$ref": "#/$defs/numericBackend"
+        },
+        "resourceLimits": {
+          "$ref": "#/$defs/resourceLimits"
+        },
+        "sourceFiles": {
+          "type": "array",
+          "minItems": 25,
+          "maxItems": 25,
+          "items": {
+            "$ref": "#/$defs/sourceFile"
+          }
+        },
+        "toneMapper": {
+          "const": "reinhard-rec709-luminance-uniform-gamut/v2"
+        },
+        "toneMappingDomain": {
+          "const": "Rec.709-linear-luminance"
+        },
+        "transferCurve": {
+          "const": "IEC-61966-2-1-sRGB"
+        },
+        "uniformRgbToneScale": {
+          "const": "mappedY/Y = 1/(1+Y)"
+        }
+      }
+    },
+    "runtimeArtifact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "artifactName",
+        "byteLength",
+        "sha256"
+      ],
+      "properties": {
+        "artifactName": {"type": "string", "minLength": 1},
+        "byteLength": {"type": "integer", "minimum": 1},
+        "sha256": {"$ref": "#/$defs/sha256"}
+      }
+    },
+    "numericBackend": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "architectureBits",
+        "binary64MantissaBits",
+        "byteOrder",
+        "floatRadix",
+        "implementationId",
+        "libc",
+        "machine",
+        "mathExtension",
+        "operatingSystem",
+        "operatingSystemRelease",
+        "operatingSystemVersion",
+        "processor",
+        "pythonBuild",
+        "pythonCacheTag",
+        "pythonCompiler",
+        "pythonExecutable",
+        "pythonImplementation",
+        "pythonVersion",
+        "structDoubleBytes"
+      ],
+      "properties": {
+        "architectureBits": {"type": "integer", "minimum": 1},
+        "binary64MantissaBits": {"type": "integer", "minimum": 1},
+        "byteOrder": {"enum": ["little", "big"]},
+        "floatRadix": {"type": "integer", "minimum": 2},
+        "implementationId": {"const": "cpython-binary64-struct-libm/v2"},
+        "libc": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["implementation", "version"],
+          "properties": {
+            "implementation": {"type": "string"},
+            "version": {"type": "string"}
+          }
+        },
+        "machine": {"type": "string"},
+        "mathExtension": {"$ref": "#/$defs/runtimeArtifact"},
+        "operatingSystem": {"type": "string"},
+        "operatingSystemRelease": {"type": "string"},
+        "operatingSystemVersion": {"type": "string"},
+        "processor": {"type": "string"},
+        "pythonBuild": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["date", "tag"],
+          "properties": {
+            "date": {"type": "string"},
+            "tag": {"type": "string"}
+          }
+        },
+        "pythonCacheTag": {"type": "string"},
+        "pythonCompiler": {"type": "string"},
+        "pythonExecutable": {"$ref": "#/$defs/runtimeArtifact"},
+        "pythonImplementation": {"type": "string"},
+        "pythonVersion": {"type": "string"},
+        "structDoubleBytes": {"type": "integer", "minimum": 1}
+      }
+    },
+    "resourceLimits": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "bulkBufferAccounting",
+        "coverageBytesPerPixel",
+        "maxFramePixels",
+        "maxInputTileBytes",
+        "maxInputTilePayloadBytes",
+        "maxSampleCount",
+        "maxTotalPixels",
+        "ppmHeaderUpperBoundBytes",
+        "producerBulkBufferUpperBoundBytes",
+        "rgb16BytesPerPixel",
+        "verifierBulkBufferUpperBoundBytes"
+      ],
+      "properties": {
+        "bulkBufferAccounting": {
+          "const": "counts only RGB16 frame buffers, coverage buffers, one authenticated tile or up to two PPM payloads, and producer record scratch; excludes raw manifest/schema bytes, parsed JSON objects, and upstream verifier runtime memory"
+        },
+        "coverageBytesPerPixel": {"const": 1},
+        "maxFramePixels": {"const": 8388608},
+        "maxInputTileBytes": {"const": 67108864},
+        "maxInputTilePayloadBytes": {"const": 67108800},
+        "maxSampleCount": {"const": 64},
+        "maxTotalPixels": {"const": 16777216},
+        "ppmHeaderUpperBoundBytes": {"const": 19},
+        "producerBulkBufferUpperBoundBytes": {"const": 184549432},
+        "rgb16BytesPerPixel": {"const": 6},
+        "verifierBulkBufferUpperBoundBytes": {"const": 218103846}
+      }
+    },
+    "encoding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "channelOrder",
+        "encodedColourspace",
+        "header",
+        "id",
+        "inputRowOrder",
+        "magic",
+        "maxValue",
+        "mediaType",
+        "outputRowOrder",
+        "quantization",
+        "sampleBits",
+        "sampleByteOrder"
+      ],
+      "properties": {
+        "channelOrder": {"const": "RGB"},
+        "encodedColourspace": {"const": "sRGB-D65"},
+        "header": {"const": "P6\n<width> <height>\n65535\n"},
+        "id": {"const": "blackhole.ppm16-rgb-srgb/big-endian-v1"},
+        "inputRowOrder": {"const": "bottom-to-top-local-y-then-x"},
+        "magic": {"const": "P6"},
+        "maxValue": {"const": 65535},
+        "mediaType": {"const": "image/x-portable-pixmap"},
+        "outputRowOrder": {"const": "top-to-bottom-local-y-then-x"},
+        "quantization": {"const": "floor(encoded-sRGB*65535+0.5)"},
+        "sampleBits": {"const": 16},
+        "sampleByteOrder": {"const": "big-endian"}
+      }
+    },
+    "frame": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "heightPixels",
+        "imageOrigin",
+        "pixelOrder",
+        "projection",
+        "sampleIndices",
+        "screenBounds",
+        "widthPixels"
+      ],
+      "properties": {
+        "heightPixels": {"type": "integer", "minimum": 1, "maximum": 8388608},
+        "imageOrigin": {"const": "lower-left"},
+        "pixelOrder": {"const": "sample-then-row-major-y-then-x"},
+        "projection": {"const": "pinhole-screen-z-equals-one"},
+        "sampleIndices": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 64,
+          "uniqueItems": true,
+          "items": {"type": "integer", "minimum": 0, "maximum": 999999}
+        },
+        "screenBounds": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["xMax", "xMin", "yMax", "yMin"],
+          "properties": {
+            "xMax": {"type": "number"},
+            "xMin": {"type": "number"},
+            "yMax": {"type": "number"},
+            "yMin": {"type": "number"}
+          }
+        },
+        "widthPixels": {"type": "integer", "minimum": 1, "maximum": 8388608}
+      }
+    },
+    "inputLinearSrgbProduct": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "inputPhysicsVerified",
+        "manifestSha256",
+        "matrixTransformVerified",
+        "maximumUlpDifference",
+        "productSha256",
+        "recordCount",
+        "schema",
+        "structuralStatus",
+        "tileCount"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^scientific-linear-srgb-frame-[0-9a-f]{24}$"
+        },
+        "inputPhysicsVerified": {"const": false},
+        "manifestSha256": {"$ref": "#/$defs/sha256"},
+        "matrixTransformVerified": {"const": true},
+        "maximumUlpDifference": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "productSha256": {"$ref": "#/$defs/sha256"},
+        "recordCount": {"type": "integer", "minimum": 1, "maximum": 16777216},
+        "schema": {"const": "blackhole.scientific-linear-srgb-frame/v1"},
+        "structuralStatus": {
+          "const": "scientific-linear-srgb-frame-contract-conformant"
+        },
+        "tileCount": {"type": "integer", "minimum": 1}
+      }
+    },
+    "integrity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "configurationSha256",
+        "manifestSidecar",
+        "productSha256"
+      ],
+      "properties": {
+        "configurationSha256": {"$ref": "#/$defs/sha256"},
+        "manifestSidecar": {"const": "manifest.sha256"},
+        "productSha256": {"$ref": "#/$defs/sha256"}
+      }
+    },
+    "summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "inputLinearSrgbRecordSha256Chain",
+        "maximumRgb16",
+        "minimumRgb16",
+        "outputPpmSha256Chain",
+        "pixelCount",
+        "pixelsAtBlack",
+        "pixelsWithAnyNegativeLinearInput",
+        "pixelsWithAnySaturatedCode"
+      ],
+      "properties": {
+        "inputLinearSrgbRecordSha256Chain": {"$ref": "#/$defs/sha256"},
+        "maximumRgb16": {"$ref": "#/$defs/uint16Triplet"},
+        "minimumRgb16": {"$ref": "#/$defs/uint16Triplet"},
+        "outputPpmSha256Chain": {"$ref": "#/$defs/sha256"},
+        "pixelCount": {"type": "integer", "minimum": 1, "maximum": 16777216},
+        "pixelsAtBlack": {"type": "integer", "minimum": 0},
+        "pixelsWithAnyNegativeLinearInput": {"type": "integer", "minimum": 0},
+        "pixelsWithAnySaturatedCode": {"type": "integer", "minimum": 0}
+      }
+    },
+    "inputArtifact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["byteLength", "sha256", "uri"],
+      "properties": {
+        "byteLength": {"type": "integer", "minimum": 1, "maximum": 67108864},
+        "sha256": {"$ref": "#/$defs/sha256"},
+        "uri": {
+          "type": "string",
+          "pattern": "^tiles/t[0-9]{6}-y[0-9]{6}-x[0-9]{6}-w[0-9]{6}-h[0-9]{6}\\.lsrgb$"
+        }
+      }
+    },
+    "outputArtifact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["byteLength", "sha256", "uri"],
+      "properties": {
+        "byteLength": {"type": "integer", "minimum": 1, "maximum": 50331667},
+        "sha256": {"$ref": "#/$defs/sha256"},
+        "uri": {
+          "type": "string",
+          "pattern": "^images/sample-[0-9]{6}\\.ppm$"
+        }
+      }
+    },
+    "tileCoordinates": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["height", "width", "x", "y"],
+      "properties": {
+        "height": {"type": "integer", "minimum": 1},
+        "width": {"type": "integer", "minimum": 1},
+        "x": {"type": "integer", "minimum": 0},
+        "y": {"type": "integer", "minimum": 0}
+      }
+    },
+    "tileEntry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "inputLinearSrgbPayload",
+        "recordCount",
+        "recordOrder",
+        "sampleIndex",
+        "tile"
+      ],
+      "properties": {
+        "inputLinearSrgbPayload": {"$ref": "#/$defs/inputArtifact"},
+        "recordCount": {"type": "integer", "minimum": 1, "maximum": 559240},
+        "recordOrder": {"const": "row-major-local-y-then-x"},
+        "sampleIndex": {"type": "integer", "minimum": 0},
+        "tile": {"$ref": "#/$defs/tileCoordinates"}
+      }
+    },
+    "frameImage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "heightPixels",
+        "outputPayload",
+        "pixelCount",
+        "sampleIndex",
+        "widthPixels"
+      ],
+      "properties": {
+        "heightPixels": {"type": "integer", "minimum": 1, "maximum": 8388608},
+        "outputPayload": {"$ref": "#/$defs/outputArtifact"},
+        "pixelCount": {"type": "integer", "minimum": 1, "maximum": 8388608},
+        "sampleIndex": {"type": "integer", "minimum": 0, "maximum": 999999},
+        "widthPixels": {"type": "integer", "minimum": 1, "maximum": 8388608}
+      }
+    }
+  }
+}
