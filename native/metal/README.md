@@ -42,3 +42,35 @@ Generated binaries and the machine-readable report are kept under
 `productionQualified` to `false`; passing this arithmetic milestone does not
 qualify ray integration, surface-event topology, convergence, or any renderer
 scientific policy.
+
+## Milestone 2: scaled encoding and RHS feasibility
+
+Milestone 2 is a separate fail-closed experiment:
+
+```sh
+native/metal/run_milestone2.sh
+```
+
+It replaces the absolute low word with a normalized mantissa pair plus a shared
+signed binary exponent, exercises the tested binary64-scale exponent range, and
+adds:
+
+- a batched Hamiltonian RHS from a precomputed, CPU-authenticated metric sample;
+- a deterministic 2,048-record real Kerr and 2,048-record adversarial corpus;
+- a current-checkout Python binary64 reference and throughput baseline;
+- a non-gating DOPRI5(4) result/error-combination diagnostic; and
+- explicit fail-closed arithmetic status probes.
+
+The default full run is expected to exit non-zero at the current checkpoint:
+the subnormal defect is fixed and real-Kerr RHS signs match, but four
+ill-conditioned adversarial RHS components change sign and the DOPRI diagnostic
+misses its precision gate.  See `MILESTONE2_RESULTS.md`.  These failures are the
+reason the prototype remains disconnected from the renderer.
+
+For a short plumbing smoke test (not scientific evidence):
+
+```sh
+REAL_KERR_COUNT=16 ADVERSARIAL_COUNT=16 \
+BENCHMARK_COUNT=1024 BENCHMARK_ITERATIONS=3 \
+  native/metal/run_milestone2.sh
+```
