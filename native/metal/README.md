@@ -74,3 +74,24 @@ REAL_KERR_COUNT=16 ADVERSARIAL_COUNT=16 \
 BENCHMARK_COUNT=1024 BENCHMARK_ITERATIONS=3 \
   native/metal/run_milestone2.sh
 ```
+
+## Milestone 3: triple-word product/accumulator
+
+Milestone 3 preserves the frozen milestone-2 two-word input corpus but promotes
+products, reductions, and DOPRI combinations to a shared-exponent three-float
+expansion.  It always replays the four milestone-2 RHS sign-drift witnesses
+before the complete 2,048 real-Kerr + 2,048 adversarial corpus:
+
+```sh
+native/metal/run_milestone3.sh
+```
+
+The gate also covers the fifth-order DOPRI state, a directly accumulated
+embedded error, fail-closed malformed input, and the first batched boundary:
+one precomputed-stage fifth-order combine plus a signed planar z probe.  The
+measured full run passes these gates; see `MILESTONE3_RESULTS.md`.
+
+The result remains `productionQualified=false`.  The planar probe is not the
+renderer finite-thickness surface function, root localization, or topology
+policy, and no complete adaptive whole ray has been replayed.  The milestone-3
+kernel therefore remains isolated from the renderer.
