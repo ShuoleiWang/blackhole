@@ -55,6 +55,7 @@ stationary analytic **Schwarzschild 与 Kerr** 参考图验证 transfer-map
 | `?scene=schwarzschild` | 已实现 | 交互式单黑洞 Schwarzschild 测地线与理想薄盘 |
 | Stationary Schwarzschild/Kerr 工作台 | 已实现 | 固定相机解析真空校准、认证交付和回归 oracle；不是 merger renderer |
 | WebGL2 双黑洞回退 | 已实现 | 明确标注的旧 weak-field 兼容预览，不声称与 WebGPU 强场路径物理等价 |
+| 离线单 Kerr 光谱渲染器 | 计划重写 | 早期纯 Python 原型已从 `main` 移除、等待精简重写；完整代码保留在 `archive/offline-v1` 分支 |
 | 4D NR slow-light 极致离线渲染 | 规划中 | 需要 ray bundles/Jacobi；若要发光画面，还需独立来源的 GRMHD/GRRT、光谱和偏振数据 |
 
 [`docs/rendering-modes.md`](./docs/rendering-modes.md) 详细定义两条开发路线、
@@ -93,7 +94,7 @@ escape-transfer ABI，而不是完整辐射渲染格式。
   `?scene=transfer-map-reference` 会先认证两个内置 1024×576 stationary
   map 之一，再交给任一后端消费。Kerr 参考在精确解析 Kerr 度规中数值积分
   可分离零测地线，并使用有限距离 BL-ZAMO、恒 Kerr 半径扁球捕获面和到
-  无穷远的延拓。这些 map 是离线管线的 stationary vacuum oracle，不是
+  无穷远的延拓。这些 map 是 stationary vacuum 校准 oracle，不是
   合并帧。
 - **可检查的科学诊断**：稳定 URL 可显示天空、outcome、回溯时间、频移、
   null residual 或投影误差；点击 texel 可查看解码值与原始 32-byte 记录。

@@ -187,7 +187,8 @@ The repository currently provides:
 It does not currently provide four-dimensional NR metric data, NR slow-light
 pixel rays, ray bundles or Jacobi fields, GRMHD matter data,
 spectral/polarized GR radiative transfer, or multilayer OpenEXR scientific
-masters.
+masters. An earlier pure-Python single-Kerr offline prototype was removed from
+`main` pending a rewrite; it is preserved on the `archive/offline-v1` branch.
 
 The implemented metric and ray conventions are specified in
 [`strong-field-equations.md`](./strong-field-equations.md); scheduling and

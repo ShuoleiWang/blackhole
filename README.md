@@ -71,6 +71,7 @@ renderers.
 | `?scene=schwarzschild` | Implemented | Interactive single-hole Schwarzschild geodesics and an idealized disk |
 | Stationary Schwarzschild/Kerr workbench | Implemented | Fixed-camera analytic vacuum calibration, authenticated delivery, and regression oracles; not a merger renderer |
 | WebGL2 binary fallback | Implemented | Explicit legacy weak-field preview with no claim of physical parity with the WebGPU strong-field path |
+| Offline single-Kerr spectral renderer | Rewrite planned | The earlier pure-Python prototype was removed from `main` pending a lean rewrite; it is preserved on the `archive/offline-v1` branch |
 | Four-dimensional NR slow-light offline rendering | Planned | Requires ray bundles/Jacobi fields and, for luminous output, separately sourced GRMHD/GRRT, spectral, and polarization data |
 
 [`docs/rendering-modes.md`](./docs/rendering-modes.md) defines these two
@@ -119,7 +120,7 @@ rendering format.
   numerically integrates separated null geodesics of the exact analytic Kerr
   metric, with a finite-distance BL-ZAMO, a constant-Kerr-r oblate capture
   surface, and continuation to infinity. These maps are stationary vacuum
-  oracles for the offline pipeline, not merger frames.
+  calibration oracles, not merger frames.
 - **Inspectable scientific diagnostics** — Stable URL modes show sky,
   outcomes, lookback time, frequency shift, null residual, or projection
   error. Clicking a texel exposes its decoded canonical 32-byte record.
