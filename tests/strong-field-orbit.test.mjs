@@ -11,6 +11,7 @@ import {
 } from "../src/strong-field-orbit.js";
 import {
   STRONG_FIELD_UNIFORM_ABI,
+  createStrongFieldSpacetimeProvider,
 } from "../src/strong-field-spacetime.js";
 
 const root = new URL("../", import.meta.url);
@@ -393,8 +394,23 @@ test("common-horizon and peak joins preserve value, rate, acceleration", () => {
       );
     }
   }
+  // The metric transition begins at the superposition limit or the common
+  // horizon, whichever comes first, and ends at the waveform peak.
+  const blendStart = runtime.waveformModel.metricBlendStartTimeM;
+  const limit = runtime.waveformModel.superpositionLimitSeparationM;
+  close(limit, 8.5 * Math.sqrt(0.6 * 0.4), 1e-12, "superposition limit");
+  assert.ok(blendStart <= runtime.waveformModel.commonHorizonTimeM);
+  if (blendStart < runtime.waveformModel.commonHorizonTimeM) {
+    // The start is the interpolated crossing, not the next grid sample.
+    close(
+      runtime.frameAt(blendStart).kinematics.separationM,
+      limit,
+      1e-9,
+      "an early transition starts exactly at the superposition limit",
+    );
+  }
   close(
-    runtime.frameAt(-10).uniforms[1],
+    runtime.frameAt(blendStart).uniforms[1],
     0,
     0,
     "transition begins at zero",
@@ -405,8 +421,71 @@ test("common-horizon and peak joins preserve value, rate, acceleration", () => {
     0,
     "transition ends at one",
   );
-  assert.ok(runtime.frameAt(-10 + 1e-4).uniforms[1] < 1e-10);
+  assert.ok(runtime.frameAt(blendStart + 1e-4).uniforms[1] < 1e-10);
   assert.ok(1 - runtime.frameAt(-1e-4).uniforms[1] < 1e-10);
+});
+
+test("metric failures stay inside the photon-orbit capture region through merger", () => {
+  // Superposed Kerr-Schild terms lose the Lorentzian signature where two
+  // significant terms have anti-aligned null vectors. The metric transition
+  // starts before that happens between the inspiralling holes; during the
+  // transition any remaining failure must lie inside the unscaled innermost
+  // photon orbit of a term present in the metric, where the tracer classifies
+  // it as a capture. Sample the orbital plane (normal +y) with the CPU oracle.
+  const track = createDynamicsTrack(bundledManifest, bundledPayload);
+  const runtime = createStrongFieldOrbitRuntime({ track });
+  const provider = createStrongFieldSpacetimeProvider({
+    orbitAdapter: runtime.orbitAdapter,
+  });
+  const photonRadius = (body) => {
+    const chi = Math.hypot(...body.dimensionlessSpin);
+    return 2 * body.massM * (1 + Math.cos((2 / 3) * Math.acos(-chi)));
+  };
+  const kerrRadius = (body, point) => {
+    const x = point.map((value, index) => value - body.positionM[index]);
+    const a = body.dimensionlessSpin.map((value) => value * body.massM);
+    const rho2 = x[0] ** 2 + x[1] ** 2 + x[2] ** 2;
+    const a2 = a[0] ** 2 + a[1] ** 2 + a[2] ** 2;
+    const ax = a[0] * x[0] + a[1] * x[1] + a[2] * x[2];
+    const d = rho2 - a2;
+    return Math.sqrt(0.5 * (d + Math.sqrt(d * d + 4 * ax * ax)));
+  };
+  const start = runtime.waveformModel.metricBlendStartTimeM;
+  const limit = runtime.waveformModel.superpositionLimitSeparationM;
+  // For SXS:BBH:0001 (m_A = m_B = 0.5) the limit is 8.5 sqrt(m_A m_B) =
+  // 4.25 M, reached about 12 M before the common horizon. The start is the
+  // interpolated crossing, not the next (few-M-later) grid sample.
+  close(limit, 4.25, 1e-12, "superposition limit");
+  assert.ok(start > -19 && start < -17.5, `metric transition starts at ${start} M`);
+  assert.ok(start < runtime.waveformModel.commonHorizonTimeM - 10);
+  close(runtime.frameAt(start).kinematics.separationM, limit, 1e-9, "start separation");
+  assert.ok(runtime.frameAt(start - 0.05).kinematics.separationM > limit);
+  // Dense sampling at the onset: while the remnant weight is still tiny its
+  // ring singularity can break the metric near the centre of mass, so the
+  // tracer's failure capture must count every term present in the metric.
+  const onset = [0.05, 0.1, 0.2, 0.4, 0.8, 1.5, 2.5].map((dt) => start + dt);
+  for (const timeM of [-60, -30, -20, start - 0.1, ...onset, -14, -12, -10, -8, -6, -4, -2, -0.2, 0]) {
+    const frame = provider.frameAt(timeM);
+    const blend = Number(frame.uniforms[1]);
+    const active = [];
+    if (blend < 1) active.push(...frame.orbitState.bodies);
+    if (blend > 0) active.push(frame.orbitState.remnant);
+    for (let i = -20; i <= 20; i += 1) {
+      for (let k = -20; k <= 20; k += 1) {
+        const point = [0.2 * i, 0, 0.2 * k];
+        if (frame.evaluateOrUnresolved(point).outcome === "valid") {
+          continue;
+        }
+        const insideCapture = active.some((body) => (
+          kerrRadius(body, point) < photonRadius(body)
+        ));
+        assert.ok(
+          insideCapture,
+          `metric fails outside every photon orbit at t=${timeM} M, x=${point}`,
+        );
+      }
+    }
+  }
 });
 
 test("runtime clamps external time without producing NaN", () => {

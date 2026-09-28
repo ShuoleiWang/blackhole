@@ -259,7 +259,7 @@ export function createStrongFieldProbeUniforms(frame, options = {}) {
   data[23] = finiteNumber(frame.diskOuterRadius ?? 18, "diskOuterRadius");
   data[24] = finiteNumber(frame.renderScale ?? 1, "renderScale");
   data[25] = finiteNumber(frame.bloom ?? 0, "bloom");
-  data[26] = finiteNumber(frame.motion ?? 0, "motion");
+  data[26] = frame.diagnosticDisplay === true ? 1 : 0;
   data[27] = finiteNumber(frame.frame ?? 0, "frame");
   data.set(observerVelocity, 28);
   data[31] = finiteNumber(frame.observerBeta ?? 0, "observerBeta");

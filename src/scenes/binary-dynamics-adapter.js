@@ -170,7 +170,11 @@ function interpolate(first, second, weight) {
 async function sha256Hex(bytes) {
   require(
     globalThis.crypto?.subtle,
-    "Web Crypto SHA-256 support is required",
+    globalThis.isSecureContext === false
+      ? "Serve this page over HTTPS or from localhost: the scene data are "
+        + "verified with Web Crypto SHA-256, which browsers only provide in "
+        + "secure contexts"
+      : "Web Crypto SHA-256 support is required",
   );
   const digest = await globalThis.crypto.subtle.digest("SHA-256", bytes);
   return [...new Uint8Array(digest)]
@@ -252,8 +256,8 @@ function validateManifest(manifest) {
   );
   require(
     sourceLicense.attributionRequired === true
-      && sourceLicense.spdx === null
-      && sourceLicense.status === "not-declared-in-pinned-zenodo-record",
+      && sourceLicense.spdx === "CC-BY-4.0"
+      && sourceLicense.status === "declared-in-pinned-zenodo-record",
     "source license declaration is invalid",
   );
   const sourceArtifacts = exactKeys(

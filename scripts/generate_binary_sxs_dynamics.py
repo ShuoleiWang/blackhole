@@ -502,8 +502,9 @@ def generate(
             "recordDoi": SOURCE_RECORD,
             "recordId": 3273935,
             "license": {
-                "spdx": None,
-                "status": "not-declared-in-pinned-zenodo-record",
+                # Zenodo record 3273935 declares CC BY 4.0 (metadata.license).
+                "spdx": "CC-BY-4.0",
+                "status": "declared-in-pinned-zenodo-record",
                 "attributionRequired": True,
             },
             "artifacts": source_artifacts,

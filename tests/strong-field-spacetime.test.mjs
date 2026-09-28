@@ -181,13 +181,24 @@ test("wide-separation superposition recovers the weak-field monopole", () => {
   assert.match(fields.scientificStatus, /approximate metric; not NR/);
 });
 
-test("companion attenuation isolates each singular neighborhood", () => {
-  const provider = createStrongFieldSpacetimeProvider({
-    orbitAdapter: adapterFor(() => binarySample({
-      separationM: 20,
-    })),
+test("companion attenuation is off by default and optional", () => {
+  // The default is the plain superposition: the companion's field is smooth
+  // near each hole, so it is not removed there.
+  const plain = createStrongFieldSpacetimeProvider({
+    orbitAdapter: adapterFor(() => binarySample({ separationM: 20 })),
   });
-  const atBodyA = provider.evaluate(0, [-10, 0, 1e-3]);
+  assert.equal(plain.attenuation.enabled, false);
+  // Outside hole A's photon orbit (rays are captured before reaching its
+  // centre, where two unattenuated terms need not stay Lorentzian).
+  const plainAtA = plain.evaluate(0, [-10, 0, 3]);
+  assert.deepEqual([...plainAtA.diagnostics.companionAttenuation], [1, 1]);
+  assert.equal(plain.frameAt(0).uniforms[40], 0);
+
+  const windowed = createStrongFieldSpacetimeProvider({
+    orbitAdapter: adapterFor(() => binarySample({ separationM: 20 })),
+    attenuation: { enabled: true },
+  });
+  const atBodyA = windowed.evaluate(0, [-10, 0, 1e-3]);
   assert.ok(atBodyA.diagnostics.companionAttenuation[0] > 0.99);
   assert.ok(atBodyA.diagnostics.companionAttenuation[1] < 1e-12);
   assert.equal(atBodyA.regularized, false);

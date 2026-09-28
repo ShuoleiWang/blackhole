@@ -73,7 +73,7 @@
     "command": "python3 scripts/generate_binary_sxs_dynamics.py --metadata metadata.json --horizons Horizons.h5 --waveform rhOverM_Asymptotic_GeometricUnits_CoM.h5",
     "deterministic": true,
     "generator": "scripts/generate_binary_sxs_dynamics.py",
-    "generatorSha256": "b3d6f051d829e142cd53ba731cfcafbbde6070c4dae13d22c41afca8802d8cce"
+    "generatorSha256": "8511209e4f20b1c3de35f70ab0c1a1558485d84641f3f509e26f141f9aad6fcb"
   },
   "id": "binary-sxs-bbh-0001-v2",
   "physicalSystem": {
@@ -196,8 +196,8 @@
     "level": "Lev5",
     "license": {
       "attributionRequired": true,
-      "spdx": null,
-      "status": "not-declared-in-pinned-zenodo-record"
+      "spdx": "CC-BY-4.0",
+      "status": "declared-in-pinned-zenodo-record"
     },
     "recordDoi": "https://doi.org/10.5281/zenodo.3273935",
     "recordId": 3273935,

@@ -66,6 +66,15 @@ up      = -e_theta
 forward = -e_r.
 ```
 
+This triad is left-handed: `right x up = +forward`, while a physical camera
+has `right = forward x up = +e_phi`. The stored detector columns are therefore
+mirror-ordered, and the runtime reads them in reverse column order
+(`mapUvForCanvas` in `src/transfer-map-shaders.js`) so the displayed image is
+that of a right-handed camera. The same applies to the Schwarzschild product,
+whose declared camera-right is ICRS +X although `forward x up` is -X. The
+record data themselves (escape directions, frequency factors, lookback) are
+per-ray quantities and need no change.
+
 The camera looks radially inward with a 40-degree vertical field of view and a
 1024×576 pixel-centre projection. The finite-distance ZAMO frame matters: an
 asymptotic Bardeen screen formula cannot be substituted without changing the
@@ -223,7 +232,7 @@ Kerr-Schild metric / ZAMO / spin-binding error = 0
 ```
 
 The exact manifest trust root is
-`5b0022ab963c0cc35d3d8acab17190bd1294bc72da2b49003d785f964ac81d99`.
+`596690e62b65d874c2cf99c55d65d8069145eaddc251695f5a60166406ba0851`.
 Generation time is an operational observation, not a scientific acceptance
 threshold; the recorded residual and independent-comparison gates are the
 acceptance evidence.

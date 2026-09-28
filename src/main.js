@@ -146,6 +146,8 @@ const state = {
   fps: 0,
   fpsFrames: 0,
   fpsElapsed: 0,
+  fpsWindowStart: 0,
+  fpsLastFrameAt: -Infinity,
   lastAdaptation: 0,
   userHoldUntil: 0,
   pointers: new Map(),
@@ -317,6 +319,13 @@ function strongFieldRevisionTokens(frame) {
 
 function sceneHref(sceneId) {
   const parameters = new URLSearchParams(query);
+  // An automatic WebGPU -> WebGL2 recovery (marked by its fallback token) must
+  // not stick to every later page: navigation retries WebGPU. An explicit
+  // ?renderer=webgl without a fallback token is the user's choice and stays.
+  if (parameters.has("fallback")) {
+    parameters.delete("fallback");
+    parameters.delete("renderer");
+  }
   if (sceneId === "binary-approx") {
     parameters.delete("scene");
     parameters.delete("reference");
@@ -481,6 +490,35 @@ function rendererErrorMessage(error) {
   return error instanceof Error ? error.message : String(error || "unknown");
 }
 
+// Only an exception raised inside a backend call is a GPU/runtime failure that
+// the WebGL2 fallback might cure. Scheduler, scene or validation errors would
+// fail identically after a reload, so they must not trigger one.
+let rendererCallError = null;
+
+function callRenderer(method, ...args) {
+  try {
+    return renderer[method](...args);
+  } catch (error) {
+    rendererCallError = error;
+    throw error;
+  }
+}
+
+// The timeline is "running" only while physical time actually advances: a
+// zero time scale or a scene's end-of-track hold is a static view that may
+// refine and accumulate.
+function timelineAdvancing() {
+  return (
+    state.running
+    && state.timeScale > 0
+    && activeScene?.timeAdvancing?.() !== false
+  );
+}
+
+function viewportIsEmpty() {
+  return !(window.innerWidth >= 1 && window.innerHeight >= 1);
+}
+
 function requestWebGLRendererRecovery(reason, error, source = renderer) {
   if (
     rendererRecoveryStarted
@@ -637,7 +675,6 @@ function setMotion(running) {
   const actionLabel = running ? labels.pause : labels.resume;
   ui.toggleMotion.dataset.state = running ? "running" : "paused";
   ui.toggleMotion.disabled = activeScene?.motionEnabled === false;
-  ui.toggleMotion.setAttribute("aria-pressed", String(!running));
   ui.toggleMotion.setAttribute("aria-label", actionLabel);
   ui.toggleMotion.setAttribute("title", actionLabel);
   const mark = ui.toggleMotion.querySelector("span");
@@ -713,7 +750,7 @@ function bindInteractions() {
     state.pointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
 
     if (state.pointers.size === 1) {
-      state.phase -= dx * 0.0052;
+      state.phase += dx * 0.0052;
       state.orbitTilt = clamp(state.orbitTilt + dy * 0.0042, -1.46, 1.46);
     } else if (state.pointers.size >= 2) {
       const separation = pointerSeparation();
@@ -766,15 +803,30 @@ function bindInteractions() {
   canvas.addEventListener("contextmenu", (event) => event.preventDefault());
 
   window.addEventListener("keydown", (event) => {
-    if (event.target instanceof HTMLInputElement || event.target instanceof HTMLButtonElement) {
+    // Leave browser shortcuts (zoom, history, find) and the native keyboard
+    // behaviour of focusable controls untouched.
+    if (
+      event.defaultPrevented
+      || event.metaKey
+      || event.ctrlKey
+      || event.altKey
+      || event.target?.closest?.(
+        "input, select, textarea, button, summary, a[href], [contenteditable]",
+      )
+    ) {
       return;
     }
     if (activeScene?.cameraLocked) {
       return;
     }
+    if (event.key === " " && event.repeat) {
+      // Holding Space must not toggle the timeline on every auto-repeat.
+      event.preventDefault();
+      return;
+    }
     let handled = true;
-    if (event.key === "ArrowLeft") state.phase += 0.06;
-    else if (event.key === "ArrowRight") state.phase -= 0.06;
+    if (event.key === "ArrowLeft") state.phase -= 0.06;
+    else if (event.key === "ArrowRight") state.phase += 0.06;
     else if (event.key === "ArrowUp") state.orbitTilt = clamp(state.orbitTilt - 0.05, -1.46, 1.46);
     else if (event.key === "ArrowDown") state.orbitTilt = clamp(state.orbitTilt + 0.05, -1.46, 1.46);
     else if (event.key === "0") state.orbitTilt = 0;
@@ -814,8 +866,10 @@ function cameraFrame() {
   ]);
   const cameraPos = scale(positionUnit, state.distance);
   const forward = scale(positionUnit, -1);
-  const right = tangent;
-  const up = normalize(cross(forward, right));
+  // Right-handed camera (right x up = -forward): screen-right is the
+  // opposite of the orbital tangent, so real sky maps are not mirrored.
+  const up = normalize(cross(forward, tangent));
+  const right = scale(tangent, -1);
 
   const baseCamera = {
     cameraPos,
@@ -858,7 +912,7 @@ function resizeRenderer(force = false) {
   state.lastHeight = height;
   state.lastScale = scaleValue;
   state.renderScale = scaleValue;
-  renderer.resize(width, height);
+  callRenderer("resize", width, height);
   ui.renderScaleValue.textContent = `${scaleValue.toFixed(2)}× · ${width}×${height}`;
   state.resizePending = false;
   state.needsRender = true;
@@ -916,13 +970,17 @@ function frameParameters() {
     // celestial sphere remains fixed while the observer moves around the hole.
     skyRotation: -2.576,
     up: camera.up,
-    diskOuterRadius: 18,
+    // Inside the 34 M minimum camera distance; the Novikov-Thorne flux there
+    // is ~6% of peak and fades smoothly from 0.72 of this radius.
+    diskOuterRadius: 30,
     renderScale: state.renderScale,
     // In the strong-field scene mode 1 is the categorical ray-outcome view,
     // not the legacy Hubble display look.  Diagnostic masks must never pass
     // through a photographic bloom transform.
     bloom: state.mode === 1 && !usesStrongFieldQuality(activeScene) ? 0.06 : 0,
-    motion: state.running ? 1 : 0,
+    // Scenes whose modes are false-colour diagnostics set this themselves.
+    diagnosticDisplay: false,
+    motion: timelineAdvancing() ? 1 : 0,
     frame: state.frame,
     observerVelocity: camera.observerVelocity,
     observerBeta: camera.observerBeta,
@@ -949,7 +1007,9 @@ function consumeRendererFrameTimeMs(frameElapsed) {
     renderer?.capabilities?.api === "webgpu"
     || renderer instanceof WebGPURenderer
   );
-  return !webgpu && strongFieldPreviousFrameRendered
+  // A zero interval (e.g. the first frame after a visibility change) carries
+  // no timing information and must not reach the scheduler's validation.
+  return !webgpu && strongFieldPreviousFrameRendered && frameElapsed > 0
     ? frameElapsed * 1_000
     : null;
 }
@@ -974,7 +1034,7 @@ function scheduledStrongFieldFrame(now, frameTimeMs) {
       state.dragging
       || now < strongFieldInteractionUntil
     ),
-    timelineRunning: state.running,
+    timelineRunning: timelineAdvancing(),
     backend: renderer.capabilities?.api || (
       renderer instanceof WebGPURenderer ? "webgpu" : "webgl2"
     ),
@@ -986,14 +1046,14 @@ function scheduledStrongFieldFrame(now, frameTimeMs) {
     || height !== state.lastHeight
     || Math.abs(renderScale - state.lastScale) > 1e-9
   ) {
-    renderer.resize(width, height);
+    callRenderer("resize", width, height);
     state.lastWidth = width;
     state.lastHeight = height;
     state.lastScale = renderScale;
     state.renderScale = renderScale;
   }
   ui.renderScaleValue.textContent = (
-    `${decision.qualityTierId} · ${renderScale.toFixed(2)}× · ${width}×${height}`
+    `${i18n.t(`quality.tier.${decision.qualityTierId}`)} · ${renderScale.toFixed(2)}× · ${width}×${height}`
   );
   app.dataset.strongFieldTier = decision.qualityTierId;
   app.dataset.strongFieldPerformanceTier = String(decision.performanceTier);
@@ -1037,14 +1097,27 @@ function scheduledStrongFieldFrame(now, frameTimeMs) {
   };
 }
 
-function updateFps(dt) {
-  state.fpsFrames += 1;
-  state.fpsElapsed += dt;
-  if (state.fpsElapsed >= 0.75) {
-    state.fps = state.fpsFrames / state.fpsElapsed;
-    ui.fpsValue.textContent = Math.round(state.fps).toString();
+function updateFps(dt, now) {
+  // A gap (idle, hidden tab) starts a fresh measurement window.
+  if (!(now - state.fpsLastFrameAt <= 1_000)) {
     state.fpsFrames = 0;
     state.fpsElapsed = 0;
+    state.fpsWindowStart = now;
+  }
+  state.fpsLastFrameAt = now;
+  state.fpsFrames += 1;
+  state.fpsElapsed += dt;
+  const wallSeconds = (now - state.fpsWindowStart) / 1_000;
+  if (state.fpsElapsed >= 0.75 || wallSeconds >= 0.75) {
+    // GPU frame times give the throughput that drives adaptive quality; the
+    // readout shows frames actually delivered per wall-clock second, which
+    // one-frame-in-flight submission quantizes to the display refresh.
+    state.fps = state.fpsFrames / Math.max(state.fpsElapsed, 1e-6);
+    const delivered = wallSeconds > 0 ? state.fpsFrames / wallSeconds : state.fps;
+    ui.fpsValue.textContent = Math.round(delivered).toString();
+    state.fpsFrames = 0;
+    state.fpsElapsed = 0;
+    state.fpsWindowStart = now;
   }
 }
 
@@ -1104,11 +1177,26 @@ function bindUi() {
     state.resizePending = true;
     state.needsRender = true;
   });
+  // Moving the window between 1x and 2x displays changes devicePixelRatio
+  // without a resize event; watch the current ratio and re-arm on change.
+  const watchPixelRatio = () => {
+    const ratioQuery = window.matchMedia?.(
+      `(resolution: ${window.devicePixelRatio || 1}dppx)`,
+    );
+    ratioQuery?.addEventListener?.("change", () => {
+      invalidateStrongFieldQuality("device-pixel-ratio-change");
+      state.resizePending = true;
+      state.needsRender = true;
+      watchPixelRatio();
+    }, { once: true });
+  };
+  watchPixelRatio();
   document.addEventListener("visibilitychange", () => {
     invalidateStrongFieldQuality(
       document.hidden ? "visibility-hidden" : "visibility-resume",
     );
     lastFrameTime = performance.now();
+    strongFieldPreviousFrameRendered = false;
   });
 }
 
@@ -1137,7 +1225,9 @@ function renderAnimationFrame(now) {
   const dt = Math.min(frameElapsed, 0.1);
   lastFrameTime = now;
 
-  if (!document.hidden) {
+  // A collapsed or display:none viewport has nothing to render; treat it like
+  // a hidden document instead of handing zero dimensions to the scheduler.
+  if (!document.hidden && !viewportIsEmpty()) {
     if (activeScene?.advance) {
       if (state.running) {
         activeScene.advance(dt, now);
@@ -1163,12 +1253,12 @@ function renderAnimationFrame(now) {
         const scheduled = scheduledStrongFieldFrame(now, frameTimeMs);
         strongFieldPreviousFrameRendered = scheduled.decision.shouldRender;
         if (scheduled.decision.shouldRender) {
-          const submitted = renderer.render(scheduled.frame) !== false;
+          const submitted = callRenderer("render", scheduled.frame) !== false;
           strongFieldPreviousFrameRendered = submitted;
           if (submitted) {
             state.frame = (state.frame + 1) % 16_777_216;
             state.needsRender = false;
-            updateFps((frameTimeMs ?? frameElapsed * 1_000) / 1_000);
+            updateFps((frameTimeMs ?? frameElapsed * 1_000) / 1_000, now);
           }
         }
       }
@@ -1177,9 +1267,9 @@ function renderAnimationFrame(now) {
         if (state.resizePending) {
           resizeRenderer();
         }
-        if (state.running || state.dragging || state.needsRender) {
+        if (timelineAdvancing() || state.dragging || state.needsRender) {
           const frameTimeMs = renderer.consumeCompletedFrameTimeMs?.();
-          const submitted = renderer.render(frameParameters()) !== false;
+          const submitted = callRenderer("render", frameParameters()) !== false;
           if (submitted) {
             state.frame = (state.frame + 1) % 16_777_216;
             state.needsRender = false;
@@ -1187,6 +1277,7 @@ function renderAnimationFrame(now) {
               Number.isFinite(frameTimeMs) && frameTimeMs > 0
                 ? frameTimeMs / 1_000
                 : frameElapsed,
+              now,
             );
             adaptQuality(now);
           }
@@ -1204,7 +1295,12 @@ function animate(now) {
     }
   } catch (error) {
     console.error("Renderer frame failed", error);
-    if (!requestWebGLRendererRecovery("render-error", error)) {
+    const backendFailure = error === rendererCallError;
+    rendererCallError = null;
+    if (
+      !backendFailure
+      || !requestWebGLRendererRecovery("render-error", error)
+    ) {
       if (!rendererRecoveryStarted) {
         runtimeRenderFailed = true;
         renderer?.dispose?.();

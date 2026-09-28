@@ -756,7 +756,7 @@ test("the visible sky selector preserves the URL and exposes the 16K memory cost
   assert.match(html, /<select id="skySource"[^>]*aria-describedby="skySourceHint"/);
   assert.match(html, /<option value="high" data-i18n="sky\.eso">[\s\S]*ESO native 6000×3000/);
   assert.match(html, /<option value="ultra" data-i18n="sky\.gaia">[\s\S]*Gaia native 16000×8000/);
-  assert.match(html, /native dimensions[\s\S]*no downsampling or silent fallback[\s\S]*236 MB[\s\S]*488 MiB/);
+  assert.match(html, /native dimensions[\s\S]*no downsampling or silent fallback[\s\S]*236 MiB[\s\S]*488 MiB/);
   assert.match(
     main,
     /const requestedSkyMode = query\.get\("sky"\) === "ultra" \? "ultra" : "high"/,

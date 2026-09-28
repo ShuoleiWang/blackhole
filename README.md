@@ -11,9 +11,10 @@ The root URL opens the real-time vacuum binary scene; the independent
 opens the interactive single-hole scene.
 
 The root scene is a production-oriented **WebGPU strong-field binary ray
-tracer**. Each pixel follows a past-directed null Hamiltonian ray through a
-frame-frozen, boosted, superposed Kerr-Schild approximation and classifies the
-result as `captured`, `escaped`, or `unresolved`. The merger transitions
+tracer**. Each pixel follows a past-directed null Hamiltonian ray, integrated
+with fourth-order Runge-Kutta, through a frame-frozen superposition of
+Kerr-Schild black holes and classifies the result as `captured` (at the
+innermost photon orbit), `escaped`, or `unresolved`. The merger transitions
 smoothly to an analytic single-Kerr remnant. Mouse or touch input changes the
 camera; the next submitted frame contains only rays from that new camera and
 never reuses a fixed transfer map or queues stale viewpoints.
@@ -66,7 +67,7 @@ renderers.
 
 | Product layer | Status | Scientific boundary |
 | --- | --- | --- |
-| Root real-time vacuum binary scene | Implemented | WebGPU 3+1 Hamiltonian rays through a boosted, superposed Kerr-Schild fast-light approximation; SXS anchors waveform/events/remnant, not body coordinates |
+| Root real-time vacuum binary scene | Implemented | WebGPU 3+1 Hamiltonian RK4 rays through a frame-frozen superposed Kerr-Schild fast-light approximation; SXS anchors waveform/events/remnant, not body coordinates |
 | `?scene=binary-dual-disk` | Implemented | Same strong-field lensing plus two idealized Roche/ISCO-truncated thin mini-disks; no GRMHD, self-consistent spectral radiative transfer, or post-merger emission model |
 | `?scene=schwarzschild` | Implemented | Interactive single-hole Schwarzschild geodesics and an idealized disk |
 | Stationary Schwarzschild/Kerr workbench | Implemented | Fixed-camera analytic vacuum calibration, authenticated delivery, and regression oracles; not a merger renderer |
@@ -83,7 +84,7 @@ rendering format.
 
 - **Interactive Schwarzschild geodesics** — The explicit single-hole scene uses Störmer–Verlet integration of `u'' = -u + 3u²` instead of a screen-space distortion effect.
 - **Unified ray-path composition** — A single traced ray handles capture, multiple disk-plane intersections, and the final sky escape direction, producing critical-curve arcs and higher-order images.
-- **Relativistic disk appearance** — Includes frequency shifts from Schwarzschild circular motion, the bolometric intensity transfer factor `g⁴`, approximate blackbody chromaticity, surface optical depth, and limb darkening.
+- **Relativistic disk appearance** — An optically thick Novikov–Thorne disk from the ISCO to 30 M with exact Schwarzschild circular-orbit frequency shifts. Colour and brightness come from a 15-sample CIE integral of the colour-corrected blackbody at the observed temperature times the transferred bolometric intensity `g⁴F`, so Doppler and radial contrasts are those of the visible band; flux-normalized electron-scattering limb darkening. Exposure is anchored to a static emitter at the flux peak.
 - **Real-time procedural disk structure** — Turbulence-inspired, finite-lifetime noise is advected at the local Keplerian angular velocity. This is a visual approximation, not an MHD simulation.
 - **Source-anchored binary evolution** — The root scene lazy-loads a
   2,732-sample, approximately 198 KiB track derived from
@@ -93,27 +94,33 @@ rendering format.
   strong-field renderer; centroid channels remain labelled, gauge-dependent
   diagnostics.
 - **Unified spacetime provider** — A 44-float aligned frame ABI supplies
-  explicit body/remnant positions, velocities, spins, attenuation, numerical
-  guards, and a C² binary-to-remnant transition. The CPU oracle and WGSL share
+  explicit body/remnant positions, velocities, spins, optional companion
+  attenuation (off by default), numerical guards, and a C² binary-to-remnant
+  transition. The CPU oracle and WGSL share
   the same 3+1 contract.
 - **Strong-field WebGPU transport** — The production shader evaluates
-  arbitrary-spin boosted Kerr-Schild terms, analytic spatial metric
-  derivatives, lapse, shift, and inverse spatial metric before integrating the
-  reduced null Hamiltonian. The exact post-merger limit is a single Kerr
-  metric with the pinned SXS remnant mass and spin.
-- **Fail-closed ray outcomes** — Outside the declared isolated-Kerr excision
-  and narrowly bounded failure-only capture guard, metric-domain failures,
-  regularization contact, excessive null residual, and exhausted step budgets
-  remain visibly `unresolved`; they are never sampled as sky.
+  arbitrary-spin Kerr-Schild terms, analytic spatial metric derivatives,
+  lapse, shift, and inverse spatial metric, and integrates the reduced null
+  Hamiltonian with classical RK4 whose steps scale with the distance to the
+  nearest hole. Frozen body positions enter unboosted, so each term keeps its
+  horizon at `r = r+`. The exact post-merger limit is a single Kerr metric with
+  the pinned SXS remnant mass and spin.
+- **Photon-orbit capture and fail-closed outcomes** — A ray inside an
+  innermost (prograde) photon orbit and moving inward cannot escape an
+  isolated Kerr hole, so it is captured there; radii are scaled by each term's
+  metric weight during the merger blend. Metric failures or exhausted budgets
+  inside an unscaled photon orbit are captures; elsewhere they remain visibly
+  `unresolved` and are never sampled as sky.
 - **Interactive binary transport** — The waveform timeline can be scrubbed,
   paused from either transport control, and replayed with an optional
   presentation-only `0.12×` slow-motion window around merger. Slow motion
   changes wall-clock playback only, never the source time or physics data.
 - **M3 Pro quality-locked scheduling** — One WebGPU frame may be in flight at
   a time, preventing stale-camera queue buildup. Motion and dragging retain the
-  full Retina backing raster up to 12 MP with a 72-step base budget; slow frame
-  timing may reduce throughput but cannot silently lower spatial resolution.
-  Paused views retain the same raster and refine from 160 to 288 base steps.
+  full Retina backing raster up to 12 MP with the `interactive` RK4 tier; slow
+  frame timing may reduce throughput but cannot silently lower spatial
+  resolution. Paused views retain the same raster and refine through the
+  `balanced` and `fine` RK4 tiers.
 - **Schwarzschild/Kerr calibration workbench** —
   `?scene=transfer-map-reference` authenticates one of two bundled 1024×576
   stationary maps before either backend consumes it. The Kerr reference
@@ -189,7 +196,8 @@ The single-hole scene retains its neutral science and stylized Hubble display
 transforms. In the root strong-field scene, the same mode area exposes the
 scientific sky as the primary image, with coordinate-lookback,
 Hamiltonian-residual, and integration-cost views kept under advanced
-diagnostics. Ray outcome and frequency-shift channels remain in the GPU result
+diagnostics. False-colour diagnostics bypass exposure, the Hubble grade and
+tone mapping, so their palettes reach the screen unchanged. Ray outcome and frequency-shift channels remain in the GPU result
 and stationary scientific-reference workbench without occupying primary
 binary-scene controls.
 
@@ -265,34 +273,41 @@ derivative, and second derivative from the common-horizon event to the
 waveform peak. Gauge-dependent SXS centroid separation and phase are retained
 only for labelled UI evidence and regression.
 
-On WebGPU, each pixel first builds its camera direction in an ADM-orthonormal
-local tetrad. It stores the opposite, future-directed momentum of the photon
-arriving at the camera, then advances the Hamiltonian flow with negative
-coordinate-time steps so the traced path is past-directed. The shader
-evaluates a frozen boosted-superposed Kerr-Schild metric, decomposes it into
-lapse, shift, and spatial metric, and integrates
+On WebGPU, each pixel first builds its camera direction in the rest frame of
+a static observer (`u = ∂ₜ/α_s`), the same kind of camera as the Schwarzschild
+scene. It stores the future-directed momentum of the photon arriving at the
+camera, then advances the Hamiltonian flow with negative coordinate-time steps
+so the traced path is past-directed. The shader
+evaluates a frozen superposed Kerr-Schild metric, decomposes it into lapse,
+shift, and spatial metric, and integrates
 
 ```text
 H(x,p) = α sqrt(γⁱʲ pᵢ pⱼ) - βⁱpᵢ = -pₜ
 ```
 
-with adaptive steps and analytic spatial derivatives. Rays terminate as
-captured, escaped, or unresolved. Escaped rays receive a closed-form
-weak-field monopole continuation from the finite escape sphere to infinity;
-their frequency factor uses the conserved asymptotic energy. During merger,
-the approximate binary metric makes a C² transition to the analytic Kerr
-remnant. The image is then accumulated in linear FP16 HDR only while every
+with classical fourth-order Runge-Kutta, analytic spatial derivatives, and
+an exact energy-surface projection (H is homogeneous in p, so the projection
+does not change the path). Rays terminate as captured at the innermost photon
+orbit, escaped, or unresolved. The escape sphere lies well outside the camera,
+where the ingoing Kerr-Schild coordinate direction already matches the
+asymptotic sky direction to ~M b³/r⁴, so no weak-field tail is added; the
+frequency factor uses the conserved asymptotic energy (the same `1/α_s` for
+every sky pixel of the static camera). The approximate binary metric makes a
+C² transition to the analytic Kerr remnant that starts once the separation
+reaches 8.5 sqrt(m_A m_B) (t = −18.09 M for SXS:BBH:0001), before the
+superposition would lose its Lorentzian signature between the holes. The image is then accumulated in linear FP16 HDR only while every
 physical and camera revision is stationary, before the shared display
 transform.
 
 This pipeline is not a solved SXS near-zone spacetime: body locations come
 from the declared analytic adapter, the metric is frozen along a ray, and the
-isolated-Kerr capture surfaces are excision proxies rather than computed
-apparent or event horizons. Deadline-oriented `emergency`, `survival`, and `interactive`
-tiers use explicitly larger capture padding and looser integration budgets;
-the paused `fine` tier is the strictest settled configuration. These policies
-trade numerical resolution for latency and do not change the model's
-scientific classification. On WebGL2, the scene intentionally supplies the
+photon-orbit capture surfaces are those of isolated Kerr terms rather than
+computed apparent or event horizons, and the plain superposition makes each
+hole's shadow roughly `2 m_companion / d` too large. The motion tiers use a
+larger RK4 step fraction (sky errors near the holes of a few arcminutes, i.e.
+several native-Retina pixels); the paused `fine` tier is the strictest settled
+configuration (about 0.1′). These policies trade numerical resolution for
+latency and do not change the model's scientific classification. On WebGL2, the scene intentionally supplies the
 old separation/phase compatibility payload to the labelled weak-field shader.
 
 The reference path completes a separate fail-closed chain: select a reference
@@ -340,8 +355,9 @@ Primary implementation files:
   Kerr-Schild/3+1 physics oracle, provider ABI, Hamiltonian, and fail-closed
   domain checks
 - [`src/strong-field-shaders.js`](./src/strong-field-shaders.js) — Production
-  WebGPU metric jets, local camera tetrad, Hamiltonian tracer, outcomes,
-  diagnostics, asymptotic handoff, and the explicit WebGL2 fallback declaration
+  WebGPU metric jets, static-observer camera, RK4 Hamiltonian tracer,
+  photon-orbit capture, outcomes, diagnostics, and the explicit WebGL2
+  fallback declaration
 - [`src/strong-field-quality.js`](./src/strong-field-quality.js) — M3 Pro
   interaction/refinement scheduler, resolution/step hysteresis, revision
   invalidation, and accumulation policy
@@ -368,8 +384,8 @@ Primary implementation files:
   boundary, current real-time strong-field model, explicit WebGL2 fallback, and
   offline architecture
 - [`docs/strong-field-equations.md`](./docs/strong-field-equations.md) —
-  Boosted Kerr-Schild provider, past-directed Hamiltonian convention,
-  excision semantics, and GPU frame ABI
+  Superposed Kerr-Schild provider, past-directed Hamiltonian convention,
+  photon-orbit capture semantics, and GPU frame ABI
 - [`docs/strong-field-performance.md`](./docs/strong-field-performance.md) —
   M3 Pro quality tiers, one-frame backpressure, declared numerical tradeoffs,
   and progressive convergence
@@ -396,11 +412,11 @@ Primary implementation files:
 | Scene / component | Implemented | Current boundary |
 | --- | --- | --- |
 | Explicit single black hole | Non-rotating Schwarzschild spacetime and numerical GPU null-geodesic integration | No Kerr spin or frame dragging; the narrowest critical-curve features remain sampling-limited |
-| Explicit Schwarzschild accretion disk | Idealized zero-thickness surface from `r = 6M` to `18M`, frequency shifts, approximate emission, and turbulence-inspired structure | No finite scale height, GRMHD, complete spectrum, polarization, or self-consistent radiative transfer |
+| Explicit Schwarzschild accretion disk | Optically thick zero-thickness Novikov–Thorne surface from `r = 6M` to `30M`, exact circular-orbit frequency shifts, CIE visible-band photometry, and turbulence-inspired structure | No finite scale height, GRMHD, complete spectrum, polarization, or self-consistent radiative transfer |
 | Binary coordinate dynamics | Waveform-frequency-anchored quasi-circular PN/EOB-like relation with analytic center-of-mass positions and velocities | Not a calibrated EOB Hamiltonian; SXS centroid separation/phase are gauge-dependent UI evidence and never renderer coordinates |
 | Binary waveform | CoM-corrected `Extrapolated_N2` complex `h22`, aligned so its maximum amplitude is protocol `t = 0` | A far-zone waveform is not a near-zone metric and cannot determine camera-ray propagation |
 | Binary merger/remnant data | Common apparent horizon at `t = -6.072285 M`; exact metadata remnant mass `0.951609417715 M` and spin vector `(-7.29520687012e-10, 7.40468371215e-10, 0.686461676493)` | The C² metric removal is an analytic transition, not reconstructed NR horizon geometry or recoil |
-| Binary lensing | Per-pixel 3+1 null-Hamiltonian integration through boosted superposed Kerr-Schild terms; exact single-Kerr post-merger limit includes frame dragging | Strong-field but approximate, frame-frozen, and not constraint-solved NR; the capture surfaces remain isolated-Kerr excision proxies |
+| Binary lensing | Per-pixel 3+1 null-Hamiltonian RK4 integration through frame-frozen superposed Kerr-Schild terms; exact single-Kerr post-merger limit includes frame dragging | Strong-field but approximate, frame-frozen (fast light), and not constraint-solved NR; photon-orbit capture uses isolated-Kerr radii |
 | Root binary emission | Vacuum sky lensing with no accretion disk | Adding luminous plasma would require physical gas initial data, GRMHD, and radiative transfer |
 | Dual-disk binary emission | Two moving thin surfaces with `6m_i` ISCOs, `0.8R_L` tidal truncation, zero-torque temperature, CIE visible-band response, invariant frequency transfer, `g⁴`, C² photospheric coverage, bounded analytic tidal structure, and finite optical depth | Idealized emission proxy; no SXS matter data, GRMHD, volumetric absorption, polarization, self-consistent spectral transfer, or post-merger disk |
 | Stationary Schwarzschild reference | Fixed 1024×576 analytic vacuum map, authenticated chunks, nearest-texel WebGPU/WebGL2 playback | Fixed camera; no disk, NR source, time interpolation, or binary slow-light rays |
@@ -433,10 +449,14 @@ output mode, completed-frame throughput, and internal render resolution. The
 strong-field scheduler prevents WebGPU work from queueing behind one in-flight
 Metal frame, but it no longer trades resolution for frame rate. Motion and
 dragging use the native device-pixel ratio up to the 12 MP M3 Pro ceiling with
-72 base steps; paused refinement uses 160 and then 288 steps at the same raster.
+the `interactive` RK4 tier; paused refinement uses the `balanced` and then
+`fine` tiers at the same raster.
 For example, a 1280×720 CSS viewport renders at 2560×1440 on a 2× Retina display,
 and a 1836×1376 viewport renders at 3672×2752. These settings can stutter by
 design; completed-frame timing is telemetry rather than authority to downscale.
+On an M3 Pro a full-screen 3456×2234 Retina raster takes about 240 ms per
+`interactive` frame (about 4 FPS while moving) and 670 ms per `fine` sample;
+see [`docs/strong-field-performance.md`](./docs/strong-field-performance.md).
 
 ## Validation
 
@@ -464,9 +484,12 @@ node --test tests/transfer-map-runtime.test.mjs
 With the static server running on an M3 Pro, open
 <http://localhost:4173/tests/strong-field-gpu-probe-browser.html> to execute
 the exact 116-float dual-disk production WGSL as a WebGPU compute corpus. The
-harness reads back both disk radiance, transmittance, and fail-closed state for
-combined, A-only, B-only, repeated, and dark-disk cases; a passing page is a
-native-backend numerical check, not a screenshot comparison.
+page first compiles every production WGSL module and fails on any compilation
+error, then reads back both disk radiance, transmittance, and fail-closed state
+for combined, A-only, B-only, repeated, and dark-disk cases; a passing page is
+a native-backend numerical check, not a screenshot comparison. No automated
+test executes the WGSL tracers; the Node suite checks their source contract and
+the CPU oracles.
 
 Regenerate the bundled reference deterministically with:
 
@@ -475,13 +498,16 @@ python3 scripts/generate_schwarzschild_transfer_map.py
 python3 scripts/generate_kerr_transfer_map.py
 ```
 
-The Schwarzschild numerical regression checks cover:
+The Schwarzschild numerical regression checks read the step angle, step
+budgets and camera range from the shader and runtime sources and cover:
 
-- Critical impact parameter `b_c = 3√3 M`
-- Agreement between weak-field deflection and `4M/b`
-- Shadow angular diameter for a finite-distance observer
-- The null-geodesic integration invariant
-- Capture and escape behavior under the 184- and 288-step real-time budgets
+- Weak-field deflection against the exact orbit integral (1e-5 rad) and the
+  known `4x + (15π/4)x² + (128/3)x³ + (3465π/64)x⁴` series
+- The shader-step escape azimuth against exact quadrature at the camera
+  distances the UI allows
+- The shadow edge `b_c = 3√3 M` by bisection, with second-order convergence
+  of the integrator's separatrix, and the shader's capture rule across it
+- The null-geodesic integration invariant under the production step budget
 
 The Phase 2 binary validator pins the three official source files by URL, size,
 MD5, and SHA-256; checks the 2,732-sample sidecar hash and schema; confirms the
@@ -493,11 +519,14 @@ event anchors, finite interpolation, scrub clamping, presentation-only slow
 motion, deterministic looping/end hold, and frame-rate independence.
 
 The strong-field suite independently checks the Minkowski and exact
-single-Schwarzschild Kerr-Schild limits, Kerr spin parity/frame-dragging sign,
-wide-separation monopole limit, companion attenuation, Lorentz-covector boost,
-C² remnant transition, 3+1 null construction, Hamiltonian derivatives,
-regularization, fail-closed outcomes, the packed GPU ABI, local ADM camera
-tetrad, finite-sphere asymptotic continuation, revision-safe accumulation, and
+single-Schwarzschild Kerr-Schild limits, the full Kerr-Schild metric and 3+1
+fields against an independent closed-form implementation (off-equatorial
+points, arbitrary spin axes), Kerr spin parity/frame-dragging sign,
+wide-separation monopole limit, optional companion attenuation,
+Lorentz-covector boost, C² remnant transition, 3+1 null construction,
+Hamiltonian derivatives, regularization, fail-closed outcomes (including a
+non-Lorentzian binary midpoint), the packed GPU ABI, the static-observer
+camera, the no-tail escape direction, revision-safe accumulation, and the
 single-frame WebGPU submission gate. Separate tests prove that changing or
 making the SXS centroid separation/phase unreadable cannot change the
 strong-field body coordinates.
@@ -569,8 +598,14 @@ The original source code in this project is licensed under the
 
 Third-party sky assets, SXS-derived data, transfer-map source data, and vendored
 dependencies are not relicensed by the MIT License and remain subject to their
-respective source terms. The pinned Zenodo record used for the Phase 2 SXS files
-does not declare a license; this repository records that source status without
-inventing an SPDX identifier or inferring a license from another page. See
+respective source terms. The SXS:BBH:0001 data used by the binary scenes come
+from the pinned Zenodo record
+[10.5281/zenodo.3273935](https://doi.org/10.5281/zenodo.3273935) (G. Lovelace,
+H. Pfeiffer, M. Boyle, M. Scheel, L. Kidder, A. Zenginoglu, A. Mroue,
+D. Hemberger, B. Szilagyi, N. Taylor; SXS Collaboration), licensed under
+[CC BY 4.0](https://creativecommons.org/licenses/by/4.0/); the bundled files
+are derived resamplings, not the original data. The bundled CIE 1931 table is
+CC BY-SA 4.0, and the vendored three.js r165 is MIT
+([`vendor/three.LICENSE`](./vendor/three.LICENSE)). See
 [`assets/SOURCES.md`](./assets/SOURCES.md) for complete provenance and licensing
 details.

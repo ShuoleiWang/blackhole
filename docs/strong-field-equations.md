@@ -9,8 +9,8 @@ implementation, not the production per-pixel implementation itself.
 The provider is a **strong-field approximate fast-light metric**. It is not a
 constraint-satisfying numerical-relativity spacetime and is not slow-light.
 The two body positions are frozen while a ray is integrated. The construction
-follows the boosted, superposed Kerr-Schild strategy developed for inexpensive
-binary backgrounds by:
+is a frozen, unboosted variant of the superposed Kerr-Schild strategy developed
+for inexpensive (time-dependent, boosted) binary backgrounds by:
 
 - L. Combi and S. M. Ressler, *A binary black hole metric approximation from
   inspiral to merger*, [arXiv:2403.13308](https://arxiv.org/abs/2403.13308).
@@ -49,11 +49,16 @@ l = [r x + x cross a + (a dot x) a / r] / (r^2 + a^2).
 For `a=0`, these reduce to ingoing Schwarzschild Kerr-Schild coordinates:
 `r=|x|`, `H=M/r`, and `l=(1,x/r)`.
 
-An instantaneous Lorentz transformation maps the rest-frame scalar and
-covector to the asymptotically inertial binary frame. Acceleration-dependent
-coordinate terms are intentionally omitted: this is the instantaneous boosted
-ansatz used by the fast-light approximation, not an exact accelerated-hole
-solution.
+A Lorentz transformation maps the rest-frame scalar and covector to a frame
+in which the hole moves with velocity `v`; that boosted term is an exact vacuum
+solution only while its centre moves as `X0 + v t`. The fast-light provider
+freezes body positions for the whole ray, so it uses **unboosted** terms at the
+frame positions: a frozen boosted term is not a vacuum solution, and its
+trailing-side null surface moves out to `r = r+ gamma^2 (1 + v)^2` (1.26 r+ at
+`v = 0.116`, 1.74 r+ at `v = 0.27`), beyond the photon orbit once `v > 0.2`.
+Unboosted frozen terms keep their horizons at `r = r+` and deflect light no
+less accurately than frozen boosted ones. Body velocities remain in the frame
+ABI for matter kinematics and for a future slow-light provider.
 
 ## Binary superposition and remnant
 
@@ -70,40 +75,70 @@ terms vanish exactly, leaving the analytic remnant Kerr metric. Remnant mass
 and spin may be anchored to SXS metadata, but SXS apparent-horizon centroid
 coordinates are not accepted as Kerr-Schild body positions.
 
-The attenuation applied to term A near the companion B is
+An optional attenuation of term A near the companion B,
 
 ```text
-A_A = 1 - exp[-(r_B / sigma)^p],
+A_A = 1 - exp[-(r_B / sigma)^p]      (p = 4, sigma = 0.35 separation),
 ```
 
-with the reciprocal definition for B. The default is `p=4` and
-`sigma=0.35 separation`. This removes the companion's singular contribution
-from each local hole neighborhood. It is an explicit numerical prescription;
-it does not solve the Hamiltonian or momentum constraints.
+with the reciprocal definition for B, remains in the provider but is
+**disabled by default** (`A_A = A_B = 1`). Its window gradient acts as a
+spurious diverging lens around each hole: rays passing one to two shadow
+radii from a hole pick up an extra +8 to +30 degrees of deflection at a 10 M
+separation. The plain superposition has a smoother, smaller error: the
+companion's nearly constant potential couples nonlinearly into each hole's
+term, so each shadow is too large by roughly `2 m_companion / d` (about 5% at
+the initial 18.6 M separation and 10% at 10 M). Removing that bias would
+require writing each term in the local flat frame of its companion's
+potential; this is not implemented. Neither variant solves the Hamiltonian or
+momentum constraints.
 
 The ring singularity is protected by a small Kerr-radius floor and a finite
-`H` ceiling. A ray must be classified as captured before entering this region.
-Every sample records whether regularization was touched. Capture distances are
-excision proxies measured outward from the isolated Kerr radius `r_+`; they
-are not computed binary apparent or event horizons.
+`H` ceiling. Every sample records whether regularization was touched.
 
-The production quality tiers declare capture padding of `0.30 M`
-(`emergency`), `0.24 M` (`survival`), `0.16 M` (`interactive`), `0.08 M`
-(`balanced`), and `0.04 M` (`fine`). In ingoing Kerr-Schild coordinate time,
-a past-directed shadow ray
-can approach the past horizon asymptotically. If the reduced coordinate-time
-energy projection fails, the WebGPU tracer therefore has one additional
-failure-only capture guard: it may classify a ray as captured only inside
-`0.95 M` of either non-spinning individual horizon, tapering to `0.25 M` for
-the pinned spinning remnant. Both limits remain inside the corresponding
-isolated-Kerr photon shell. Outside that declared bound the same failure stays
-`unresolved`.
+The merger transition starts before the superposition breaks down. Two
+significant terms with anti-aligned null vectors make the metric non-Lorentzian
+where `c_A c_B (l_A . l_B)^2 >= 1` with `c = 2 H w`; at the midpoint of two
+unboosted Schwarzschild terms `(l_A . l_B)^2 = 4`, so this happens once the
+separation drops below `8 sqrt(m_A m_B)` (4 M for SXS:BBH:0001, where
+`m_A = m_B = 0.5`). The orbit adapter therefore starts the `C2` metric blend
+when the separation reaches `8.5 sqrt(m_A m_B)` (4.25 M, at `t = -18.09 M`;
+the crossing is interpolated on the orbit grid rather than taken at the next
+grid sample), or at the common horizon if that comes first. Body trajectories
+are unchanged.
 
-The larger low-tier surfaces and looser step budgets are latency policies, not
-new horizons or accuracy claims. A paused view can progress to `fine`, the
-strictest settled tier, which uses the smallest padding, smallest maximum
-step, and tightest residual threshold. Even `fine` remains a trace through the
-approximate frame-frozen metric.
+### Capture
+
+A ray is captured at the innermost photon orbit. For an isolated Kerr hole no
+null geodesic has a radial turning point inside the prograde equatorial
+circular photon orbit
+
+```text
+r_ph = 2m [1 + cos(2/3 acos(-chi))]      (3m for chi = 0, m for chi = 1),
+```
+
+so a ray found there while moving inward cannot escape. Time reversal maps
+Kerr to Kerr with the opposite spin, which has the same innermost orbit, so the
+test also applies to the past-directed rays traced here. In the superposed
+metric it is applied to the nearest term, using the Kerr radius of that term
+and its gradient for the inward test. A term with metric weight `w` acts like a
+hole of mass `w m` near its centre, so its horizon and photon radii are scaled
+by `w`; during the merger blend the capture regions therefore grow and shrink
+continuously rather than switching on.
+
+If a sample fails (non-Lorentzian metric, non-positive Hamiltonian branch or
+energy drift beyond the tier gate) or the step budget runs out while the ray is
+inside the unscaled photon orbit of any term present in the metric, the ray is
+captured: a ray from outside cannot escape from there, and during the merger
+blend that region lies inside the common horizon. "Present" means any non-zero
+weight: early in the blend the remnant's ring singularity already breaks the
+superposition near the centre of mass while its weight is below 1e-4. Every
+metric failure found by the CPU oracle in the orbital plane, sampled densely
+through the blend, lies inside this region. Elsewhere failing rays stay
+`unresolved`. A
+horizon padding remains only as a backstop. Validation against exact
+Schwarzschild integrals and a converged Kerr reference (`chi = 0.686`) found no
+ray misclassified by the photon-orbit test.
 
 ## 3+1 fields
 
@@ -142,32 +177,52 @@ The CPU oracle uses centered finite differences for `partial_i H` and
 `partial_t H`. Production WGSL may use analytic or automatic derivatives, but
 must agree with this reference within the declared integration tolerance.
 
-For a camera view direction `n_view^i` pointing from the observer into the
-scene, the future-directed photon that arrives at the camera has the opposite
-Eulerian spatial direction. After normalization the initial covector is
+The camera is the static observer `u = d/dt / alpha_s`, with
+`alpha_s^2 = alpha^2 - beta_k beta^k`, whose rest space carries the metric
+`h_ij = gamma_ij + beta_i beta_j / alpha_s^2`. For a view direction `n^i`
+(unit with respect to `h`, pointing from the observer into the scene) the
+future-directed photon that arrives at the camera is `p = E_s (u - n)`; with
+`E_s = 1`,
 
 ```text
-p_i = -gamma_ij n_view^j.
+p^t = (1 - beta_k n^k / alpha_s) / alpha_s,
+p_i = beta_i p^t - gamma_ij n^j.
 ```
+
+Its conserved energy is `E = -p_t = alpha_s`, so every sky photon arrives with
+frequency shift `g = 1 / alpha_s`; the frozen metric is stationary, so this is
+uniform over the sky. The Eulerian (normal) observer of ingoing Kerr-Schild
+slicing is not suitable: it falls inward at `v = 2M/r` relative to static
+observers, which shrinks the shadow by `sqrt((1 - v)/(1 + v))` (5-6% at a
+30-40 M camera distance), and it does not match the static camera of the
+Schwarzschild scene.
 
 The equations above give the future-directed Hamiltonian flow for that
-covector. Ray tracing advances them with a negative coordinate-time increment:
+covector. Ray tracing integrates them backward in coordinate time, i.e. the
+past-directed flow `d(x, p)/d tau = -(dx/dt, dp/dt)` with lookback `tau = -t`,
+using classical fourth-order Runge-Kutta. Each step is a tier-dependent
+fraction of `max(r - w r+, r/2)` for the nearest term, so steps shrink near the
+holes and grow geometrically in the far field; the WGSL writes RK4 as a stage
+machine so the metric provider is evaluated at one call site per iteration.
+Because `H` is homogeneous of degree one in `p`, rescaling `p` by
+`E / H(x, p)` at each step restores the conserved energy exactly without
+changing the spatial path; the pre-projection drift is the reported residual.
 
-```text
-x <- x - Delta_t dx/dt
-p <- p - Delta_t dp/dt,     Delta_t > 0.
-```
-
-The outward direction used at the escape sphere is consequently `-dx/dt`.
+The outward direction used at the escape sphere is consequently `-dx/dt`. The
+escape sphere lies at least `2 r_camera + 16 M` out. Ingoing Kerr-Schild
+coordinates follow the ingoing principal null congruence, so the coordinate
+direction of an arriving photon there already matches its asymptotic direction
+to about `M b^3 / r^4` (0.004 deg for `b = 20 M` at 96 M); adding the
+harmonic-gauge tail `(2M/b)(1 - s/r)` would instead introduce a ~0.1 deg
+error, so none is added.
 This past-directed convention is essential for the sign of Kerr frame
 dragging and for frequency shifts in boosted or rotating spacetimes; merely
 launching the view vector as a future-directed ray gives the wrong boundary
 problem.
 
-The null diagnostic reconstructs `p_mu=(-H,p_i)` and reports both
-`g^mu_nu p_mu p_nu` and a scale-normalized residual. Unless it is already
-inside the declared failure-only capture guard above, a ray whose residual,
-step budget, or metric domain fails must end as `unresolved`.
+The residual diagnostic is the relative energy drift `|H/E - 1|` measured
+before each projection. Outside the unscaled photon orbits (see Capture), a
+ray whose drift, step budget, or metric domain fails ends as `unresolved`.
 
 ## Orbit adapter boundary
 
@@ -203,7 +258,8 @@ interactive scene. It never reads the bundled `sample.separationM` or
    same radius/phase model for their boost velocities;
 6. joins the inspiral state at the SXS common-horizon event to the
    waveform-peak state with quintic Hermite polynomials matching value, first
-   derivative, and second derivative;
+   derivative, and second derivative, while the metric blend weight rises
+   from the superposition limit (see above) to one at the waveform peak;
 7. supplies the SXS remnant mass/spin after mapping the source orbital axis to
    the renderer axis.
 

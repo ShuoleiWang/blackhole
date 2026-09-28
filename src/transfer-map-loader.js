@@ -182,7 +182,13 @@ function bytesOf(value) {
 
 export async function sha256Hex(value, cryptoImpl = globalThis.crypto) {
   if (!cryptoImpl?.subtle) {
-    throw new Error("Web Crypto SHA-256 is unavailable");
+    throw new Error(
+      globalThis.isSecureContext === false
+        ? "Serve this page over HTTPS or from localhost: transfer maps are "
+          + "verified with Web Crypto SHA-256, which browsers only provide in "
+          + "secure contexts"
+        : "Web Crypto SHA-256 is unavailable",
+    );
   }
   const bytes = bytesOf(value);
   const digest = await cryptoImpl.subtle.digest(

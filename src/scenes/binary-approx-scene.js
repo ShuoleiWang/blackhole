@@ -18,7 +18,8 @@ const MANIFEST_URL = new URL(
 );
 const DEG = 180 / Math.PI;
 const WAVEFORM_WIDTH = 280;
-const MAX_STRONG_FIELD_STEPS = 320;
+// Must match MAX_RK4_STEPS in the strong-field WGSL.
+const MAX_STRONG_FIELD_RK4_STEPS = 192;
 const STRONG_FIELD_ACCUMULATION_MODE = "linear-hdr-running-average-v1";
 const DUAL_DISK_DEFAULT_LOG_ACCRETION = -1.70;
 const DUAL_DISK_MAXIMUM_OUTER_RADIUS_M = 10;
@@ -40,46 +41,55 @@ const SCENE_VARIANTS = Object.freeze({
     shaderBundle: strongFieldBinaryDualDiskShaderBundle,
   }),
 });
+// RK4 tracer policy. integrator = [minimum step M, maximum step M, step
+// fraction of the distance to the nearest horizon, relative energy-drift
+// failure threshold]. Rays are captured at the innermost photon orbit, so the
+// horizon padding is only a backstop. The escape sphere is far enough out
+// that the ingoing Kerr-Schild coordinate direction there matches the
+// asymptotic sky direction to well below a pixel.
+//
+// The step fraction sets the truncation error, which scales roughly as f^5.
+// Against a converged reference on SXS:BBH:0001 frames, rays passing within
+// 8 M of a horizon have median/p90 sky errors of about 3-5'/7-13' at 0.6,
+// 0.1-0.2'/0.2-0.3' at 0.3, and less at 0.22. The motion tiers therefore
+// trade a few native-Retina pixels near the holes for frame time; a paused
+// view refines to balanced/fine. Larger fractions start flipping capture
+// outcomes, so no tier exceeds 0.6.
 const STRONG_FIELD_TIER_POLICY = Object.freeze({
   emergency: Object.freeze({
-    integrator: Object.freeze([0.065, 3.50, 2.7, 0.34]),
-    escapeRadiusM: 56,
-    maximumLookbackM: 164,
-    maximumCriticalBonus: 268,
-    stepCurveExponent: 0.50,
-    capturePaddingM: 0.30,
+    integrator: Object.freeze([0.02, 64, 0.60, 0.05]),
+    escapeRadiusM: 96,
+    maximumLookbackM: 260,
+    maximumSteps: 48,
+    capturePaddingM: 0.02,
   }),
   survival: Object.freeze({
-    integrator: Object.freeze([0.050, 3.50, 3.0, 0.25]),
-    escapeRadiusM: 60,
-    maximumLookbackM: 180,
-    maximumCriticalBonus: 256,
-    stepCurveExponent: 0.65,
-    capturePaddingM: 0.24,
+    integrator: Object.freeze([0.02, 64, 0.60, 0.05]),
+    escapeRadiusM: 96,
+    maximumLookbackM: 260,
+    maximumSteps: 56,
+    capturePaddingM: 0.02,
   }),
   interactive: Object.freeze({
-    integrator: Object.freeze([0.035, 3.00, 3.3, 0.18]),
-    escapeRadiusM: 64,
-    maximumLookbackM: 200,
-    maximumCriticalBonus: 224,
-    stepCurveExponent: 0.80,
-    capturePaddingM: 0.16,
+    integrator: Object.freeze([0.01, 64, 0.60, 0.02]),
+    escapeRadiusM: 96,
+    maximumLookbackM: 260,
+    maximumSteps: 80,
+    capturePaddingM: 0.02,
   }),
   balanced: Object.freeze({
-    integrator: Object.freeze([0.018, 1.10, 3.6, 0.10]),
-    escapeRadiusM: 80,
-    maximumLookbackM: 220,
-    maximumCriticalBonus: 160,
-    stepCurveExponent: 1.50,
-    capturePaddingM: 0.08,
+    integrator: Object.freeze([0.01, 64, 0.30, 0.01]),
+    escapeRadiusM: 160,
+    maximumLookbackM: 400,
+    maximumSteps: 144,
+    capturePaddingM: 0.01,
   }),
   fine: Object.freeze({
-    integrator: Object.freeze([0.010, 0.85, 4.0, 0.05]),
-    escapeRadiusM: 80,
-    maximumLookbackM: 220,
-    maximumCriticalBonus: 64,
-    stepCurveExponent: 1.90,
-    capturePaddingM: 0.04,
+    integrator: Object.freeze([0.005, 64, 0.22, 0.005]),
+    escapeRadiusM: 200,
+    maximumLookbackM: 480,
+    maximumSteps: 192,
+    capturePaddingM: 0.005,
   }),
 });
 const SCRUB_KEYS = new Set([
@@ -491,7 +501,6 @@ export async function createBinaryScene({
       : i18n.t("binary.resumeTimeline");
     elements.playPause.setAttribute("aria-label", action);
     elements.playPause.setAttribute("title", action);
-    elements.playPause.setAttribute("aria-pressed", String(!running));
     const mark = elements.playPause.querySelector("span");
     if (mark) {
       mark.textContent = running ? "Ⅱ" : "▶";
@@ -570,7 +579,7 @@ export async function createBinaryScene({
       elements.sceneStatus.textContent = [
         rendererView?.backend || capabilities.backend || "WebGPU",
         i18n.t("binary.status.strongTrace"),
-        "boosted superposed Kerr–Schild",
+        "superposed Kerr–Schild",
         i18n.t("binary.status.fastLight"),
         i18n.t("binary.status.advanced"),
       ].join(" · ");
@@ -594,11 +603,38 @@ export async function createBinaryScene({
     ].join(" · ");
   }
 
+  // Frames are rebuilt on every animation tick, including idle ones that
+  // render nothing; skip DOM writes whose value has not changed.
+  // Values are compared with the live DOM so a write from elsewhere is never
+  // masked by a stale cache.
+  function setText(element, value) {
+    if (element.textContent !== value) {
+      element.textContent = value;
+    }
+  }
+  function setHtml(element, value) {
+    if (element.innerHTML !== value) {
+      element.innerHTML = value;
+    }
+  }
+  function setAttributeIfChanged(element, name, value) {
+    const text = String(value);
+    if (element.getAttribute?.(name) !== text) {
+      element.setAttribute(name, text);
+    }
+  }
+  function setValue(element, value) {
+    if (element.value !== value) {
+      element.value = value;
+    }
+  }
+
   function updateTransport(sample) {
-    elements.scrubber.value = sample.tM.toFixed(6);
+    setValue(elements.scrubber, sample.tM.toFixed(6));
     const timeText = formatProtocolTime(sample.tM);
-    elements.timeValue.textContent = timeText;
-    elements.scrubber.setAttribute(
+    setText(elements.timeValue, timeText);
+    setAttributeIfChanged(
+      elements.scrubber,
       "aria-valuetext",
       i18n.t("binary.ariaTime", {
         time: timeText,
@@ -610,7 +646,7 @@ export async function createBinaryScene({
       slowMotionEnabled,
     );
     const stationary = !state.running || scrubbing || playbackHolding;
-    elements.playbackRate.textContent = stationary
+    setText(elements.playbackRate, stationary
       ? playbackHolding && state.running
         ? i18n.t("binary.playback.endHold")
         : i18n.t("binary.playback.paused")
@@ -621,14 +657,15 @@ export async function createBinaryScene({
         })
         : i18n.t("binary.playback.actual", {
           rate: actualRateMPerSecond.toFixed(0),
-        });
-    elements.slowMotion.setAttribute(
+        }));
+    setAttributeIfChanged(
+      elements.slowMotion,
       "aria-pressed",
       String(slowMotionEnabled),
     );
-    elements.slowMotion.textContent = slowMotionEnabled
+    setText(elements.slowMotion, slowMotionEnabled
       ? i18n.t("binary.playback.slowOn")
-      : i18n.t("binary.playback.slowOff");
+      : i18n.t("binary.playback.slowOff"));
   }
 
   function updateDynamicReadouts(
@@ -640,45 +677,43 @@ export async function createBinaryScene({
       (sample.orbitalPhaseRad * DEG) % 360 + 360
     ) % 360;
     if (sample.individualHorizonsValid) {
-      ui.observerValue.innerHTML = [
+      setHtml(ui.observerValue, [
         `a<sub>coord,SXS</sub> ${sample.separationM.toFixed(2)} M`,
         `φ<sub>coord,SXS</sub> ${phaseDegrees.toFixed(0)}°`,
-      ].join(" · ");
+      ].join(" · "));
     } else if (sample.regime === "nr-horizon-gap") {
-      ui.observerValue.textContent = (
-        i18n.t("binary.readout.gap")
-      );
+      setText(ui.observerValue, i18n.t("binary.readout.gap"));
     } else if (sample.renderTopologyBlend < 0.995) {
-      ui.observerValue.textContent = i18n.t("binary.readout.horizon");
+      setText(ui.observerValue, i18n.t("binary.readout.horizon"));
     } else {
-      ui.observerValue.textContent = i18n.t("binary.readout.remnant");
+      setText(ui.observerValue, i18n.t("binary.readout.remnant"));
     }
     if (variant.dualDisk) {
       const providerFrame = strongFieldFrame
         ?? strongFieldRuntime.frameAt(sample.tM);
       const diskState = providedDualDiskState
         ?? dualDiskStateAt(providerFrame);
-      ui.rsValue.textContent = i18n.t("dualDisk.readout.radiiValue", {
+      setText(ui.rsValue, i18n.t("dualDisk.readout.radiiValue", {
         radiusA: diskState.geometry.disks[0].outerRadiusM.toFixed(2),
         radiusB: diskState.geometry.disks[1].outerRadiusM.toFixed(2),
-      });
-      ui.shadowValue.textContent = i18n.t(
+      }));
+      setText(ui.shadowValue, i18n.t(
         dualDiskEmissionRendered === false
           ? "dualDisk.readout.emissionUnavailable"
           : diskState.emissionKey,
-      );
+      ));
     } else {
-      ui.shadowValue.textContent = regimeLabel(sample, i18n);
+      setText(ui.shadowValue, regimeLabel(sample, i18n));
     }
-    elements.binaryRegime.textContent = [
+    setText(elements.binaryRegime, [
       regimeLabel(sample, i18n),
       `|rh₂₂| ${sample.waveform.amplitude.toFixed(3)}`,
-    ].join(" · ");
+    ].join(" · "));
     const cursor = (
       WAVEFORM_WIDTH * clamp(sample.timelineFraction, 0, 1)
     ).toFixed(2);
-    elements.timeCursor.setAttribute("x1", cursor);
-    elements.timeCursor.setAttribute("x2", cursor);
+    setAttributeIfChanged(elements.timeCursor, "x1", cursor);
+    setAttributeIfChanged(elements.timeCursor, "x2", cursor);
     updateTransport(sample);
   }
 
@@ -902,7 +937,7 @@ export async function createBinaryScene({
         ].join(" · ")
         : [
           i18n.t("binary.initialStatus.strong"),
-          "boosted superposed Kerr–Schild",
+          "superposed Kerr–Schild",
           i18n.t("binary.initialStatus.anchor"),
           i18n.t("binary.status.fastLight"),
           i18n.t("binary.initialStatus.fallback"),
@@ -1001,15 +1036,21 @@ export async function createBinaryScene({
         cosLatitude * sinPhase,
       ]);
       const forward = scale(positionUnit, -1);
-      const right = normalize([-sinPhase, 0, cosPhase]);
+      // Right-handed camera (right x up = -forward); see main.js cameraFrame.
+      const orbitTangent = normalize([-sinPhase, 0, cosPhase]);
       return {
         cameraPos: scale(positionUnit, state.distance),
         forward,
-        right,
-        up: normalize(cross(forward, right)),
+        right: scale(orbitTangent, -1),
+        up: normalize(cross(forward, orbitTangent)),
         observerVelocity: [0, 0, 0],
         observerBeta: 0,
       };
+    },
+
+    // Time stands still while scrubbing or during the end-of-track hold.
+    timeAdvancing() {
+      return !scrubbing && !playbackHolding;
     },
 
     advance(deltaSeconds) {
@@ -1048,6 +1089,9 @@ export async function createBinaryScene({
         ];
       return {
         ...baseFrame,
+        // Modes 1-5 are false-colour diagnostics in the strong-field tracer;
+        // they bypass exposure, grading and tone mapping in the post pass.
+        diagnosticDisplay: baseFrame.mode >= 1 && baseFrame.mode <= 5,
         accretion: variant.dualDisk ? baseFrame.accretion : 0,
         fov: Math.max(baseFrame.fov, defaults.fieldOfViewDeg / DEG),
         diskOuterRadius: diskState
@@ -1078,45 +1122,30 @@ export async function createBinaryScene({
         STRONG_FIELD_TIER_POLICY[tierId]
         ?? STRONG_FIELD_TIER_POLICY.balanced
       );
-      const baseBudget = clamp(
-        Math.trunc(Number(frame?.steps) || 0),
-        0,
-        MAX_STRONG_FIELD_STEPS,
-      );
-      const criticalBonus = Math.max(
-        0,
-        Math.min(
-          tier.maximumCriticalBonus,
-          MAX_STRONG_FIELD_STEPS - baseBudget,
-        ),
-      );
       const cameraRadius = Number(frame?.cameraRadius);
       if (!Number.isFinite(cameraRadius) || cameraRadius <= 0) {
         throw new Error(
           "Binary strong-field quality requires a positive camera radius",
         );
       }
+      // Keep the escape sphere well outside the observer: the residual
+      // coordinate-direction error there falls off as r^-4.
       const escapeRadius = Math.max(
         tier.escapeRadiusM,
-        cameraRadius + 8,
+        2 * cameraRadius + 16,
       );
       const maximumLookback = Math.max(
         tier.maximumLookbackM,
-        2 * escapeRadius + 32,
+        2 * escapeRadius + 64,
       );
       return {
         ...frame,
-        // Coarser settled/far-field steps let interaction rays leave the
-        // tier-specific finite domain within their smaller budget. The escape
-        // sphere always remains at least 8M outside the current observer.
-        // Horizon/photon-region
-        // accuracy tightens monotonically through the fine tier.
         sceneStrongIntegrator: tier.integrator,
         sceneStrongDomain: Object.freeze([
           escapeRadius,
           maximumLookback,
           tier.capturePaddingM,
-          criticalBonus,
+          Math.min(tier.maximumSteps, MAX_STRONG_FIELD_RK4_STEPS),
         ]),
         sceneStrongDiagnostics: Object.freeze([
           4,
@@ -1126,7 +1155,7 @@ export async function createBinaryScene({
           // the default image. Raw outcomes remain available to regression
           // probes and the scientific reference workbench.
           0.055,
-          tier.stepCurveExponent,
+          0, // reserved
         ]),
       };
     },

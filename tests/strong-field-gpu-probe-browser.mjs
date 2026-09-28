@@ -11,6 +11,17 @@ import {
   stableAnnulusWeight,
 } from "../src/scenes/binary-accretion-model.js";
 import { loadBinaryDynamics } from "../src/scenes/binary-dynamics-adapter.js";
+import {
+  fullscreenVertexWGSL,
+  postFragmentWGSL,
+  traceFragmentWGSL,
+} from "../src/shaders.js";
+import {
+  strongFieldBinaryDualDiskTraceFragmentWGSL,
+  strongFieldBinaryTraceFragmentWGSL,
+} from "../src/strong-field-shaders.js";
+import { transferMapTraceFragmentWGSL } from "../src/transfer-map-shaders.js";
+import { progressiveAccumulationFragmentWGSL } from "../src/webgpu-renderer.js";
 
 const MANIFEST_URL = new URL(
   "../assets/scenes/binary-sxs-bbh-0001-v2.json",
@@ -70,12 +81,12 @@ function cameraFrame(defaults) {
     cosLatitude * sinPhase,
   ]);
   const forward = scale(positionUnit, -1);
-  const right = normalize([-sinPhase, 0, cosPhase]);
+  const orbitTangent = normalize([-sinPhase, 0, cosPhase]);
   return Object.freeze({
     cameraPos: Object.freeze(scale(positionUnit, defaults.observerRadiusM)),
     forward: Object.freeze(forward),
-    right: Object.freeze(right),
-    up: Object.freeze(normalize(cross(forward, right))),
+    right: Object.freeze(scale(orbitTangent, -1)),
+    up: Object.freeze(normalize(cross(forward, orbitTangent))),
   });
 }
 
@@ -183,6 +194,28 @@ async function main() {
   }
   const device = await adapter.requestDevice();
   try {
+    // Every production WGSL module must compile; the Node tests only inspect
+    // the source text.
+    const shaderModules = {
+      fullscreenVertex: fullscreenVertexWGSL,
+      schwarzschildTrace: traceFragmentWGSL,
+      post: postFragmentWGSL,
+      progressiveAccumulation: progressiveAccumulationFragmentWGSL,
+      strongFieldVacuumTrace: strongFieldBinaryTraceFragmentWGSL,
+      strongFieldDualDiskTrace: strongFieldBinaryDualDiskTraceFragmentWGSL,
+      transferMapTrace: transferMapTraceFragmentWGSL,
+    };
+    const compileErrors = [];
+    for (const [name, code] of Object.entries(shaderModules)) {
+      const info = await device.createShaderModule({ code }).getCompilationInfo();
+      for (const message of info.messages) {
+        if (message.type === "error") {
+          compileErrors.push(`${name}:${message.lineNum}:${message.linePos} ${message.message}`);
+        }
+      }
+    }
+    assert(compileErrors.length === 0, `WGSL compilation failed: ${compileErrors.join("; ")}`);
+
     const track = await loadBinaryDynamics(MANIFEST_URL);
     const runtime = createStrongFieldOrbitRuntime({ track });
     const strongFrame = runtime.frameAt(PROTOCOL_TIME_M);
@@ -227,9 +260,11 @@ async function main() {
       observerVelocity: Object.freeze([0, 0, 0]),
       observerBeta: 0,
       sceneStrongFieldUniforms: strongFrame.uniforms,
-      sceneStrongIntegrator: Object.freeze([0.010, 0.85, 4.0, 0.05]),
-      sceneStrongDomain: Object.freeze([80, 220, 0.04, 32]),
-      sceneStrongDiagnostics: Object.freeze([4, 180, 0.055, 1.9]),
+      // Production fine tier: RK4 step fraction, escape sphere, lookback,
+      // horizon backstop, and maximum RK4 steps.
+      sceneStrongIntegrator: Object.freeze([0.005, 64, 0.22, 0.005]),
+      sceneStrongDomain: Object.freeze([200, 480, 0.005, 192]),
+      sceneStrongDiagnostics: Object.freeze([4, 180, 0.055, 0]),
     });
     const probes = createStrongFieldProbeGrid({
       columns: GRID_COLUMNS,
@@ -311,6 +346,7 @@ async function main() {
       schema: both.schema,
       adapter: exposedAdapterInfo,
       requiredAdapter: REQUIRED_ADAPTER,
+      compiledShaderModules: Object.freeze(Object.keys(shaderModules)),
       raster: RASTER,
       grid: Object.freeze([GRID_COLUMNS, GRID_ROWS]),
       probeCount: probes.length,
@@ -327,6 +363,15 @@ async function main() {
   }
 }
 
+if (typeof document === "undefined") {
+  // Browser-only harness: open tests/strong-field-gpu-probe-browser.html from
+  // a local server. Under `node --test tests/*.mjs` it is a no-op, not a failure.
+  console.log("strong-field GPU probe: browser-only harness skipped under Node");
+} else {
+  await runInBrowser();
+}
+
+async function runInBrowser() {
 const resultElement = document.querySelector("#result");
 try {
   const result = await main();
@@ -343,4 +388,5 @@ try {
   document.documentElement.dataset.status = result.status;
   resultElement.textContent = JSON.stringify(result, null, 2);
   console.error(error);
+}
 }

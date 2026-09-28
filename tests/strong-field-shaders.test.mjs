@@ -155,6 +155,12 @@ test("strong-field bundle declares asymmetric WebGPU production policy", () => {
     strongFieldBinaryShaderBundle.wgsl.trace,
     strongFieldBinaryShaderBundle.glsl.trace,
   );
+  // The fallback orbits in the same sense as the WebGPU orbit adapter
+  // (angular momentum along +y, phase advancing from +x toward -z).
+  assert.match(
+    binaryTraceFragmentGLSL,
+    /vec3 axis = vec3\(cos\(orbitalPhase\), 0\.0, -sin\(orbitalPhase\)\);/,
+  );
   assert.match(
     strongFieldBinaryShaderBundle.labels.webglFallback,
     /weak-field/i,
@@ -412,9 +418,9 @@ test("dual-disk uniform writer rejects malformed or non-physical transfer state"
 test("vacuum generated WGSL remains byte-for-byte unchanged", () => {
   assert.equal(
     createHash("sha256").update(strongFieldBinaryTraceFragmentWGSL).digest("hex"),
-    "de367f0ba7f2f2bc71750d983067ac813c35eb0818c0b1dfdb0cf2ef7ab28849",
+    "ec466402cb1e6303483db5d85a27cd5b3a1fa8e2dcbcc06169cfcddef1835f46",
   );
-  assert.equal(strongFieldBinaryTraceFragmentWGSL.length, 49097);
+  assert.equal(strongFieldBinaryTraceFragmentWGSL.length, 54361);
   assert.doesNotMatch(
     strongFieldBinaryTraceFragmentWGSL,
     /sceneDiskControl|DiskIntersection|diskRadiance|accumulateDualDiskEmission/,
@@ -445,10 +451,14 @@ test("dual-disk WGSL sorts segment crossings and composes finite optical depth",
     shader.indexOf("return result;", shader.indexOf("if (firstIsA)")),
   );
   assert.ok(firstBranch.indexOf("result, hitA") < firstBranch.indexOf("result, hitB"));
+  // Crossings are located on two chords per RK4 step through the third-order
+  // continuous-extension midpoint, with momentum interpolated to each hit.
   assert.match(
     shader,
-    /let previousPosition = position;[\s\S]*position = position - acceptedStepSize[\s\S]*accumulateDualDiskEmission\(/,
+    /let midPosition = stepPosition[\s\S]*accumulateDualDiskEmission\(\s*result,\s*stepPosition,\s*midPosition,[\s\S]*accumulateDualDiskEmission\(\s*result,\s*midPosition,\s*nextPosition,/,
   );
+  assert.match(shader, /midX = \(5\.0 \/ 24\.0\) \* derivativeX/);
+  assert.match(shader, /let momentumA = mix\(\s*momentumStart,\s*momentumEnd,/);
 });
 
 test("dual-disk transfer uses local emitter energy, g4, and mass-scaled T_eff4", () => {
@@ -518,7 +528,7 @@ test("dual-disk emissivity texture is bounded, continuous, and transport-only", 
   assert.ok(structureStart >= 0 && structureEnd > structureStart);
   const structure = shader.slice(structureStart, structureEnd);
   assert.match(structure, /let tidal = 0\.16 \* cos/);
-  assert.match(structure, /let referenceRadius = \(49\.0 \/ 36\.0\) \* innerRadius/);
+  assert.match(structure, /let referenceRadius = 1\.5918167 \* innerRadius/);
   assert.match(structure, /let omegaPeak = sqrt/);
   assert.match(structure, /wrapDiskPatternAngle\(0\.82 \* omegaPeak \* time\)/);
   assert.match(structure, /wrapDiskPatternAngle\(1\.21 \* omegaPeak \* time\)/);
@@ -566,8 +576,11 @@ test("WGSL exposes the strong-field provider and complete ray-result contract", 
     "contractionCoefficient",
     "transformedFactor",
     "observerCameraDirection",
-    "spatialMetricDot",
-    "asymptoticEscapeDirection",
+    "fn staticObserverFrame(",
+    "fn insidePhotonCapture(",
+    "photonMargin",
+    "failureCaptureMargin",
+    "stepDistance",
     "binaryActive",
     "remnantActive",
     "struct ADMFields",
@@ -582,8 +595,7 @@ test("WGSL exposes the strong-field provider and complete ray-result contract", 
     "nullResidual",
     "minimumHorizonDistance",
     "terminationReason",
-    "fn numericalCaptureGuard()",
-    "MAX_STRONG_STEPS: i32 = 320",
+    "MAX_RK4_STEPS: i32 = 192",
     "fn accumulationJitter()",
     "radicalInverse(sequenceIndex, 2u)",
     "fn fsMain(",
@@ -603,14 +615,27 @@ test("WGSL exposes the strong-field provider and complete ray-result contract", 
   );
   assert.match(strongFieldBinaryTraceFragmentWGSL, /value == value/);
   assert.match(strongFieldBinaryTraceFragmentWGSL, /abs\(value\) < 1\.0e18/);
+  // The RK4 step budget comes from the tier; exhausting it outside the
+  // capture region stays unresolved.
   assert.match(
     strongFieldBinaryTraceFragmentWGSL,
-    /stepIndex >= allowedSteps/,
+    /if \(stepCount >= maximumSteps\) \{[\s\S]*?failureCaptureMargin < 0\.0[\s\S]*?break;/,
   );
-  assert.match(
-    strongFieldBinaryTraceFragmentWGSL,
-    /baseBudget \+ criticalBonus/,
-  );
+  // Failure capture must cover every term present in the metric: a remnant
+  // with w < 1e-4 already breaks the superposition near its ring singularity.
+  for (const [weight, term] of [
+    ["weightA", "holeA"],
+    ["weightB", "holeB"],
+    ["weightRemnant", "remnant"],
+  ]) {
+    assert.match(
+      strongFieldBinaryTraceFragmentWGSL,
+      new RegExp(
+        String.raw`if \(${weight}\.value > 0\.0\) \{\s*failureCaptureMargin = min\(\s*`
+          + String.raw`failureCaptureMargin,\s*${term}\.kerrRadius - ${term}\.photonRadius`,
+      ),
+    );
+  }
   assert.match(
     strongFieldBinaryTraceFragmentWGSL,
     new RegExp(
@@ -626,29 +651,38 @@ test("WGSL exposes the strong-field provider and complete ray-result contract", 
     strongFieldBinaryTraceFragmentWGSL,
     /result\.outcome = RAY_UNRESOLVED/,
   );
+  // Static-observer arriving photon: p^t = (1 - beta.n / alpha_s) / alpha_s.
   assert.match(
     strongFieldBinaryTraceFragmentWGSL,
-    /return mix\(\s*0\.95,\s*0\.25,/,
+    /let photonTime = \(\s*1\.0 - dot\(observerFrame\.shiftCovariant, initialDirection\) \/ staticLapse\s*\) \/ staticLapse;/,
+  );
+  // Past-directed flow: position and momentum advance along minus the
+  // future-directed Hamiltonian derivatives; exact energy projection keeps
+  // the path unchanged because H is homogeneous of degree one in p.
+  assert.match(
+    strongFieldBinaryTraceFragmentWGSL,
+    /let derivativeX = -rhs\.velocity;\s*let derivativeP = -rhs\.momentumRate;/,
   );
   assert.match(
     strongFieldBinaryTraceFragmentWGSL,
-    /momentum = -\(observerFields\.spatialMetric \* initialDirection\)/,
+    /evalMomentum = evalMomentum\s*\* \(conservedEnergy \/ kinematics\.reducedHamiltonian\)/,
   );
   assert.match(
     strongFieldBinaryTraceFragmentWGSL,
-    /momentum = momentumBeforeKick - acceptedStepSize \* rhs\.momentumRate/,
+    /retryScale = retryScale \* 0\.25/,
   );
   assert.match(
     strongFieldBinaryTraceFragmentWGSL,
-    /acceptedStepSize = max\(minimumStep, stepSize \* 0\.25\)/,
+    /dot\(stepPosition, derivativeX\) > 0\.0/,
+  );
+  // Capture at the innermost photon orbit, with weight-scaled radii.
+  assert.match(
+    strongFieldBinaryTraceFragmentWGSL,
+    /2\.0 \* mass \* \(\s*1\.0 \+ cos\(\(2\.0 \/ 3\.0\) \* acos\(-clamp\(length\(safeChi\), 0\.0, 1\.0\)\)\)/,
   );
   assert.match(
     strongFieldBinaryTraceFragmentWGSL,
-    /position = position - acceptedStepSize \* driftKinematics\.velocity/,
-  );
-  assert.match(
-    strongFieldBinaryTraceFragmentWGSL,
-    /dot\(position, -rhs\.velocity\) > 0\.0/,
+    /let margin = holeA\.kerrRadius - w \* holeA\.photonRadius;/,
   );
 });
 
@@ -702,9 +736,6 @@ test("WGSL specializes exact inspiral and remnant endpoints", () => {
 });
 
 test("photographic sky sampling uses a path-independent stable four-tap footprint", () => {
-  const qualityStart = strongFieldBinaryTraceFragmentWGSL.indexOf(
-    "fn skyQualityPressure()",
-  );
   const start = strongFieldBinaryTraceFragmentWGSL.indexOf(
     "fn sampleEnvironment(",
   );
@@ -712,12 +743,14 @@ test("photographic sky sampling uses a path-independent stable four-tap footprin
     "\n}\n\nfn viridis(",
     start,
   );
-  assert.ok(qualityStart >= 0 && start > qualityStart && end > start);
-  const reconstruction = strongFieldBinaryTraceFragmentWGSL.slice(
-    qualityStart,
-    end,
-  );
+  assert.ok(start >= 0 && end > start);
   const environment = strongFieldBinaryTraceFragmentWGSL.slice(start, end);
+  const reconstruction = environment;
+  assert.doesNotMatch(
+    strongFieldBinaryTraceFragmentWGSL,
+    /fn skyQualityPressure\(/,
+    "the sky filter must not depend on the Schwarzschild step budget",
+  );
   assert.equal(
     (environment.match(/textureSampleLevel\(/g) || []).length,
     5,
@@ -726,11 +759,11 @@ test("photographic sky sampling uses a path-independent stable four-tap footprin
   assert.match(environment, /sourceFootprint/);
   assert.match(environment, /horizontalFov/);
   assert.match(environment, /footprintPressure/);
-  assert.match(environment, /sourceFootprint \* mix\(0\.72, 1\.08, qualityPressure\)/);
+  assert.match(environment, /clamp\(sourceFootprint \* 0\.72, 0\.50, 3\.0\)/);
+  assert.match(environment, /filterWeight = 0\.32 \* footprintPressure/);
   assert.match(environment, /uv \+ vec2<f32>\(radius \* texel\.x, 0\.0\)/);
   assert.match(environment, /uv - vec2<f32>\(0\.0, radius \* texel\.y\)/);
   assert.match(environment, /mix\(centre, filtered, filterWeight\)/);
-  assert.match(reconstruction, /params\.renderControls\.w/);
   assert.doesNotMatch(reconstruction, /result\.iterations/);
   assert.doesNotMatch(reconstruction, /result\.minimumHorizonDistance/);
   assert.doesNotMatch(reconstruction, /result\.lookback/);
@@ -786,13 +819,26 @@ test("progressive jitter is deterministic across epochs and bounded near the cen
   );
 });
 
-test("far-zone step ceiling deliberately rejects the unsafe 4.40 M emergency request", () => {
-  assert.equal(STRONG_FIELD_MAXIMUM_STEP_M, 3.5);
-  assert.ok(STRONG_FIELD_MAXIMUM_STEP_M < 4.4);
+test("RK4 steps scale with the orbit and are bounded by a single ceiling", () => {
+  assert.equal(STRONG_FIELD_MAXIMUM_STEP_M, 64);
   assert.match(
     strongFieldBinaryTraceFragmentWGSL,
-    /params\.sceneStrongIntegrator\.y,[\s\S]*?3\.5/,
+    /params\.sceneStrongIntegrator\.y,[\s\S]*?64\.0/,
   );
+  assert.match(
+    strongFieldBinaryTraceFragmentWGSL,
+    /stepFraction \* max\(fields\.stepDistance, 0\.0\) \* retryScale/,
+  );
+  // Classical RK4 weights and a single metric evaluation per iteration.
+  assert.match(
+    strongFieldBinaryTraceFragmentWGSL,
+    /\(stepSize \/ 6\.0\) \* \(sumX \+ derivativeX\)/,
+  );
+  assert.equal(
+    strongFieldBinaryTraceFragmentWGSL.match(/sampleSpacetime\(frameTime, /g).length,
+    2,
+  );
+  assert.doesNotMatch(strongFieldBinaryTraceFragmentWGSL, /symplectic|acceptedStepSize/);
 });
 
 test("diagnostic and outcome enums are stable and non-overlapping", () => {
@@ -868,63 +914,140 @@ test("local momentum construction starts on the 3+1 null cone", () => {
   assert.ok(Math.abs(constraint) < 1e-14);
 });
 
-test("camera FOV is measured in the local ADM orthonormal frame", () => {
-  const fields = schwarzschildKerrSchildAdm(1, 8);
-  const metricDot = (a, b) => dot(
-    a,
-    matrixVector(fields.gammaCovariant, b),
-  );
-  const normalizeMetric = (value) => {
-    const inverseNorm = 1 / Math.sqrt(metricDot(value, value));
-    return value.map((component) => component * inverseNorm);
-  };
-  const forward = normalizeMetric([-1, 0.18, 0.04]);
-  const rightSeed = [0.02, 0.07, 1];
-  const projection = metricDot(forward, rightSeed);
-  const right = normalizeMetric(
-    rightSeed.map((value, index) => value - projection * forward[index]),
-  );
-  assert.ok(Math.abs(metricDot(forward, forward) - 1) < 2e-15);
-  assert.ok(Math.abs(metricDot(right, right) - 1) < 2e-15);
-  assert.ok(Math.abs(metricDot(forward, right)) < 2e-15);
-
-  const angle = 0.42;
-  const localRay = normalizeMetric(forward.map(
-    (value, index) => value + Math.tan(angle) * right[index],
+test("static camera sees the Schwarzschild static-observer sky", () => {
+  // Reproduce the shader's static-observer photon at r = 8 M on the +x axis
+  // (ingoing Kerr-Schild, M = 1), looking inward at angle psi. Exact results:
+  // asymptotic energy E = alpha_s = sqrt(1 - 2M/r) for unit observed energy,
+  // and impact parameter b = r sin(psi) / sqrt(1 - 2M/r).
+  const mass = 1;
+  const radius = 8;
+  const fields = schwarzschildKerrSchildAdm(mass, radius);
+  const gamma = fields.gammaCovariant;
+  const shift = [fields.radialShift, 0, 0];
+  const shiftCovariant = matrixVector(gamma, shift);
+  const staticLapseSquared = fields.lapse ** 2 - dot(shiftCovariant, shift);
+  const staticLapse = Math.sqrt(staticLapseSquared);
+  assert.ok(Math.abs(staticLapseSquared - (1 - 2 * mass / radius)) < 1e-14);
+  const h = gamma.map((row, i) => row.map(
+    (value, j) => value + shiftCovariant[i] * shiftCovariant[j] / staticLapseSquared,
   ));
-  const measured = Math.acos(metricDot(forward, localRay));
-  assert.ok(Math.abs(measured - angle) < 2e-15);
+  const hDot = (a, b) => dot(a, matrixVector(h, b));
+  const hNormalize = (value) => value.map((c) => c / Math.sqrt(hDot(value, value)));
+  const forward = hNormalize([-1, 0, 0]);
+  const right = hNormalize([0, 0, 1]);
+  for (const psi of [0.1, 0.42, 0.9]) {
+    const n = hNormalize(forward.map((value, i) => value + Math.tan(psi) * right[i]));
+    assert.ok(Math.abs(Math.acos(hDot(forward, n)) - psi) < 1e-12);
+    const photonTime = (1 - dot(shiftCovariant, n) / staticLapse) / staticLapse;
+    const gammaN = matrixVector(gamma, n);
+    const p = shiftCovariant.map((value, i) => value * photonTime - gammaN[i]);
+    const q = Math.sqrt(dot(p, matrixVector(fields.gammaInverse, p)));
+    const energy = fields.lapse * q - dot(shift, p);
+    assert.ok(Math.abs(energy - staticLapse) < 1e-12);
+    const position = [radius, 0, 0];
+    const angularMomentum = Math.hypot(
+      position[1] * p[2] - position[2] * p[1],
+      position[2] * p[0] - position[0] * p[2],
+      position[0] * p[1] - position[1] * p[0],
+    );
+    const impact = angularMomentum / energy;
+    const expected = radius * Math.sin(psi) / Math.sqrt(1 - 2 * mass / radius);
+    assert.ok(Math.abs(impact - expected) < 1e-12);
+  }
   assert.match(
     strongFieldBinaryTraceFragmentWGSL,
-    /rawRight[\s\S]*spatialMetricDot/,
+    /fn staticObserverFrame\(fields: ADMFields\)/,
+  );
+  assert.match(
+    strongFieldBinaryTraceFragmentWGSL,
+    /var momentum = observerFrame\.shiftCovariant \* photonTime\s*- observerFields\.spatialMetric \* initialDirection;/,
   );
 });
 
-test("finite escape sphere receives the closed-form monopole tail", () => {
-  const position = [30, 40, 0];
-  const direction = [1, 0, 0];
-  const mass = 1;
-  const radius = Math.hypot(...position);
-  const longitudinal = dot(position, direction);
-  const impact = position.map(
-    (value, index) => value - longitudinal * direction[index],
+test("escape directions need no harmonic-gauge tail in ingoing Kerr-Schild", () => {
+  // Integrate an arriving photon in ingoing Kerr-Schild Schwarzschild (M = 1)
+  // from r = 2e4 M in to a 96 M escape sphere. Its coordinate direction barely
+  // changes, while the harmonic-gauge tail (2M/b)(1 - s/r) would add ~0.13 deg.
+  const b = 20;
+  const escapeRadius = 96;
+  const startRadius = 2e4;
+  const radiusOf = (x) => Math.hypot(x[1], x[2], x[3]);
+  const inverseMetric = (x) => {
+    const r = radiusOf(x);
+    const H = 1 / r;
+    const l = [-1, x[1] / r, x[2] / r, x[3] / r];
+    return [0, 1, 2, 3].map((i) => [0, 1, 2, 3].map((j) => (
+      (i === j ? (i === 0 ? -1 : 1) : 0) - 2 * H * l[i] * l[j]
+    )));
+  };
+  const contract = (g, p) => g.map((row) => row.reduce(
+    (sum, value, j) => sum + value * p[j],
+    0,
+  ));
+  const derivative = (y) => {
+    const x = y.slice(0, 4);
+    const p = y.slice(4);
+    const dp = [0, 0, 0, 0];
+    for (let axis = 1; axis < 4; axis += 1) {
+      const h = 1e-6 * radiusOf(x);
+      const plus = x.slice();
+      const minus = x.slice();
+      plus[axis] += h;
+      minus[axis] -= h;
+      const gPlus = inverseMetric(plus);
+      const gMinus = inverseMetric(minus);
+      let sum = 0;
+      for (let i = 0; i < 4; i += 1) {
+        for (let j = 0; j < 4; j += 1) {
+          sum += (gPlus[i][j] - gMinus[i][j]) * p[i] * p[j];
+        }
+      }
+      dp[axis] = -0.25 * sum / h;
+    }
+    return [...contract(inverseMetric(x), p), ...dp];
+  };
+  const direction = (y) => {
+    const v = derivative(y);
+    const d = [v[1] / v[0], v[2] / v[0], v[3] / v[0]];
+    const n = Math.hypot(...d);
+    return d.map((value) => value / n);
+  };
+  const x0 = [0, -Math.sqrt(startRadius ** 2 - b ** 2), b, 0];
+  const g0 = inverseMetric(x0);
+  const spatial = [1, 0, 0];
+  const A = g0[0][0];
+  const B = 2 * (g0[0][1] * spatial[0] + g0[0][2] * spatial[1] + g0[0][3] * spatial[2]);
+  let C = 0;
+  for (let i = 0; i < 3; i += 1) {
+    for (let j = 0; j < 3; j += 1) {
+      C += g0[i + 1][j + 1] * spatial[i] * spatial[j];
+    }
+  }
+  const roots = [1, -1].map((sign) => (-B + sign * Math.sqrt(B * B - 4 * A * C)) / (2 * A));
+  const pt = roots.find((root) => contract(g0, [root, ...spatial])[0] > 0);
+  let y = [...x0, pt, ...spatial];
+  const initial = direction(y);
+  while (radiusOf(y) > escapeRadius) {
+    const step = Math.min(0.002 * radiusOf(y), radiusOf(y) - escapeRadius + 1e-9);
+    const k1 = derivative(y);
+    const k2 = derivative(y.map((v, i) => v + 0.5 * step * k1[i]));
+    const k3 = derivative(y.map((v, i) => v + 0.5 * step * k2[i]));
+    const k4 = derivative(y.map((v, i) => v + step * k3[i]));
+    y = y.map((v, i) => v + (step / 6) * (k1[i] + 2 * k2[i] + 2 * k3[i] + k4[i]));
+  }
+  const final = direction(y);
+  const changeDeg = Math.acos(Math.min(1, dot(initial, final))) * 180 / Math.PI;
+  const s = Math.sqrt(escapeRadius ** 2 - b ** 2);
+  const harmonicTailDeg = (2 / b) * (1 - s / escapeRadius) * 180 / Math.PI;
+  assert.ok(changeDeg < 0.02, `KS far-field change ${changeDeg} deg`);
+  assert.ok(harmonicTailDeg > 10 * changeDeg);
+  assert.doesNotMatch(
+    strongFieldBinaryTraceFragmentWGSL,
+    /asymptoticEscapeDirection|remainingFraction/,
   );
-  const impactSquared = dot(impact, impact);
-  const remainingFraction = 1 - longitudinal / radius;
-  const correction = impact.map(
-    (value) => -2 * mass * value * remainingFraction / impactSquared,
-  );
-  assert.ok(Math.abs(correction[0]) < 1e-16);
-  assert.ok(Math.abs(correction[1] - (-0.02)) < 1e-16);
-  assert.ok(Math.abs(correction[2]) < 1e-16);
-  const raw = direction.map((value, index) => value + correction[index]);
-  const norm = Math.hypot(...raw);
-  const asymptotic = raw.map((value) => value / norm);
-  assert.ok(asymptotic[1] < 0);
-  assert.ok(Math.abs(Math.hypot(...asymptotic) - 1) < 2e-16);
   assert.match(
     strongFieldBinaryTraceFragmentWGSL,
-    /remainingFraction[\s\S]*-2\.0 \* asymptoticMass \* impact/,
+    /result\.escapeDirection = safeNormalize\(derivativeX\)/,
   );
 });
 

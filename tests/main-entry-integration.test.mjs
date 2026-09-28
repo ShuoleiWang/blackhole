@@ -65,4 +65,22 @@ test("main entry dynamically loads and configures the dual-disk scene", () => {
   assert.match(report.readouts.sceneStatus, /无 GRMHD 或自洽辐射转移 · 非完整 NR/);
   assert.equal(report.rafCount, 1);
   assert.deepEqual(report.startupErrors, []);
+
+  // A collapsed viewport pauses rendering instead of being mistaken for a GPU
+  // failure that reloads the page into the WebGL2 fallback.
+  assert.equal(report.emptyViewport.renders, 0);
+  assert.equal(report.emptyViewport.locationUnchanged, true);
+  assert.deepEqual(report.emptyViewport.errors, []);
+  assert.ok(report.emptyViewport.rendersAfterRestore >= 1);
+
+  // Native control keys and browser shortcuts are left alone.
+  assert.deepEqual(report.keyboard, {
+    arrowOnSelect: false,
+    spaceOnSelect: false,
+    spaceOnSummary: false,
+    browserZoom: false,
+    historyBack: false,
+    spaceRepeatToggles: false,
+    arrowOnBody: true,
+  });
 });

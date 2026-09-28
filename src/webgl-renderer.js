@@ -336,7 +336,9 @@ export class WebGLRenderer {
       uTime: this.traceUniforms.uTime,
       uExposure: this.traceUniforms.uExposure,
       uMode: this.traceUniforms.uMode,
+      uRenderScale: this.traceUniforms.uRenderScale,
       uBloom: this.traceUniforms.uBloom,
+      uDiagnosticDisplay: { value: 0 },
       uFrame: this.traceUniforms.uFrame,
     };
 
@@ -509,6 +511,12 @@ export class WebGLRenderer {
     uniforms.uFrame.value = frame.frame;
     uniforms.uObserverVelocity.value.fromArray(frame.observerVelocity);
     uniforms.uObserverBeta.value = frame.observerBeta;
+    // A GLSL fallback that only renders its photographic image keeps the
+    // tone-mapped display path even when the scene asks for a diagnostic.
+    this.postUniforms.uDiagnosticDisplay.value = (
+      frame.diagnosticDisplay === true
+      && this.shaderBundle.glsl?.diagnosticModes !== false
+    ) ? 1 : 0;
     this.shaderBundle.uniforms?.writeWebGLExtras?.(uniforms, frame);
   }
 

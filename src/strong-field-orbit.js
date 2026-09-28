@@ -37,6 +37,9 @@ export const STRONG_FIELD_ORBIT_MODEL = Object.freeze({
 });
 
 const TWO_PI = 2 * Math.PI;
+// Separation, in units of sqrt(m_A m_B), at which the metric transition
+// begins; the superposition fails at 8 (see buildWaveformModel).
+const SUPERPOSITION_LIMIT_FACTOR = 8.5;
 
 function requireCondition(condition, message) {
   if (!condition) {
@@ -537,6 +540,40 @@ function buildWaveformModel(track, manifest, options) {
   const separationAcceleration = derivative(separationRate, spacing);
   const omegaRate = derivative(omega, spacing);
 
+  // The superposed Kerr-Schild metric stops being Lorentzian between the
+  // holes when c_A c_B (l_A.l_B)^2 >= 1 with c = 2 H w. At the midpoint of two
+  // unboosted Schwarzschild terms (l_A.l_B)^2 = 4, so this happens once the
+  // separation drops below 8 sqrt(m_A m_B) (3.94 M for q=1 after companion
+  // attenuation). Start the C2 metric transition before that separation, or
+  // at the common-horizon event if it comes first. Body trajectories are
+  // unchanged; only the metric weight schedule moves earlier.
+  const [bodyA, bodyB] = physicalSystemFromManifest(manifest).bodies;
+  const superpositionLimitSeparationM = (
+    SUPERPOSITION_LIMIT_FACTOR * Math.sqrt(bodyA.massM * bodyB.massM)
+  );
+  // The inspiral separation is linearly interpolated on this grid (see
+  // kinematicsAt), so interpolate the crossing on it too; the grid spacing
+  // near merger is a few M.
+  let metricBlendStartTimeM = commonHorizonTimeM;
+  for (let index = 0; index < times.length; index += 1) {
+    if (times[index] >= commonHorizonTimeM) {
+      break;
+    }
+    if (separation[index] <= superpositionLimitSeparationM) {
+      metricBlendStartTimeM = times[index];
+      if (index > 0 && separation[index - 1] > separation[index]) {
+        const fraction = (
+          (separation[index - 1] - superpositionLimitSeparationM)
+          / (separation[index - 1] - separation[index])
+        );
+        metricBlendStartTimeM = (
+          times[index - 1] + fraction * (times[index] - times[index - 1])
+        );
+      }
+      break;
+    }
+  }
+
   const common = {
     separationM: sampleLinear(
       times,
@@ -594,7 +631,6 @@ function buildWaveformModel(track, manifest, options) {
     );
     let separationState;
     let phaseState;
-    let rawMergerBlend;
     if (timeM <= commonHorizonTimeM) {
       separationState = {
         value: sampleLinear(times, separation, timeM),
@@ -610,12 +646,10 @@ function buildWaveformModel(track, manifest, options) {
         rate: sampleLinear(times, omega, timeM),
         acceleration: sampleLinear(times, omegaRate, timeM),
       };
-      rawMergerBlend = 0;
     } else if (timeM < waveformPeakTimeM) {
       const elapsed = timeM - commonHorizonTimeM;
       separationState = separationTransition.evaluate(elapsed);
       phaseState = phaseTransition.evaluate(elapsed);
-      rawMergerBlend = elapsed / transitionDuration;
     } else {
       separationState = {
         value: peakSeparation,
@@ -628,8 +662,11 @@ function buildWaveformModel(track, manifest, options) {
         rate: peakOmega,
         acceleration: 0,
       };
-      rawMergerBlend = 1;
     }
+    const rawMergerBlend = (
+      (timeM - metricBlendStartTimeM)
+      / (waveformPeakTimeM - metricBlendStartTimeM)
+    );
     const sourceSample = track.sampleAt(timeM);
     return Object.freeze({
       timeM,
@@ -654,6 +691,8 @@ function buildWaveformModel(track, manifest, options) {
     firstTimeM,
     finalTimeM: track.finalTimeM,
     commonHorizonTimeM,
+    metricBlendStartTimeM,
+    superpositionLimitSeparationM,
     waveformPeakTimeM,
     amplitudeFloor,
     minimumOrbitalOmegaM,

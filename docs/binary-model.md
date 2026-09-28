@@ -21,7 +21,7 @@ two development routes are defined in
 | Waveform | CoM-corrected, extrapolated N=2 complex `(l,m) = (2,2)` strain mode | Real SXS far-zone waveform; not a near-zone metric |
 | Merger events and remnant | Published common-horizon time plus exact metadata remnant mass and spin | Source-backed anchors; C² metric removal remains an analytic transition rather than NR horizon evolution |
 | Playback | Scrubbing, shared pause/resume, end hold/loop, and optional merger slow motion | Deterministic presentation mapping; slow motion is not gravitational time dilation |
-| WebGPU light propagation | Real-time 3+1 null-Hamiltonian integration through a frame-frozen boosted-superposed Kerr-Schild metric and analytic Kerr remnant | Approximate strong-field fast-light; **not constraint-solved NR or slow-light** |
+| WebGPU light propagation | Real-time 3+1 null-Hamiltonian integration through a frame-frozen superposed Kerr-Schild metric and analytic Kerr remnant | Approximate strong-field fast-light; **not constraint-solved NR or slow-light** |
 | WebGL2 light propagation | Retained multi-centre weak-field shader | Explicit compatibility preview with no physical-parity claim |
 | Root-scene emission | Lensed all-sky background in vacuum | No accretion disks, plasma, GRMHD, or radiative transfer |
 | Independent dual-disk emission | The same declared binary lensing contract plus two idealized geometrically thin mini-disks at `?scene=binary-dual-disk` | Exploratory visualization proxy with analytic surface optical depth; no SXS matter data, GRMHD, volumetric absorption, polarization, or self-consistent spectral radiative transfer; not full NR |
@@ -62,9 +62,9 @@ the pinned [`SXS:BBH:0001` Zenodo record](https://doi.org/10.5281/zenodo.3273935
 - `Lev5/rhOverM_Asymptotic_GeometricUnits_CoM.h5`.
 
 Their official URLs, byte sizes, MD5 values, and SHA-256 values are recorded in
-[`assets/SOURCES.md`](../assets/SOURCES.md). The pinned Zenodo record does not
-declare a license, so this project records `spdx = null` and does not invent or
-infer a license.
+[`assets/SOURCES.md`](../assets/SOURCES.md). The pinned Zenodo record declares
+the CC BY 4.0 license, which the manifest records as `spdx = "CC-BY-4.0"`; the
+full attribution is in `assets/SOURCES.md`.
 
 The current SXS catalog marks `SXS:BBH:0001` as deprecated and superseded by
 the longer `SXS:BBH:1132` simulation. Phase 2 intentionally pins the archived
@@ -204,27 +204,35 @@ rate to keep this distinction visible.
 
 The production WebGPU path consumes
 `blackhole.strong-field-uniforms/v1`, an aligned 44-float packet containing
-explicit body/remnant positions, velocities, spins, companion attenuation,
-regularization controls, and a C² transition weight. At a provider time `t`
-and position `x`, it constructs each instantaneous Lorentz-boosted
-Kerr-Schild term
+explicit body/remnant positions, velocities, spins, optional companion
+attenuation (off by default), regularization controls, and a C² transition
+weight. At a provider time `t`
+and position `x`, it constructs each Kerr-Schild term at the frozen body
+position (unboosted, because a frozen boosted term is not a vacuum solution
+and displaces its horizon)
 
 ```text
 g_μν = η_μν + 2 H l_μ l_ν
 ```
 
-and superposes the binary contributions with a companion-neighborhood
-attenuation. The common-horizon-to-peak interval removes those terms and adds
-the SXS-anchored remnant with a quintic smootherstep. At unit transition weight
+and superposes the binary contributions without companion attenuation (the
+attenuation window acts as a spurious diverging lens around each hole; the
+plain superposition instead makes each shadow about `2 m_companion / d` too
+large; see [`strong-field-equations.md`](./strong-field-equations.md)).
+Starting when the separation reaches `8.5 sqrt(m_A m_B)` (4.25 M at
+`t = -18.09 M`, before the superposition would lose its Lorentzian signature
+between the holes) and ending at the waveform peak, a quintic smootherstep
+removes those terms and adds the SXS-anchored remnant. At unit transition weight
 the metric is exactly one analytic Kerr-Schild remnant.
 
 The shader decomposes the covariant metric into lapse `α`, shift `βⁱ`, and
 spatial metric `γᵢⱼ`. Dual-number metric jets provide analytic spatial
-derivatives in one provider evaluation. The view vector points from the camera
-into the scene; the shader stores the opposite future-directed covector of the
-photon arriving at the camera, then integrates the reduced null Hamiltonian
-with negative coordinate-time steps. The resulting traced path is explicitly
-past-directed:
+derivatives in one provider evaluation. The camera is the static observer
+(`u = ∂ₜ/α_s`); the view vector points from the camera into the scene, and the
+shader stores the future-directed covector of the photon arriving at the
+camera, then integrates the reduced null Hamiltonian backward in coordinate
+time with classical RK4. The resulting traced path is
+explicitly past-directed:
 
 ```text
 q = sqrt(γⁱʲ pᵢ pⱼ)
@@ -235,40 +243,39 @@ dpᵢ/dt = -∂ᵢH.
 ```
 
 The provider is frozen at the current display time for the complete ray. The
-metric therefore includes instantaneous boost and spin terms, but not the
-binary's evolution during photon flight. This is the explicit **fast-light**
-boundary. A finite escape sphere is followed by the closed-form outgoing
-weak-field monopole tail to infinity; the sky frequency factor uses the
-conserved asymptotic energy `-p_t`.
+metric therefore includes spin terms but not the binary's motion or evolution
+during photon flight. This is the explicit **fast-light** boundary. The escape
+sphere is far enough out that the ingoing Kerr-Schild coordinate direction
+already matches the asymptotic sky direction to `~M b^3/r^4`; the sky
+frequency factor uses the conserved asymptotic energy `-p_t`, which for the
+static camera gives the same `g = 1/α_s` for every sky pixel.
 
 Every ray ends as:
 
-- `captured`, after reaching a declared isolated-Kerr excision proxy or a
-  narrowly bounded failure-only capture guard inside the relevant analytic
-  photon shell;
+- `captured`, after moving inward inside the innermost (prograde) photon
+  orbit of the nearest term, or after a metric failure or exhausted budget
+  inside the unscaled photon orbit of any term present in the metric;
 - `escaped`, with an asymptotic sky direction and frequency factor; or
-- `unresolved`, after a metric-domain failure, regularization contact,
-  excessive null residual, or exhausted integration budget.
+- `unresolved`, after a metric-domain failure, excessive energy drift, or
+  exhausted integration budget anywhere else.
 
-Unresolved rays remain visibly distinct from both shadow and sky. The renderer
-never turns non-convergence into a plausible black pixel.
+Unresolved rays are never sampled as sky; in the photographic view they are a
+dim hatched mask, and the outcome diagnostic shows them in a reason-coded
+colour.
 
-The excision distance is a quality-tier parameter measured outward from the
-isolated Kerr radius: `0.30 M` (`emergency`), `0.24 M` (`survival`), `0.16 M` (`interactive`),
-`0.08 M` (`balanced`), and `0.04 M` (`fine`). If a coordinate-time energy
-projection fails, a separate conservative guard is allowed only within
-`0.95 M` of an individual non-spinning horizon, tapering to `0.25 M` for the
-pinned remnant. These are declared numerical surfaces, not computed binary
-apparent/event horizons. The low tiers exist to protect interaction latency;
-the paused `fine` tier has the smallest excision, smallest maximum step, and
-strictest residual threshold, but remains an approximate fast-light result.
+Capture uses the innermost photon orbit of the nearest Kerr-Schild term,
+with radii scaled by the term's metric weight during the merger blend; a
+horizon padding remains only as a backstop. These are isolated-hole surfaces,
+not computed binary apparent/event horizons. The low tiers use larger RK4 step
+fractions to protect interaction latency.
 
 ### Why it is still approximate
 
 The superposed metric is horizon-penetrating and strong-field, but it is not a
-constraint-satisfying binary solution. Its companion attenuation, analytic
-coordinate trajectory, frozen-time treatment, and individual capture surfaces
-are declared numerical/model prescriptions. It does not compute a common
+constraint-satisfying binary solution. Its plain superposition (which
+enlarges each shadow by about `2 m_companion / d`), analytic coordinate
+trajectory, frozen-time treatment, and individual capture surfaces are declared
+numerical/model prescriptions. It does not compute a common
 apparent/event-horizon worldtube or reproduce full time-dependent caustics and
 arrival-time effects. Accurate integration inside an approximate metric does
 not make the pixels NR ray tracing.
@@ -294,7 +301,7 @@ polarized radiative transfer.
 
 The explicit `?scene=binary-dual-disk` route is a separate visualization
 product. It reuses the vacuum scene's SXS-anchored dynamics and declared
-boosted-superposed Kerr-Schild fast-light lensing, then adds two idealized,
+superposed Kerr-Schild fast-light lensing, then adds two idealized,
 geometrically thin mini-disk emission surfaces. The emission control is a
 per-disk visualization proxy, not a measured Eddington ratio or an SXS/GRMHD
 matter quantity. The route therefore remains **approximate strong-field
@@ -321,17 +328,31 @@ quintic C² stability weight. It is strictly zero after the common horizon. The
 scene then renders the declared vacuum remnant lensing state and reports that
 post-merger emission is unmodeled; it does not invent a remnant disk.
 
-The local zero-torque surface-flux shape is
-`F(r) ∝ (r_in/r)^3 [1-sqrt(r_in/r)]`, with its analytic maximum at
-`r=49 r_in/36`; `T_eff∝F^(1/4)` and the per-body peak temperature scales as
-`(lambda_Edd/M_i)^(1/4)`. Each accepted strong-field ray segment tests both
-moving disk planes, orders their intersections from observer to source, and
-accumulates finite optical depth. The local invariant frequency ratio is used
-for Doppler/gravitational colour shift and the bolometric transfer is `g^4`.
-The true-colour proxy samples the redshifted blackbody at 15 wavelengths from
-380–780 nm, integrates the CIE 1931 observer response, and retains the visible
-fraction of bolometric power instead of normalizing every temperature to the
-same visible luminance. Its compact table is checked against the official
+The local surface flux is the Schwarzschild Novikov–Thorne (Page–Thorne)
+zero-torque profile with the inner edge at the body's ISCO, normalised to its
+maximum at `r = 1.5918 r_in` (9.5509 m_i):
+
+```text
+F ∝ [x - x0 + (√3/2) ln((x+√3)(x0-√3) / ((x-√3)(x0+√3)))] / (x⁵ (x² - 3)),
+x = sqrt(r/m_i),  x0 = sqrt(6)
+```
+
+`T_eff ∝ F^(1/4)`, and for `Ṁ = λ L_Edd,i / (0.1 c²)` the per-body peak is
+`T_peak = 1.086×10⁵ K (λ 10⁸ M☉ / M_i)^(1/4)`. Because the frozen
+Kerr-Schild terms are unboosted, each disk is circular in the coordinate frame
+around its frozen body position; the body's bulk velocity enters only the
+emitter velocity, where it Doppler-boosts the disk. Each accepted RK4 chord
+tests both disk planes, orders their intersections from observer to source,
+and accumulates finite optical depth. The local invariant frequency ratio is
+used for Doppler/gravitational colour shift and the bolometric transfer is
+`g^4`. Electron-scattering limb darkening `(1 + 2.06 μ)/2.373` (normalised to
+the emergent flux) applies where the disk is optically thick; an optically
+thin face is isotropic because the `1 - exp(-τ/μ)` opacity already carries the
+path-length brightening. The true-colour proxy samples the redshifted
+blackbody at 15 wavelengths from 380–780 nm, weights them with the
+Wyman–Sloan–Shirley analytic fit to the CIE 1931 observer, and retains the
+visible fraction of bolometric power instead of normalizing every temperature
+to the same visible luminance. Its compact table is checked against the official
 [CIE 1931 2-degree 1 nm corpus](https://cie.co.at/datatable/cie-1931-colour-matching-functions-2-degree-observer),
 independently of the production approximation. A quintic C² covering fraction
 is applied once to both emission and occultation, avoiding the previous squared
@@ -705,7 +726,7 @@ at least the following gates:
   plus the pinned [`SXS:BBH:0001` Lev5
   record](https://doi.org/10.5281/zenodo.3273935). Phase 2 derives coordinate
   separation/phase, complex `h22`, events, and remnant metadata from its
-  official files. The record does not declare a license. Exact source URLs,
+  official files, licensed CC BY 4.0. Exact source URLs,
   sizes, MD5, and SHA-256 values are recorded in
   [`assets/SOURCES.md`](../assets/SOURCES.md).
 - M. Boyle et al., [The SXS Collaboration catalog of binary black hole
@@ -713,8 +734,8 @@ at least the following gates:
   Quantum Gravity* 36, 195006 (2019).
 - L. Combi and S. M. Ressler, [A binary black hole metric approximation from
   inspiral to merger](https://arxiv.org/abs/2403.13308), including the
-  boosted-superposed Kerr-Schild and remnant-transition construction used as
-  the model basis here.
+  boosted-superposed Kerr-Schild and remnant-transition construction that
+  this frozen, unboosted fast-light variant is based on.
 - L. Combi et al., [Superposed metric for spinning black hole binaries
   approaching merger](https://arxiv.org/abs/2103.15707).
 - A. Bohn et al., [What does a binary black hole merger look

@@ -10,7 +10,7 @@ claims.
 
 | Layer | Status | What it does | Permitted claim |
 | --- | --- | --- | --- |
-| Interactive vacuum binary scene at the root URL | Implemented | Reconstructs the camera and integrates a 3+1 null Hamiltonian through a frame-frozen boosted-superposed Kerr-Schild approximation on WebGPU, sampling the distant sky in vacuum | Real-time approximate strong-field fast-light vacuum rendering; not NR |
+| Interactive vacuum binary scene at the root URL | Implemented | Reconstructs the camera and integrates a 3+1 null Hamiltonian through a frame-frozen superposed Kerr-Schild approximation on WebGPU, sampling the distant sky in vacuum | Real-time approximate strong-field fast-light vacuum rendering; not NR |
 | Interactive dual-disk binary scene at `?scene=binary-dual-disk` | Implemented as an independent product | Reuses the declared binary lensing path and adds two idealized geometrically thin mini-disk emission surfaces with finite analytic surface optical depth | Exploratory emission visualization; no SXS matter data, GRMHD, or self-consistent spectral radiative transfer; not full NR; post-merger emission unmodeled |
 | Interactive Schwarzschild scene at `?scene=schwarzschild` | Implemented | Reconstructs the camera and numerically traces its Schwarzschild rays on the GPU for every rendered frame | Real-time single-hole Schwarzschild visualization with an idealized disk |
 | Stationary Schwarzschild/Kerr workbench | Implemented | Plays authenticated fixed-camera analytic vacuum maps and exposes record-level diagnostics | Stationary analytic calibration, delivery validation, and regression oracle |
@@ -45,9 +45,10 @@ frame; they do not look up a fixed-camera transfer map. The legacy
 Their physics are different:
 
 - the Schwarzschild scene integrates a reduced null-geodesic equation;
-- the WebGPU binary scene freezes a declared boosted-superposed Kerr-Schild
+- the WebGPU binary scene freezes a declared superposed Kerr-Schild
   spacetime for each ray, evaluates its lapse, shift, spatial metric, and
-  analytic spatial derivatives, and integrates a reduced 3+1 null Hamiltonian;
+  analytic spatial derivatives, and integrates a reduced 3+1 null Hamiltonian
+  with RK4, capturing rays at the innermost photon orbit;
 - the dual-disk route adds two idealized thin emission surfaces to that declared
   lensing model, closes their emission with a C² transition when Roche/ISCO
   truncation leaves no stable mini-disk annulus, keeps it strictly zero after
@@ -56,19 +57,21 @@ Their physics are different:
 - the WebGL2 binary fallback remains the old two-centre weak-field deflection
   and is labelled as a distinct model.
 
-The WebGPU path uses a local ADM-orthonormal camera tetrad, explicit
-captured/escaped/unresolved outcomes, a C² transition to the analytic Kerr
-remnant, and a weak-field analytic continuation from its finite escape sphere.
-It stores the future-directed covector of the photon arriving at the camera and
-integrates the Hamiltonian flow with negative coordinate-time steps, so the
-traced boundary-value path is past-directed. It retains its approximate metric,
-isolated-Kerr excision surfaces, null residual, and unresolved rays as visible
+The WebGPU path uses a static-observer camera tetrad, explicit
+captured/escaped/unresolved outcomes with capture at each term's innermost
+photon orbit, a C² transition to the analytic Kerr remnant, and an escape
+sphere far enough out that the Kerr-Schild coordinate direction already equals
+the asymptotic sky direction (no analytic tail is added). It stores the
+future-directed covector of the photon arriving at the camera and integrates
+the Hamiltonian flow with negative coordinate-time steps, so the traced
+boundary-value path is past-directed. It retains its approximate metric,
+photon-orbit capture boundaries, null residual, and unresolved rays as visible
 scientific boundaries.
 
 The M3 Pro scheduler also exposes a numerical hierarchy rather than pretending
 all frames have the same convergence. Deadline-oriented `emergency`, `survival`,
-and `interactive` tiers use larger declared capture padding, longer far-zone
-steps, and smaller budgets. A paused view may progress through `balanced` to
+and `interactive` tiers use larger RK4 step fractions and smaller step
+budgets. A paused view may progress through `balanced` to
 `fine`, the strictest settled tier. These are latency/convergence policies
 inside the same approximate fast-light model, not different physical
 spacetimes. See [`strong-field-performance.md`](./strong-field-performance.md)
@@ -176,7 +179,7 @@ The repository currently provides:
 - an independent dual-disk route that adds two idealized Roche/ISCO-truncated
   thin emission surfaces with finite analytic optical depth, explicitly not
   GRMHD, self-consistent spectral radiative transfer, or post-merger emission;
-- documented past-directed ray conventions, isolated-Kerr excision semantics,
+- documented past-directed ray conventions, photon-orbit capture semantics,
   independent analytic-limit oracles, and adaptive M3 Pro convergence tiers;
 - an explicit WebGL2 weak-field binary compatibility path;
 - interactive GPU ray recomputation for the explicit Schwarzschild scene;

@@ -849,14 +849,22 @@ test("shader bundle uploads canonical records on WebGPU and float planes on WebG
 
   assert.match(transferMapTraceFragmentWGSL, /var<storage, read>/);
   assert.match(transferMapTraceFragmentWGSL, /sample\.state & 255u/);
-  assert.match(transferMapTraceFragmentWGSL, /mode == 5u/);
+  assert.match(transferMapTraceFragmentWGSL, /mode >= 1u && mode <= 5u/);
+  assert.match(
+    transferMapTraceFragmentWGSL,
+    /decodeSrgbDisplay\(diagnosticColour\(sample, mode\)\)/,
+  );
   assert.match(transferMapTraceFragmentWGSL, /hasValidity\(sample, 16u\)/);
   assert.match(transferMapTraceFragmentWGSL, /sceneTransferRange/);
   assert.match(
     transferMapTraceFragmentGLSL,
     /mod\(transferValue\.metrics\.w, 256\.0\)/,
   );
-  assert.match(transferMapTraceFragmentGLSL, /mode - 5\.0/);
+  assert.match(transferMapTraceFragmentGLSL, /mode > 0\.75 && mode < 5\.25/);
+  assert.match(
+    transferMapTraceFragmentGLSL,
+    /decodeSrgbDisplay\(diagnosticColour\(transferValue, mode\)\)/,
+  );
   assert.match(
     transferMapTraceFragmentGLSL,
     /hasValidity\(transferValue, 16\.0\)/,
@@ -962,9 +970,11 @@ test("reference scene inspector, diagnostic URL, and listeners survive dispose/r
     },
   });
   assert.equal(keyboardPrevented, true);
+  // Displayed columns run opposite to the products' stored (mirrored-basis)
+  // detector columns, so moving right on screen decrements the stored x.
   assert.match(
     host.elements.get("transferInspectorCoordinates").textContent,
-    /x 513 · y 288/,
+    /x 511 · y 288/,
   );
 
   state.mode = 5;
@@ -976,6 +986,8 @@ test("reference scene inspector, diagnostic URL, and listeners survive dispose/r
   );
   const frame = scene.extendFrame({});
   assert.equal(frame.sceneTransferState[0], 5);
+  assert.equal(frame.diagnosticDisplay, true);
+  assert.equal(frame.mode, 0);
   assert.ok(frame.sceneTransferRange[1] > frame.sceneTransferRange[0]);
 
   scene.dispose();

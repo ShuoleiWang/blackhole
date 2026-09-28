@@ -3,13 +3,14 @@
  *
  * Scientific boundary
  * -------------------
- * The inspiral metric is a frame-frozen, boosted superposition of two
- * Kerr-Schild metric contributions.  It is a strong-field analytic
- * approximation, not a numerical-relativity metric.  During merger it blends
- * to one Kerr-Schild remnant whose mass and spin are supplied by the
- * source-backed dynamics track.  The metric provider deliberately accepts
- * (coordinateTime, position), so a later slow-light implementation can advance
- * coordinateTime along the ray without replacing the geodesic integrator.
+ * The inspiral metric is a frame-frozen superposition of two unboosted
+ * Kerr-Schild metric contributions (see FROZEN_METRIC_VELOCITY).  It is a
+ * strong-field analytic approximation, not a numerical-relativity metric.
+ * During merger it blends to one Kerr-Schild remnant whose mass and spin are
+ * supplied by the source-backed dynamics track.  The metric provider
+ * deliberately accepts (coordinateTime, position), so a later slow-light
+ * implementation can advance coordinateTime along the ray without replacing
+ * the geodesic integrator.
  *
  * The WebGL2 member of this bundle intentionally remains the existing
  * weak-field preview.  WebGPU/Metal is the production strong-field path; the
@@ -41,11 +42,10 @@ export const STRONG_FIELD_UNIFORM_FLOATS = 96;
 export const STRONG_FIELD_UNIFORM_TAIL_FLOATS = 60;
 export const STRONG_FIELD_ACCRETION_UNIFORM_FLOATS = 116;
 export const STRONG_FIELD_ACCRETION_UNIFORM_TAIL_FLOATS = 80;
-// A single symplectic-Euler kick above 3.5 M is not yet safe near the
-// overlapping binary strong field. Keep the shader-side ceiling explicit and
-// align every host tier with it until segment event localisation or an
-// embedded error estimate can accept larger steps.
-export const STRONG_FIELD_MAXIMUM_STEP_M = 3.5;
+// Classical RK4 steps scale with the distance to the nearest horizon, so far-
+// field steps grow geometrically. This ceiling only bounds a single step; the
+// per-tier step fraction controls accuracy.
+export const STRONG_FIELD_MAXIMUM_STEP_M = 64;
 
 export const STRONG_FIELD_UNIFORM_LAYOUT = Object.freeze({
   shared: Object.freeze({ offset: 0, floats: 36 }),
@@ -81,24 +81,24 @@ export const STRONG_FIELD_DIAGNOSTIC_MODES = Object.freeze({
 });
 
 const DEFAULT_STRONG_FIELD_INTEGRATOR = Object.freeze([
-  0.018, // minimum coordinate-time step in M
-  0.46, // far-zone maximum step in M
-  3.5, // distance from a horizon that activates critical sampling
-  0.08, // fail-closed Hamiltonian residual threshold
+  0.01, // minimum coordinate-time RK4 step in M
+  64, // maximum RK4 step in M
+  0.30, // step as a fraction of the distance to the nearest horizon
+  0.01, // fail-closed relative energy drift per step
 ]);
 
 const DEFAULT_STRONG_FIELD_DOMAIN = Object.freeze([
-  96, // escape sphere radius in M
-  240, // maximum coordinate lookback in M
-  0.035, // horizon capture padding in M
-  72, // extra iterations available only after entering the critical zone
+  160, // escape sphere radius in M
+  400, // maximum coordinate lookback in M
+  0.01, // horizon backstop padding in M (capture is at the photon orbit)
+  144, // maximum RK4 steps
 ]);
 
 const DEFAULT_STRONG_FIELD_DIAGNOSTICS = Object.freeze([
   4, // maximum displayed frequency shift
   180, // logarithmic residual visualisation scale
   0.22, // unresolved diagnostic brightness
-  1, // model flags / provider version marker
+  0, // reserved
 ]);
 
 function finiteVec4(value, name, fallback = null) {
@@ -341,15 +341,17 @@ fn bodyRestDisplacement(
   );
 }
 
-// Locate a crossing on the accepted kick-drift segment. Body locations are
-// frozen for the complete ray, matching the metric provider's fast-light
-// contract. A small positive lower bound prevents an endpoint hit from being
-// counted again at the beginning of the next segment.
+// Locate a crossing on the accepted RK4 chord. Body locations are frozen for
+// the complete ray, matching the metric provider's fast-light contract. The
+// frozen Kerr-Schild terms are unboosted, so each hole's horizon and ISCO are
+// at rest in the coordinate frame and its disk is circular there; the bulk
+// velocity enters only the emitter kinematics (Doppler boosting). A small
+// positive lower bound prevents an endpoint hit from being counted again at
+// the beginning of the next segment.
 fn segmentDiskIntersection(
   segmentStart: vec3<f32>,
   segmentEnd: vec3<f32>,
   centre: vec3<f32>,
-  velocity: vec3<f32>,
   normalInput: vec3<f32>,
   innerRadius: f32,
   outerRadius: f32,
@@ -369,8 +371,8 @@ fn segmentDiskIntersection(
     return result;
   }
   let normal = normalInput / normalLength;
-  let restStart = bodyRestDisplacement(segmentStart, centre, velocity);
-  let restEnd = bodyRestDisplacement(segmentEnd, centre, velocity);
+  let restStart = bodyRestDisplacement(segmentStart, centre, FROZEN_METRIC_VELOCITY);
+  let restEnd = bodyRestDisplacement(segmentEnd, centre, FROZEN_METRIC_VELOCITY);
   if (!finiteVector(restStart) || !finiteVector(restEnd)) {
     return result;
   }
@@ -570,7 +572,8 @@ fn analyticDiskSurfaceStructure(
   let tidal = 0.16 * cos(
     2.0 * (azimuth - 0.42 * logarithmicRadius)
   );
-  let referenceRadius = (49.0 / 36.0) * innerRadius;
+  // Novikov-Thorne flux peak (9.5509 m for r_in = 6 m).
+  let referenceRadius = 1.5918167 * innerRadius;
   let referenceRadius3 = max(
     referenceRadius * referenceRadius * referenceRadius,
     1.0e-8
@@ -696,11 +699,20 @@ fn diskTransferAtIntersection(
   // never silently replaced by a clipped transfer factor.
   let chromaticFrequencyShift = clamp(rawFrequencyShift, 0.02, 8.0);
 
-  let x = innerRadius / max(intersection.radius, innerRadius);
-  let fluxRaw = x * x * x * max(1.0 - sqrt(x), 0.0);
-  let xPeak = 36.0 / 49.0;
-  let fluxPeak = xPeak * xPeak * xPeak * (1.0 - sqrt(xPeak));
-  let fluxShape = max(fluxRaw / fluxPeak, 0.0);
+  // Novikov-Thorne (Page-Thorne) zero-torque flux around a non-spinning
+  // body with the inner edge at its ISCO, normalised to the peak at
+  // r = 9.5509 m. x = sqrt(r/m), x0 = sqrt(r_in/m) = sqrt(6).
+  let root3 = 1.7320508;
+  let ntX = sqrt(max(intersection.radius, innerRadius) / max(bodyMassM, 1.0e-6));
+  let ntX0 = sqrt(innerRadius / max(bodyMassM, 1.0e-6));
+  let ntBracket = ntX - ntX0 + 0.5 * root3 * log(
+    ((ntX + root3) * (ntX0 - root3)) / ((ntX - root3) * (ntX0 + root3))
+  );
+  let ntX2 = ntX * ntX;
+  let fluxShape = max(
+    ntBracket / (ntX2 * ntX2 * ntX * (ntX2 - 3.0)),
+    0.0
+  ) / 1.1458947e-4;
   let edgeCoverage = annulusEdgeCoverage(
     intersection.radius,
     innerRadius,
@@ -719,7 +731,9 @@ fn diskTransferAtIntersection(
   let totalMassSolar = max(params.resolutionTimeMass.w, 1.0);
   let bodyMassSolar = max(totalMassSolar * bodyMassM, 1.0);
   let thermalScale = max(params.sceneDiskControl.z, 1.0e-4);
-  let peakTemperature = 1.43e5 * pow(
+  // Novikov-Thorne peak effective temperature for Mdot = lambda L_Edd /
+  // (0.1 c^2) around the body mass.
+  let peakTemperature = 1.086e5 * pow(
     eddingtonRatio * 1.0e8 / bodyMassSolar,
     0.25
   );
@@ -736,7 +750,7 @@ fn diskTransferAtIntersection(
     0.03,
     1.0
   );
-  let peakRadius = (49.0 / 36.0) * innerRadius;
+  let peakRadius = 1.5918167 * innerRadius;
   let tauPeak = max(params.sceneDiskControl.w, 0.0);
   let tauFace = tauPeak
     * pow(max(intersection.radius / max(peakRadius, 1.0e-5), 0.1), -0.60);
@@ -755,7 +769,14 @@ fn diskTransferAtIntersection(
     0.0,
     1.0
   );
-  let limbDarkening = (1.0 + 2.06 * muEmitter) / 3.06;
+  // Flux-normalised electron-scattering limb darkening holds for an optically
+  // thick atmosphere. A thin slab is already limb-brightened by the 1/mu path
+  // length in the opacity above, so its source is isotropic.
+  let limbDarkening = mix(
+    1.0,
+    (1.0 + 2.06 * muEmitter) / 2.373,
+    smoothstep(0.5, 2.0, tauFace)
+  );
   let g2 = rawFrequencyShift * rawFrequencyShift;
   let bolometricTransfer = g2 * g2;
   let thermalFluxScale = thermalScale * thermalScale
@@ -771,7 +792,7 @@ fn diskTransferAtIntersection(
   // visible fraction, so UV-dominated hot disks no longer map all bolometric
   // power into a featureless white surface. control.z remains a physical
   // thermal normalisation with baseline 1, not a per-scene exposure.
-  let visibleSceneGain = 4200.0;
+  let visibleSceneGain = 1800.0;
   let radiance = visibleBlackbodyLinearSrgbPerBolometric(
     emittedTemperature * chromaticFrequencyShift
   )
@@ -837,7 +858,8 @@ fn accumulateDualDiskEmission(
   ray: RayResult,
   segmentStart: vec3<f32>,
   segmentEnd: vec3<f32>,
-  momentum: vec3<f32>,
+  momentumStart: vec3<f32>,
+  momentumEnd: vec3<f32>,
   conservedEnergy: f32,
   observerFrequency: f32,
   capturePadding: f32
@@ -853,7 +875,6 @@ fn accumulateDualDiskEmission(
     segmentStart,
     segmentEnd,
     params.bodyAPositionMass.xyz,
-    params.bodyAVelocityActive.xyz,
     params.diskANormalInner.xyz,
     params.diskANormalInner.w,
     params.diskAOuterAccretionWeight.x,
@@ -863,11 +884,20 @@ fn accumulateDualDiskEmission(
     segmentStart,
     segmentEnd,
     params.bodyBPositionMass.xyz,
-    params.bodyBVelocityActive.xyz,
     params.diskBNormalInner.xyz,
     params.diskBNormalInner.w,
     params.diskBOuterAccretionWeight.x,
     params.diskBOuterAccretionWeight.z
+  );
+  let momentumA = mix(
+    momentumStart,
+    momentumEnd,
+    clamp(hitA.fraction, 0.0, 1.0)
+  );
+  let momentumB = mix(
+    momentumStart,
+    momentumEnd,
+    clamp(hitB.fraction, 0.0, 1.0)
   );
   // Apply both intersections in observer-to-source order. The first surface's
   // finite opacity attenuates the second, providing mutual occlusion without a
@@ -879,7 +909,7 @@ fn accumulateDualDiskEmission(
       params.bodyBPositionMass.xyz - params.bodyAPositionMass.xyz,
       params.bodyAVelocityActive.xyz, params.bodyAPositionMass.w,
       params.diskANormalInner.w, params.diskAOuterAccretionWeight,
-      momentum, conservedEnergy,
+      momentumA, conservedEnergy,
       observerFrequency, capturePadding
     );
     result = applyDiskIntersection(
@@ -887,7 +917,7 @@ fn accumulateDualDiskEmission(
       params.bodyAPositionMass.xyz - params.bodyBPositionMass.xyz,
       params.bodyBVelocityActive.xyz, params.bodyBPositionMass.w,
       params.diskBNormalInner.w, params.diskBOuterAccretionWeight,
-      momentum, conservedEnergy,
+      momentumB, conservedEnergy,
       observerFrequency, capturePadding
     );
   } else {
@@ -896,7 +926,7 @@ fn accumulateDualDiskEmission(
       params.bodyAPositionMass.xyz - params.bodyBPositionMass.xyz,
       params.bodyBVelocityActive.xyz, params.bodyBPositionMass.w,
       params.diskBNormalInner.w, params.diskBOuterAccretionWeight,
-      momentum, conservedEnergy,
+      momentumB, conservedEnergy,
       observerFrequency, capturePadding
     );
     result = applyDiskIntersection(
@@ -904,7 +934,7 @@ fn accumulateDualDiskEmission(
       params.bodyBPositionMass.xyz - params.bodyAPositionMass.xyz,
       params.bodyAVelocityActive.xyz, params.bodyAPositionMass.w,
       params.diskANormalInner.w, params.diskAOuterAccretionWeight,
-      momentum, conservedEnergy,
+      momentumA, conservedEnergy,
       observerFrequency, capturePadding
     );
   }
@@ -928,14 +958,41 @@ function createStrongFieldBinaryTraceFragmentWGSL({ dualDisk = false } = {}) {
   result.diskRadiance = vec3<f32>(0.0);
   result.diskTransmittance = 1.0;
   result.diskTransferFailure = 0.0;` : "";
-  const diskBeforeDrift = dualDisk ? /* wgsl */ `
-    let previousPosition = position;` : "";
+  // Disk crossings are located on two chords per RK4 step through the
+  // third-order continuous-extension midpoint
+  //   y(1/2) = y0 + h (5/24 k1 + 1/6 k2 + 1/6 k3 - 1/24 k4),
+  // with the momentum interpolated to the crossing, instead of on the raw
+  // step chord. The combination is accumulated stage by stage.
+  const diskMidpointDeclaration = dualDisk ? /* wgsl */ `
+  var midX = vec3<f32>(0.0);
+  var midP = vec3<f32>(0.0);` : "";
+  const diskMidpointFromK1 = dualDisk ? /* wgsl */ `
+      midX = (5.0 / 24.0) * derivativeX;
+      midP = (5.0 / 24.0) * derivativeP;` : "";
+  const diskMidpointAddInner = dualDisk ? /* wgsl */ `
+      midX = midX + (1.0 / 6.0) * derivativeX;
+      midP = midP + (1.0 / 6.0) * derivativeP;` : "";
   const diskStep = dualDisk ? /* wgsl */ `
+    let midPosition = stepPosition
+      + stepSize * (midX - (1.0 / 24.0) * derivativeX);
+    let midMomentum = stepMomentum
+      + stepSize * (midP - (1.0 / 24.0) * derivativeP);
     result = accumulateDualDiskEmission(
       result,
-      previousPosition,
-      position,
-      momentum,
+      stepPosition,
+      midPosition,
+      stepMomentum,
+      midMomentum,
+      conservedEnergy,
+      observerQ,
+      capturePadding
+    );
+    result = accumulateDualDiskEmission(
+      result,
+      midPosition,
+      nextPosition,
+      midMomentum,
+      nextMomentum,
       conservedEnergy,
       observerQ,
       capturePadding
@@ -957,7 +1014,7 @@ diagnostic(off, derivative_uniformity);
 
 const PI: f32 = 3.14159265358979323846;
 const TWO_PI: f32 = 6.28318530717958647692;
-const MAX_STRONG_STEPS: i32 = 320;
+const MAX_RK4_STEPS: i32 = 192;
 const RAY_UNRESOLVED: u32 = 0u;
 const RAY_CAPTURED: u32 = 1u;
 const RAY_ESCAPED: u32 = 2u;
@@ -966,6 +1023,12 @@ const DUAL_EPSILON: f32 = 1.0e-12;
 // 2=transition.  The default keeps the complete provider available to the GPU
 // probe and any consumer that does not opt into pipeline specialization.
 override SPACETIME_PHASE_MODE: i32 = -1;
+// Positions are frozen for the whole ray (fast light), so each hole enters the
+// metric as an unboosted Kerr-Schild term. A Lorentz-boosted term is a vacuum
+// solution only while its centre moves as X0 + v t; frozen, it is not, and its
+// trailing null surface moves out to r+ gamma^2 (1 + v)^2, beyond the photon
+// orbit for v > 0.2. Body velocities still drive the disk-matter kinematics.
+const FROZEN_METRIC_VELOCITY: vec3<f32> = vec3<f32>(0.0, 0.0, 0.0);
 
 struct Params {
   resolutionTimeMass: vec4<f32>,
@@ -974,7 +1037,7 @@ struct Params {
   cameraForwardFov: vec4<f32>,
   cameraRightSkyRotation: vec4<f32>,
   cameraUpDiskOuter: vec4<f32>,
-  postMotionFrame: vec4<f32>,
+  postDisplayFrame: vec4<f32>,
   observerVelocityBeta: vec4<f32>,
   displayOutput: vec4<f32>,
   spacetimeControl: vec4<f32>,
@@ -1031,6 +1094,10 @@ struct HoleContribution {
   cartesianRadius: Dual3,
   curvatureScale: f32,
   regularized: f32,
+  kerrRadius: f32,
+  kerrRadiusGradient: vec3<f32>,
+  horizonRadius: f32,
+  photonRadius: f32,
 };
 
 struct ADMFields {
@@ -1047,6 +1114,19 @@ struct ADMFields {
   spatialMetric: mat3x3<f32>,
   horizonDistance: f32,
   curvatureScale: f32,
+  // Distance inside (<0) or outside (>0) the innermost photon orbit of the
+  // nearest active term, and the gradient of that term's Kerr radius.
+  photonMargin: f32,
+  photonRadialGradient: vec3<f32>,
+  // RK4 step scale: distance to the nearest horizon, but never below half the
+  // Kerr radius. Ingoing Kerr-Schild data are smooth at the horizon, so the
+  // orbit scale r, not r - r+, limits accuracy near prograde photon orbits.
+  stepDistance: f32,
+  // Distance inside (<0) the unscaled innermost photon orbit of any active
+  // term. During the merger blend the region around the merging holes lies
+  // inside the common event horizon, so an unrecoverable metric sample there
+  // is classified as captured.
+  failureCaptureMargin: f32,
   valid: f32,
 };
 
@@ -1330,6 +1410,10 @@ fn zeroHoleContribution() -> HoleContribution {
   result.cartesianRadius = dualConstant(1.0e6);
   result.curvatureScale = 0.0;
   result.regularized = 0.0;
+  result.kerrRadius = 1.0e6;
+  result.kerrRadiusGradient = vec3<f32>(0.0);
+  result.horizonRadius = 0.0;
+  result.photonRadius = 0.0;
   return result;
 }
 
@@ -1503,11 +1587,20 @@ fn boostedKerrSchildContribution(
   let horizonRadius = mass * (
     1.0 + sqrt(max(1.0 - dot(safeChi, safeChi), 1.0e-5))
   );
+  // Innermost (prograde equatorial) circular photon orbit of an isolated Kerr
+  // hole: r = 2m[1 + cos(2/3 acos(-chi))], i.e. 3m at chi=0 and m at chi=1.
+  let photonRadius = 2.0 * mass * (
+    1.0 + cos((2.0 / 3.0) * acos(-clamp(length(safeChi), 0.0, 1.0)))
+  );
   result.horizonDistance = kerrRadius.value - horizonRadius;
   result.cartesianRadius = dualLength(restPosition);
   result.curvatureScale = mass
     / max(kerrRadius.value * kerrRadius.value, 0.02);
   result.regularized = regularized;
+  result.kerrRadius = kerrRadius.value;
+  result.kerrRadiusGradient = kerrRadius.gradient;
+  result.horizonRadius = horizonRadius;
+  result.photonRadius = photonRadius;
   return result;
 }
 
@@ -1558,7 +1651,7 @@ fn sampleSpacetime(
     holeA = boostedKerrSchildContribution(
       position,
       params.bodyAPositionMass.xyz,
-      params.bodyAVelocityActive.xyz,
+      FROZEN_METRIC_VELOCITY,
       params.bodyAPositionMass.w,
       params.bodyASpin.xyz,
       params.bodyAVelocityActive.w
@@ -1566,7 +1659,7 @@ fn sampleSpacetime(
     holeB = boostedKerrSchildContribution(
       position,
       params.bodyBPositionMass.xyz,
-      params.bodyBVelocityActive.xyz,
+      FROZEN_METRIC_VELOCITY,
       params.bodyBPositionMass.w,
       params.bodyBSpin.xyz,
       params.bodyBVelocityActive.w
@@ -1586,7 +1679,7 @@ fn sampleSpacetime(
     remnant = boostedKerrSchildContribution(
       position,
       params.remnantPositionMass.xyz,
-      params.remnantVelocityActive.xyz,
+      FROZEN_METRIC_VELOCITY,
       params.remnantPositionMass.w,
       params.remnantSpinBlend.xyz,
       params.remnantVelocityActive.w
@@ -1599,7 +1692,7 @@ fn sampleSpacetime(
     holeA = boostedKerrSchildContribution(
       position,
       params.bodyAPositionMass.xyz,
-      params.bodyAVelocityActive.xyz,
+      FROZEN_METRIC_VELOCITY,
       params.bodyAPositionMass.w,
       params.bodyASpin.xyz,
       params.bodyAVelocityActive.w * binaryActive
@@ -1607,7 +1700,7 @@ fn sampleSpacetime(
     holeB = boostedKerrSchildContribution(
       position,
       params.bodyBPositionMass.xyz,
-      params.bodyBVelocityActive.xyz,
+      FROZEN_METRIC_VELOCITY,
       params.bodyBPositionMass.w,
       params.bodyBSpin.xyz,
       params.bodyBVelocityActive.w * binaryActive
@@ -1615,7 +1708,7 @@ fn sampleSpacetime(
     remnant = boostedKerrSchildContribution(
       position,
       params.remnantPositionMass.xyz,
-      params.remnantVelocityActive.xyz,
+      FROZEN_METRIC_VELOCITY,
       params.remnantPositionMass.w,
       params.remnantSpinBlend.xyz,
       params.remnantVelocityActive.w * remnantActive
@@ -1716,15 +1809,83 @@ fn sampleSpacetime(
       + dot(betaCovariant, shiftDerivativeZ) - g00.gradient.z
   );
 
+  // Capture geometry uses weight-scaled radii. Near its own centre a
+  // Kerr-Schild term with metric weight w acts like a hole of mass w m, so its
+  // horizon and innermost photon orbit grow continuously from zero during the
+  // merger transition instead of switching on at an arbitrary weight.
   var horizonDistance = 1.0e6;
+  var photonMargin = 1.0e6;
+  var photonRadialGradient = vec3<f32>(0.0);
+  var stepDistance = 1.0e6;
+  var failureCaptureMargin = 1.0e6;
   if (weightA.value > 1.0e-4) {
-    horizonDistance = min(horizonDistance, holeA.horizonDistance);
+    let w = min(weightA.value, 1.0);
+    horizonDistance = min(
+      horizonDistance,
+      holeA.kerrRadius - w * holeA.horizonRadius
+    );
+    stepDistance = min(
+      stepDistance,
+      max(holeA.kerrRadius - w * holeA.horizonRadius, 0.5 * holeA.kerrRadius)
+    );
+    let margin = holeA.kerrRadius - w * holeA.photonRadius;
+    if (margin < photonMargin) {
+      photonMargin = margin;
+      photonRadialGradient = holeA.kerrRadiusGradient;
+    }
   }
   if (weightB.value > 1.0e-4) {
-    horizonDistance = min(horizonDistance, holeB.horizonDistance);
+    let w = min(weightB.value, 1.0);
+    horizonDistance = min(
+      horizonDistance,
+      holeB.kerrRadius - w * holeB.horizonRadius
+    );
+    stepDistance = min(
+      stepDistance,
+      max(holeB.kerrRadius - w * holeB.horizonRadius, 0.5 * holeB.kerrRadius)
+    );
+    let margin = holeB.kerrRadius - w * holeB.photonRadius;
+    if (margin < photonMargin) {
+      photonMargin = margin;
+      photonRadialGradient = holeB.kerrRadiusGradient;
+    }
   }
   if (weightRemnant.value > 1.0e-4) {
-    horizonDistance = min(horizonDistance, remnant.horizonDistance);
+    let w = min(weightRemnant.value, 1.0);
+    horizonDistance = min(
+      horizonDistance,
+      remnant.kerrRadius - w * remnant.horizonRadius
+    );
+    stepDistance = min(
+      stepDistance,
+      max(remnant.kerrRadius - w * remnant.horizonRadius, 0.5 * remnant.kerrRadius)
+    );
+    let margin = remnant.kerrRadius - w * remnant.photonRadius;
+    if (margin < photonMargin) {
+      photonMargin = margin;
+      photonRadialGradient = remnant.kerrRadiusGradient;
+    }
+  }
+  // Failure capture covers every term present in the metric, however small
+  // its weight: early in the merger blend the remnant's ring singularity can
+  // break the superposition near the centre of mass while w < 1e-4.
+  if (weightA.value > 0.0) {
+    failureCaptureMargin = min(
+      failureCaptureMargin,
+      holeA.kerrRadius - holeA.photonRadius
+    );
+  }
+  if (weightB.value > 0.0) {
+    failureCaptureMargin = min(
+      failureCaptureMargin,
+      holeB.kerrRadius - holeB.photonRadius
+    );
+  }
+  if (weightRemnant.value > 0.0) {
+    failureCaptureMargin = min(
+      failureCaptureMargin,
+      remnant.kerrRadius - remnant.photonRadius
+    );
   }
   let activeRegularization = max(
     max(
@@ -1747,6 +1908,10 @@ fn sampleSpacetime(
   result.inverseMetricDerivativeZ = derivativeInverseZ;
   result.spatialMetric = gammaCovariant;
   result.horizonDistance = horizonDistance;
+  result.photonMargin = photonMargin;
+  result.photonRadialGradient = photonRadialGradient;
+  result.stepDistance = stepDistance;
+  result.failureCaptureMargin = failureCaptureMargin;
   result.curvatureScale = max(
     max(
       weightA.value * holeA.curvatureScale,
@@ -1872,120 +2037,79 @@ fn unresolvedResult() -> RayResult {
   return result;
 }${diskFunctions}
 
-fn spatialMetricDot(
-  fields: ADMFields,
-  a: vec3<f32>,
-  b: vec3<f32>
-) -> f32 {
-  return dot(a, fields.spatialMetric * b);
+// The camera is the observer at rest in the frozen coordinates,
+// u = partial_t / alpha_s with alpha_s^2 = -g_tt = alpha^2 - beta_k beta^k.
+// Vectors orthogonal to u have e^t = beta_j e^j / alpha_s^2, and their
+// spatial components carry the metric h_ij = gamma_ij + beta_i beta_j /
+// alpha_s^2. (The Eulerian observer of the Kerr-Schild slicing instead falls
+// inward at ~2M/r, which shrinks the shadow and puts a Doppler dipole on the
+// sky.)
+struct StaticObserverFrame {
+  metric: mat3x3<f32>,
+  shiftCovariant: vec3<f32>,
+  lapse: f32,
+  valid: f32,
+};
+
+fn staticObserverFrame(fields: ADMFields) -> StaticObserverFrame {
+  let shiftCovariant = fields.spatialMetric * fields.shift;
+  let lapseSquared = fields.lapse * fields.lapse
+    - dot(shiftCovariant, fields.shift);
+  var frame: StaticObserverFrame;
+  frame.valid = select(0.0, 1.0, lapseSquared > 1.0e-6);
+  frame.lapse = sqrt(max(lapseSquared, 1.0e-6));
+  frame.shiftCovariant = shiftCovariant;
+  let inverseLapseSquared = 1.0 / (frame.lapse * frame.lapse);
+  frame.metric = fields.spatialMetric + mat3x3<f32>(
+    shiftCovariant * (shiftCovariant.x * inverseLapseSquared),
+    shiftCovariant * (shiftCovariant.y * inverseLapseSquared),
+    shiftCovariant * (shiftCovariant.z * inverseLapseSquared)
+  );
+  return frame;
 }
 
-fn spatialMetricNormalize(
-  fields: ADMFields,
-  value: vec3<f32>
-) -> vec3<f32> {
-  return value * inverseSqrt(max(
-    spatialMetricDot(fields, value, value),
-    1.0e-14
-  ));
+fn frameDot(metric: mat3x3<f32>, a: vec3<f32>, b: vec3<f32>) -> f32 {
+  return dot(a, metric * b);
+}
+
+fn frameNormalize(metric: mat3x3<f32>, value: vec3<f32>) -> vec3<f32> {
+  return value * inverseSqrt(max(frameDot(metric, value, value), 1.0e-14));
 }
 
 // The camera FOV lives in the observer's local orthonormal spatial frame, not
-// in Euclidean coordinate components.  Metric Gram-Schmidt removes the
-// systematic off-axis error that otherwise remains even at moderately large
-// observer radii.
+// in Euclidean coordinate components; metric Gram-Schmidt removes the
+// systematic off-axis error that otherwise remains at finite radius.
 fn observerCameraDirection(
-  fields: ADMFields,
+  metric: mat3x3<f32>,
   screen: vec2<f32>,
   tanHalfFov: f32
 ) -> vec3<f32> {
-  let forward = spatialMetricNormalize(
-    fields,
-    params.cameraForwardFov.xyz
-  );
+  let forward = frameNormalize(metric, params.cameraForwardFov.xyz);
   let rawRight = params.cameraRightSkyRotation.xyz
-    - forward * spatialMetricDot(
-      fields,
-      forward,
-      params.cameraRightSkyRotation.xyz
-    );
-  let right = spatialMetricNormalize(fields, rawRight);
+    - forward * frameDot(metric, forward, params.cameraRightSkyRotation.xyz);
+  let right = frameNormalize(metric, rawRight);
   let rawUp = params.cameraUpDiskOuter.xyz
-    - forward * spatialMetricDot(
-      fields,
-      forward,
-      params.cameraUpDiskOuter.xyz
-    )
-    - right * spatialMetricDot(
-      fields,
-      right,
-      params.cameraUpDiskOuter.xyz
-    );
-  let up = spatialMetricNormalize(fields, rawUp);
-  return spatialMetricNormalize(
-    fields,
+    - forward * frameDot(metric, forward, params.cameraUpDiskOuter.xyz)
+    - right * frameDot(metric, right, params.cameraUpDiskOuter.xyz);
+  let up = frameNormalize(metric, rawUp);
+  return frameNormalize(
+    metric,
     forward + tanHalfFov * (screen.x * right + screen.y * up)
   );
 }
 
-// Analytic outgoing O(M/r) monopole tail from the finite escape sphere to
-// future null infinity.  This permits a smaller real-time domain without
-// freezing in a radius-dependent sky direction.  The near-axis limit is
-// returned unchanged because its transverse impulse tends smoothly to zero.
-fn asymptoticEscapeDirection(
-  position: vec3<f32>,
-  velocity: vec3<f32>
-) -> vec3<f32> {
-  let direction = safeNormalize(velocity);
-  let radius = length(position);
-  let longitudinal = dot(position, direction);
-  let impact = position - longitudinal * direction;
-  let impactSquared = dot(impact, impact);
-  if (
-    longitudinal <= 0.0
-    || radius <= 1.0e-5
-    || impactSquared <= 1.0e-8
-  ) {
-    return direction;
-  }
-  let blend = clamp(params.spacetimeControl.y, 0.0, 1.0);
-  let binaryMass = (
-    params.bodyAPositionMass.w * params.bodyAVelocityActive.w
-    + params.bodyBPositionMass.w * params.bodyBVelocityActive.w
-  );
-  let remnantMass = (
-    params.remnantPositionMass.w * params.remnantVelocityActive.w
-  );
-  let asymptoticMass = max(
-    (1.0 - blend) * binaryMass + blend * remnantMass,
-    0.0
-  );
-  let remainingFraction = clamp(
-    1.0 - longitudinal / radius,
-    0.0,
-    1.0
-  );
-  let correction = -2.0 * asymptoticMass * impact
-    * remainingFraction / impactSquared;
-  if (!finiteVector(correction) || length(correction) > 0.25) {
-    return direction;
-  }
-  return safeNormalize(direction + correction);
-}
-
-fn numericalCaptureGuard() -> f32 {
-  // A failed coordinate-time branch inside the innermost photon shell cannot
-  // be continued reliably with the reduced real-time integrator.  Excise it
-  // as captured only inside a conservative analytic bound: 0.95M above the
-  // non-spinning individual horizons (just inside r_ph-r_+=1M), tapering to
-  // 0.25M for the chi≈0.69 remnant (inside its prograde photon shell).
-  // This branch is consulted only after the positive-energy projection fails;
-  // normally integrated rays still use the much tighter tier padding.
-  return mix(
-    0.95,
-    0.25,
-    clamp(params.spacetimeControl.y, 0.0, 1.0)
-  );
+// Photon-orbit capture. For an isolated Kerr hole no null geodesic has a
+// radial turning point inside the innermost (prograde equatorial) circular
+// photon orbit, so a ray found there while moving inward cannot escape. Time
+// reversal maps Kerr to Kerr with the opposite spin, which has the same
+// innermost orbit, so the test also holds for these past-directed rays. In the
+// superposed binary metric it is applied to the nearest term.
+fn insidePhotonCapture(
+  fields: ADMFields,
+  backwardVelocity: vec3<f32>
+) -> bool {
+  return fields.photonMargin < 0.0
+    && dot(fields.photonRadialGradient, backwardVelocity) < 0.0;
 }
 
 fn traceStrongField(screen: vec2<f32>, tanHalfFov: f32) -> RayResult {
@@ -1998,127 +2122,194 @@ fn traceStrongField(screen: vec2<f32>, tanHalfFov: f32) -> RayResult {
     return result;
   }
 
-  // initialDirection points from the camera into the viewed scene.  A photon
-  // that actually arrives at the camera has the opposite future-directed
-  // Eulerian spatial momentum.  Store that arriving future covector here,
-  // then integrate Hamilton's equations with a negative parameter step below.
-  // This distinction is invisible in static Schwarzschild paths but is
-  // essential for the sign of frame dragging and Doppler/gravitational shift
-  // in boosted or Kerr spacetimes.
+  // The view direction n points from the camera into the scene. The photon
+  // that arrives at the static camera has four-momentum p = E_s (u - n) with
+  // unit observed energy E_s; store its covector p_i = beta_i p^t - gamma_ij
+  // n^j and integrate Hamilton's equations backward in coordinate time. This
+  // arriving-photon convention fixes the sign of frame dragging and of the
+  // Doppler/gravitational shifts. The asymptotic energy is -p_t = alpha_s.
+  let observerFrame = staticObserverFrame(observerFields);
+  if (observerFrame.valid < 0.5) {
+    result.terminationReason = 2.0;
+    return result;
+  }
   let initialDirection = observerCameraDirection(
-    observerFields,
+    observerFrame.metric,
     screen,
     tanHalfFov
   );
-  var momentum = -(observerFields.spatialMetric * initialDirection);
-  let initialQ = sqrt(max(
-    dot(momentum, observerFields.inverseSpatialMetric * momentum),
-    1.0e-12
-  ));
-  momentum = momentum / initialQ;
-  let initialRaised = observerFields.inverseSpatialMetric * momentum;
-  let observerQ = sqrt(max(dot(momentum, initialRaised), 1.0e-12));
-  let conservedEnergy = observerFields.lapse * observerQ
-    - dot(observerFields.shift, momentum);
+  let staticLapse = observerFrame.lapse;
+  let photonTime = (
+    1.0 - dot(observerFrame.shiftCovariant, initialDirection) / staticLapse
+  ) / staticLapse;
+  var momentum = observerFrame.shiftCovariant * photonTime
+    - observerFields.spatialMetric * initialDirection;
+  let observerQ = 1.0;
+  let conservedEnergy = hamiltonianKinematics(
+    observerFields,
+    momentum
+  ).reducedHamiltonian;
   if (!finiteScalar(conservedEnergy) || conservedEnergy <= 1.0e-6) {
     result.terminationReason = 2.0;
     return result;
   }
 
-  let minimumStep = clamp(params.sceneStrongIntegrator.x, 0.004, 0.12);
+  let minimumStep = clamp(params.sceneStrongIntegrator.x, 0.002, 0.5);
   let maximumStep = clamp(
     params.sceneStrongIntegrator.y,
     minimumStep,
     ${STRONG_FIELD_MAXIMUM_STEP_M.toFixed(1)}
   );
-  let criticalDistance = max(params.sceneStrongIntegrator.z, 0.2);
-  let residualFail = clamp(params.sceneStrongIntegrator.w, 0.002, 0.5);
+  // Each RK4 step is this fraction of fields.stepDistance, so steps shrink
+  // near the holes and grow geometrically in the far field.
+  let stepFraction = clamp(params.sceneStrongIntegrator.z, 0.02, 1.0);
+  let residualFail = clamp(params.sceneStrongIntegrator.w, 1.0e-4, 0.5);
   let escapeRadius = max(
     params.sceneStrongDomain.x,
     length(position) + 8.0
   );
   let maximumLookback = max(params.sceneStrongDomain.y, 16.0);
   let capturePadding = max(params.sceneStrongDomain.z, 0.0);
-  let baseBudget = clamp(
-    i32(params.renderControls.w),
-    24,
-    MAX_STRONG_STEPS
-  );
-  let criticalBonus = clamp(
+  let maximumSteps = clamp(
     i32(params.sceneStrongDomain.w),
-    0,
-    MAX_STRONG_STEPS - baseBudget
+    8,
+    MAX_RK4_STEPS
   );
-  var allowedSteps = baseBudget;
   var enteredDomain = false;
   var lookback = 0.0;
   var maximumResidual = 0.0;
   var minimumHorizonDistance = 1.0e6;
 
-  for (
-    var stepIndex: i32 = 0;
-    stepIndex < MAX_STRONG_STEPS;
-    stepIndex = stepIndex + 1
-  ) {
-    if (stepIndex >= allowedSteps) {
-      break;
-    }
-    let fields = sampleSpacetime(frameTime, position);
-    result.iterations = f32(stepIndex + 1);
-    minimumHorizonDistance = min(
-      minimumHorizonDistance,
-      fields.horizonDistance
-    );
+  // Classical fourth-order Runge-Kutta, written as a stage machine so that the
+  // metric provider is evaluated at exactly one call site per iteration and
+  // little state stays live across it. Stage 0 is the start of a step
+  // (capture, escape and step-size logic plus k1); stages 1..3 evaluate k2..k4
+  // at the usual intermediate states. A failed stage restarts the step from
+  // stage 0 with a quarter of the step size.
+  var stage = 0;
+  var stepCount = 0;
+  var stepSize = minimumStep;
+  var retryScale = 1.0;
+  var stepPosition = position;
+  var stepMomentum = momentum;
+  var sumX = vec3<f32>(0.0);
+  var sumP = vec3<f32>(0.0);
+  var evalPosition = position;
+  var evalMomentum = momentum;${diskMidpointDeclaration}
+  var jets = 1.0;
 
-    if (fields.horizonDistance <= capturePadding) {
-      result.outcome = RAY_CAPTURED;
-      result.lookback = lookback;
-      result.hamiltonianResidual = maximumResidual;
-      result.minimumHorizonDistance = minimumHorizonDistance;
-      return result;
-    }
-    var rhs = hamiltonianRhs(fields, momentum, conservedEnergy);
-    maximumResidual = max(maximumResidual, rhs.nullResidual);
-    if (
-      fields.valid < 0.5
-      || rhs.valid < 0.5
-    ) {
-      result.terminationReason = 2.0;
-      result.hamiltonianResidual = max(maximumResidual, 1.0);
-      result.minimumHorizonDistance = minimumHorizonDistance;
-      return result;
-    }
-    if (rhs.nullResidual > residualFail) {
-      // A kick-drift step projects momentum on the old spatial slice.  At the
-      // next position the same covector can sit slightly off the new local
-      // null-energy surface even though it is finite and recoverable.  Correct
-      // that drift before taking another derivative; retain the pre-correction
-      // residual above as the numerical diagnostic and fail closed when the
-      // required correction is too large for the active quality tier.
-      let preProjection = hamiltonianKinematics(fields, momentum);
-      let correction = conservedEnergy / max(
-        preProjection.reducedHamiltonian,
-        1.0e-8
+  for (
+    var iteration: i32 = 0;
+    iteration < MAX_RK4_STEPS * 4 + 16;
+    iteration = iteration + 1
+  ) {
+    let fields = sampleSpacetime(frameTime, evalPosition);
+    jets = jets + 1.0;
+    result.iterations = jets;
+
+    if (stage == 0) {
+      minimumHorizonDistance = min(
+        minimumHorizonDistance,
+        fields.horizonDistance
       );
-      // The emergency real-time tier deliberately uses a permissive
-      // constraint projection.  Balanced/fine tiers retain the tight,
-      // tolerance-derived correction gate; all tiers still fail on a
-      // non-positive/non-finite branch and report the pre-projection residual.
-      let correctionLimit = select(
-        exp(2.5 * residualFail),
-        1.0e4,
-        residualFail >= 0.20
-      );
+      if (fields.horizonDistance <= capturePadding) {
+        result.outcome = RAY_CAPTURED;
+        result.lookback = lookback;
+        result.hamiltonianResidual = maximumResidual;
+        result.minimumHorizonDistance = minimumHorizonDistance;
+        return result;
+      }
+      let kinematics = hamiltonianKinematics(fields, evalMomentum);
+      var deviation = 1.0;
+      let kinematicsValid = fields.valid > 0.5
+        && kinematics.valid > 0.5
+        && kinematics.reducedHamiltonian > 1.0e-8;
+      if (kinematicsValid) {
+        deviation = abs(kinematics.reducedHamiltonian / conservedEnergy - 1.0);
+      }
+      maximumResidual = max(maximumResidual, deviation);
       if (
-        preProjection.valid < 0.5
-        || !finiteScalar(correction)
-        || correction < 1.0 / correctionLimit
-        || correction > correctionLimit
+        !kinematicsValid
+        || !finiteScalar(deviation)
+        || deviation > residualFail
       ) {
-        if (
-          fields.horizonDistance
-            <= max(capturePadding, numericalCaptureGuard())
-        ) {
+        // Inside an innermost photon orbit a ray that came from outside cannot
+        // escape (and during the merger blend that region is inside the
+        // common horizon), so an unrecoverable sample there is a capture.
+        if (fields.failureCaptureMargin < 0.0) {
+          result.outcome = RAY_CAPTURED;
+          result.lookback = lookback;
+          result.hamiltonianResidual = maximumResidual;
+          result.minimumHorizonDistance = minimumHorizonDistance;
+          return result;
+        }
+        result.terminationReason = select(3.0, 2.0, fields.valid < 0.5);
+        result.hamiltonianResidual = max(maximumResidual, 1.0);
+        result.minimumHorizonDistance = minimumHorizonDistance;
+        return result;
+      }
+      // H is homogeneous of degree one in p, so this rescaling restores the
+      // conserved energy exactly without changing the spatial path.
+      evalMomentum = evalMomentum
+        * (conservedEnergy / kinematics.reducedHamiltonian);
+      stepMomentum = evalMomentum;
+    }
+
+    let rhs = hamiltonianRhs(fields, evalMomentum, conservedEnergy);
+    let derivativeX = -rhs.velocity;
+    let derivativeP = -rhs.momentumRate;
+    let derivativeValid = fields.valid > 0.5 && rhs.valid > 0.5;
+
+    if (stage == 0) {
+      if (insidePhotonCapture(fields, derivativeX)) {
+        result.outcome = RAY_CAPTURED;
+        result.lookback = lookback;
+        result.hamiltonianResidual = maximumResidual;
+        result.minimumHorizonDistance = minimumHorizonDistance;
+        return result;
+      }
+      let radius = length(stepPosition);
+      enteredDomain = enteredDomain || radius < escapeRadius * 0.82;
+      if (
+        enteredDomain
+        && radius >= escapeRadius
+        && dot(stepPosition, derivativeX) > 0.0
+      ) {
+        result.outcome = RAY_ESCAPED;
+        // Ingoing Kerr-Schild coordinates follow the ingoing principal null
+        // congruence, so an arriving photon's coordinate direction here is
+        // already within ~M b^3 / r^4 of its asymptote. No harmonic-gauge tail
+        // correction is added.
+        result.escapeDirection = safeNormalize(derivativeX);
+        result.frequencyShift = clamp(
+          observerQ / max(conservedEnergy, 1.0e-5),
+          0.02,
+          max(params.sceneStrongDiagnostics.x, 1.0)
+        );
+        result.lookback = lookback;
+        result.hamiltonianResidual = maximumResidual;
+        result.minimumHorizonDistance = minimumHorizonDistance;
+        return result;
+      }
+      if (stepCount >= maximumSteps) {
+        // A ray still circling inside an innermost photon orbit when the
+        // budget runs out is falling in slowly (typical of the blended merger
+        // metric); elsewhere exhaustion stays unresolved.
+        if (fields.failureCaptureMargin < 0.0) {
+          result.outcome = RAY_CAPTURED;
+          result.lookback = lookback;
+          result.hamiltonianResidual = maximumResidual;
+          result.minimumHorizonDistance = minimumHorizonDistance;
+          return result;
+        }
+        break;
+      }
+      if (lookback >= maximumLookback) {
+        result.terminationReason = 4.0;
+        break;
+      }
+      if (!derivativeValid) {
+        if (fields.failureCaptureMargin < 0.0) {
           result.outcome = RAY_CAPTURED;
           result.lookback = lookback;
           result.hamiltonianResidual = maximumResidual;
@@ -2130,145 +2321,84 @@ fn traceStrongField(screen: vec2<f32>, tanHalfFov: f32) -> RayResult {
         result.minimumHorizonDistance = minimumHorizonDistance;
         return result;
       }
-      momentum = momentum * correction;
-      rhs = hamiltonianRhs(fields, momentum, conservedEnergy);
-      if (rhs.valid < 0.5 || rhs.nullResidual > 1.0e-3) {
-        result.terminationReason = 3.0;
-        result.hamiltonianResidual = max(maximumResidual, 1.0);
-        result.minimumHorizonDistance = minimumHorizonDistance;
-        return result;
-      }
-    }
-    if (fields.horizonDistance < criticalDistance) {
-      allowedSteps = min(
-        MAX_STRONG_STEPS,
-        max(allowedSteps, baseBudget + criticalBonus)
+      stepSize = clamp(
+        stepFraction * max(fields.stepDistance, 0.0) * retryScale,
+        minimumStep,
+        maximumStep
       );
+      stepSize = max(min(stepSize, maximumLookback - lookback), minimumStep);
+      sumX = derivativeX;
+      sumP = derivativeP;${diskMidpointFromK1}
+      evalPosition = stepPosition + 0.5 * stepSize * derivativeX;
+      evalMomentum = stepMomentum + 0.5 * stepSize * derivativeP;
+      stage = 1;
+      continue;
     }
 
-    let radius = length(position);
-    enteredDomain = enteredDomain || radius < escapeRadius * 0.82;
-    if (
-      enteredDomain
-      && radius >= escapeRadius
-      && dot(position, -rhs.velocity) > 0.0
-    ) {
-      result.outcome = RAY_ESCAPED;
-      result.escapeDirection = asymptoticEscapeDirection(
-        position,
-        -rhs.velocity
-      );
-      result.frequencyShift = clamp(
-        observerQ / max(conservedEnergy, 1.0e-5),
-        0.02,
-        max(params.sceneStrongDiagnostics.x, 1.0)
-      );
-      result.lookback = lookback;
-      result.hamiltonianResidual = maximumResidual;
-      result.minimumHorizonDistance = minimumHorizonDistance;
-      return result;
-    }
-    if (lookback >= maximumLookback) {
-      result.terminationReason = 4.0;
-      break;
-    }
-
-    // One analytic metric jet per step. Small steps are reserved for the
-    // horizon/photon region; the far field quickly reaches maximumStep.
-    let criticalRatio = clamp(
-      max(fields.horizonDistance, 0.0) / criticalDistance,
-      0.0,
-      1.0
-    );
-    let curvatureLimiter = inverseSqrt(
-      1.0 + 7.0 * max(fields.curvatureScale, 0.0)
-    );
-    let stepCurveExponent = clamp(
-      params.sceneStrongDiagnostics.w,
-      0.5,
-      2.5
-    );
-    var stepSize = mix(
-      minimumStep,
-      maximumStep,
-      pow(criticalRatio, stepCurveExponent)
-    ) * curvatureLimiter;
-    stepSize = clamp(
-      min(stepSize, maximumLookback - lookback),
-      minimumStep,
-      maximumStep
-    );
-    // Backward symplectic-Euler kick/drift. Hamiltonian homogeneity supplies a
-    // cheap exact energy-surface projection at the current position.
-    let momentumBeforeKick = momentum;
-    var acceptedStepSize = stepSize;
-    momentum = momentumBeforeKick - acceptedStepSize * rhs.momentumRate;
-    var projectedKinematics = hamiltonianKinematics(fields, momentum);
-    var rawEnergyScale = conservedEnergy / max(
-      projectedKinematics.reducedHamiltonian,
-      1.0e-8
-    );
-    let stepCorrectionLimit = select(
-      exp(2.5 * residualFail),
-      1.0e4,
-      residualFail >= 0.20
-    );
-    // Large far-field steps are normally the main M3 Pro speedup, but a ray
-    // entering the overlapping binary strong field can cross the positive
-    // Hamiltonian-energy branch in one kick. Retry only those pixels with a
-    // quarter step before declaring failure. This preserves the one-metric-jet
-    // fast path and avoids globally taxing rays that remain well conditioned.
-    if (
-      projectedKinematics.valid < 0.5
-      || !finiteScalar(rawEnergyScale)
-      || rawEnergyScale <= 0.0
-      || rawEnergyScale > stepCorrectionLimit
-    ) {
-      acceptedStepSize = max(minimumStep, stepSize * 0.25);
-      momentum = (
-        momentumBeforeKick - acceptedStepSize * rhs.momentumRate
-      );
-      projectedKinematics = hamiltonianKinematics(fields, momentum);
-      rawEnergyScale = conservedEnergy / max(
-        projectedKinematics.reducedHamiltonian,
-        1.0e-8
-      );
-    }
-    if (
-      projectedKinematics.valid < 0.5
-      || !finiteScalar(rawEnergyScale)
-      || rawEnergyScale <= 0.0
-      || rawEnergyScale > stepCorrectionLimit
-    ) {
-      if (
-        fields.horizonDistance
-          <= max(capturePadding, numericalCaptureGuard())
-      ) {
+    if (!derivativeValid) {
+      // A stage left the valid metric domain. Inside an unscaled innermost
+      // photon orbit this is a capture; elsewhere retry the step from its
+      // start with a quarter of the size, or give up at the minimum step.
+      if (fields.failureCaptureMargin < 0.0) {
         result.outcome = RAY_CAPTURED;
         result.lookback = lookback;
         result.hamiltonianResidual = maximumResidual;
         result.minimumHorizonDistance = minimumHorizonDistance;
         return result;
       }
+      if (stepSize <= minimumStep) {
+        result.terminationReason = 3.0;
+        result.hamiltonianResidual = max(maximumResidual, 1.0);
+        result.minimumHorizonDistance = minimumHorizonDistance;
+        return result;
+      }
+      retryScale = retryScale * 0.25;
+      evalPosition = stepPosition;
+      evalMomentum = stepMomentum;
+      stage = 0;
+      continue;
+    }
+
+    if (stage == 1) {
+      sumX = sumX + 2.0 * derivativeX;
+      sumP = sumP + 2.0 * derivativeP;${diskMidpointAddInner}
+      evalPosition = stepPosition + 0.5 * stepSize * derivativeX;
+      evalMomentum = stepMomentum + 0.5 * stepSize * derivativeP;
+      stage = 2;
+      continue;
+    }
+    if (stage == 2) {
+      sumX = sumX + 2.0 * derivativeX;
+      sumP = sumP + 2.0 * derivativeP;${diskMidpointAddInner}
+      evalPosition = stepPosition + stepSize * derivativeX;
+      evalMomentum = stepMomentum + stepSize * derivativeP;
+      stage = 3;
+      continue;
+    }
+
+    // Stage 3: k4 completes the step.
+    let nextPosition = stepPosition
+      + (stepSize / 6.0) * (sumX + derivativeX);
+    let nextMomentum = stepMomentum
+      + (stepSize / 6.0) * (sumP + derivativeP);
+    if (!finiteVector(nextPosition) || !finiteVector(nextMomentum)) {
       result.terminationReason = 3.0;
       result.hamiltonianResidual = max(maximumResidual, 1.0);
       result.minimumHorizonDistance = minimumHorizonDistance;
       return result;
-    }
-    momentum = momentum * rawEnergyScale;
-    let driftKinematics = hamiltonianKinematics(fields, momentum);${diskBeforeDrift}
-    position = position - acceptedStepSize * driftKinematics.velocity;${diskStep}
-    lookback = lookback + acceptedStepSize;
-    if (!finiteVector(position) || !finiteVector(momentum)) {
-      result.terminationReason = 2.0;
-      result.hamiltonianResidual = max(maximumResidual, 1.0);
-      result.minimumHorizonDistance = minimumHorizonDistance;
-      return result;
-    }
+    }${diskStep}
+    lookback = lookback + stepSize;
+    stepCount = stepCount + 1;
+    retryScale = 1.0;
+    stepPosition = nextPosition;
+    stepMomentum = nextMomentum;
+    evalPosition = nextPosition;
+    evalMomentum = nextMomentum;
+    stage = 0;
   }
 
-  // Exhausting either the base or critical-zone budget is unresolved, never
-  // silently converted to captured black or a fabricated sky sample.
+  // Exhausting the step or lookback budget is unresolved, never silently
+  // converted to captured black or a fabricated sky sample.
   result.outcome = RAY_UNRESOLVED;
   if (result.terminationReason < 0.5) {
     result.terminationReason = 1.0;
@@ -2286,23 +2416,6 @@ fn rotateAroundY(direction: vec3<f32>, angle: f32) -> vec3<f32> {
     c * direction.x + s * direction.z,
     direction.y,
    -s * direction.x + c * direction.z
-  );
-}
-
-fn skyQualityPressure() -> f32 {
-  let baseBudget = clamp(
-    params.renderControls.w,
-    24.0,
-    f32(MAX_STRONG_STEPS)
-  );
-  // The step budget is fixed by the selected quality tier.  Do not derive
-  // reconstruction weights from per-ray iteration counts or closest-horizon
-  // state: those values move at sub-pixel boundaries and made bright stars
-  // shimmer even while the camera and tier were otherwise unchanged.
-  return 1.0 - smoothstep(
-    64.0,
-    160.0,
-    baseBudget
   );
 }
 
@@ -2332,24 +2445,18 @@ fn sampleEnvironment(direction: vec3<f32>) -> vec3<f32> {
       / (TWO_PI * resolution.x),
     0.0
   );
-  let qualityPressure = skyQualityPressure();
+  // Reconstruction depends only on the screen-to-panorama footprint. Do not
+  // derive it from per-ray iteration counts or closest-horizon state: those
+  // move at sub-pixel boundaries and made bright stars shimmer.
   let footprintPressure = smoothstep(0.62, 1.35, sourceFootprint);
-  let radius = clamp(
-    sourceFootprint * mix(0.72, 1.08, qualityPressure),
-    0.50,
-    3.0
-  );
+  let radius = clamp(sourceFootprint * 0.72, 0.50, 3.0);
   let centre = textureSampleLevel(
     tSky,
     skySampler,
     uv,
     0.0
   ).rgb;
-  let filterWeight = clamp(
-    footprintPressure * mix(0.32, 0.46, qualityPressure),
-    0.0,
-    0.46
-  );
+  let filterWeight = 0.32 * footprintPressure;
   var panorama = centre;
   // Four stable axis taps band-limit the photographic panorama before a
   // low-resolution ray is enlarged by the browser.  Their positions and
@@ -2417,25 +2524,40 @@ fn viridis(valueInput: f32) -> vec3<f32> {
   return mix(c8, c9, fraction);
 }
 
-fn shadeResult(result: RayResult, pixel: vec2<f32>) -> vec3<f32> {
-  let mode = i32(round(params.renderControls.z));
+fn outcomeDiagnostic(result: RayResult) -> vec3<f32> {
+  if (result.outcome == RAY_CAPTURED) {
+    return vec3<f32>(0.02, 0.035, 0.07);
+  }
+  if (result.outcome == RAY_ESCAPED) {
+    return vec3<f32>(0.12, 0.78, 0.50);
+  }
+  if (result.terminationReason < 1.5) {
+    return vec3<f32>(0.95, 0.19, 0.62);
+  }
+  if (result.terminationReason < 2.5) {
+    return vec3<f32>(0.92, 0.10, 0.08);
+  }
+  if (result.terminationReason < 3.5) {
+    return vec3<f32>(1.00, 0.48, 0.05);
+  }
+  return vec3<f32>(0.76, 0.28, 0.96);
+}
+
+// Diagnostic palettes are sRGB-encoded display colours. The scene target is
+// linear, and the post pass shows diagnostics without tone mapping, so decode
+// them here to reach the screen unchanged.
+fn decodeSrgbDisplay(colour: vec3<f32>) -> vec3<f32> {
+  let encoded = clamp(colour, vec3<f32>(0.0), vec3<f32>(1.0));
+  return select(
+    pow((encoded + vec3<f32>(0.055)) / 1.055, vec3<f32>(2.4)),
+    encoded / 12.92,
+    encoded <= vec3<f32>(0.04045)
+  );
+}
+
+fn diagnosticColour(result: RayResult, mode: i32) -> vec3<f32> {
   if (mode == 1) {
-    if (result.outcome == RAY_CAPTURED) {
-      return vec3<f32>(0.02, 0.035, 0.07);
-    }
-    if (result.outcome == RAY_ESCAPED) {
-      return vec3<f32>(0.12, 0.78, 0.50);
-    }
-    if (result.terminationReason < 1.5) {
-      return vec3<f32>(0.95, 0.19, 0.62);
-    }
-    if (result.terminationReason < 2.5) {
-      return vec3<f32>(0.92, 0.10, 0.08);
-    }
-    if (result.terminationReason < 3.5) {
-      return vec3<f32>(1.00, 0.48, 0.05);
-    }
-    return vec3<f32>(0.76, 0.28, 0.96);
+    return outcomeDiagnostic(result);
   }
   if (mode == 2) {
     return viridis(result.lookback / max(params.sceneStrongDomain.y, 1.0));
@@ -2452,8 +2574,16 @@ fn shadeResult(result: RayResult, pixel: vec2<f32>) -> vec3<f32> {
       clamp(log2(1.0 + result.hamiltonianResidual * scale) / 8.0, 0.0, 1.0)
     );
   }
-  if (mode == 5) {
-    return viridis(result.iterations / f32(MAX_STRONG_STEPS));
+  // Metric evaluations as a fraction of the active tier's budget: four per
+  // RK4 step plus the observer sample.
+  let stepBudget = clamp(i32(params.sceneStrongDomain.w), 8, MAX_RK4_STEPS);
+  return viridis(result.iterations / (4.0 * f32(stepBudget) + 1.0));
+}
+
+fn shadeResult(result: RayResult, pixel: vec2<f32>) -> vec3<f32> {
+  let mode = i32(round(params.renderControls.z));
+  if (mode >= 1 && mode <= 5) {
+    return decodeSrgbDisplay(diagnosticColour(result, mode));
   }
   if (result.outcome == RAY_CAPTURED) {
     ${capturedPhotographicResult}
@@ -2474,9 +2604,13 @@ fn shadeResult(result: RayResult, pixel: vec2<f32>) -> vec3<f32> {
     );
     ${unresolvedPhotographicResult}
   }
+  // I_nu / nu^3 is invariant. The panorama is broadband rather than spectral,
+  // so g^4 is the declared bolometric display approximation, as in the
+  // Schwarzschild scene and the stationary reference workbench. A static camera sees
+  // every sky photon with the same g = 1 / alpha_static.
   let shiftRadiance = pow(
-    clamp(result.frequencyShift, 0.20, 2.5),
-    3.0
+    clamp(result.frequencyShift, 0.25, 4.0),
+    4.0
   );
   ${escapedPhotographicResult}
 }
@@ -2557,7 +2691,7 @@ export const strongFieldBinaryShaderBundle = Object.freeze({
   }),
   backendPolicy: Object.freeze({
     production: "webgpu",
-    webgpuModel: "boosted-superposed-kerr-schild-fast-light",
+    webgpuModel: "superposed-kerr-schild-fast-light",
     webgl2Model: "legacy-weak-field-fast-light",
     physicalParityRequired: false,
   }),
@@ -2595,8 +2729,10 @@ export const strongFieldBinaryShaderBundle = Object.freeze({
     },
   }),
   glsl: Object.freeze({
-    // Deliberate fallback, not a port of the strong-field provider.
+    // Deliberate fallback, not a port of the strong-field provider. It has
+    // no diagnostic modes, so its output always takes the photographic path.
     trace: binaryTraceFragmentGLSL,
+    diagnosticModes: false,
   }),
   uniforms: Object.freeze({
     requiredFloatCount: STRONG_FIELD_UNIFORM_FLOATS,
@@ -2633,7 +2769,7 @@ export const strongFieldBinaryDualDiskShaderBundle = Object.freeze({
   }),
   backendPolicy: Object.freeze({
     production: "webgpu",
-    webgpuModel: "boosted-superposed-kerr-schild-fast-light-plus-analytic-thin-disks",
+    webgpuModel: "superposed-kerr-schild-fast-light-plus-analytic-thin-disks",
     webgl2Model: "legacy-weak-field-fast-light-vacuum",
     physicalParityRequired: false,
     matterBackreaction: false,
@@ -2673,8 +2809,10 @@ export const strongFieldBinaryDualDiskShaderBundle = Object.freeze({
     },
   }),
   glsl: Object.freeze({
-    // Deliberate vacuum fallback. It is surfaced as a different physical model.
+    // Deliberate vacuum fallback. It is surfaced as a different physical model
+    // and has no diagnostic modes.
     trace: binaryTraceFragmentGLSL,
+    diagnosticModes: false,
   }),
   uniforms: Object.freeze({
     requiredFloatCount: STRONG_FIELD_ACCRETION_UNIFORM_FLOATS,

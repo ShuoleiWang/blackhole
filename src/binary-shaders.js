@@ -235,7 +235,10 @@ vec3 traceBinary(vec3 initialDirection) {
   float massB = max(uSceneBinaryMasses.y, 1.0e-6);
   float remnantMass = max(uSceneBinaryMasses.z, 1.0e-6);
   float totalBinaryMass = max(massA + massB, 1.0e-6);
-  vec3 axis = vec3(cos(orbitalPhase), 0.0, sin(orbitalPhase));
+  // Same orientation as the WebGPU orbit adapter: the source orbital plane
+  // maps to the renderer's x-z plane with angular momentum along +y (the
+  // remnant spin axis), so phase advances from +x toward -z.
+  vec3 axis = vec3(cos(orbitalPhase), 0.0, -sin(orbitalPhase));
   vec3 centreA = -separation * (massB / totalBinaryMass) * axis;
   vec3 centreB =  separation * (massA / totalBinaryMass) * axis;
 

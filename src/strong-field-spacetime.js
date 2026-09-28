@@ -7,9 +7,9 @@
  *
  * Scientific boundary
  * -------------------
- * The binary metric is a time-frozen linear superposition of two instantaneously
- * boosted Kerr-Schild perturbations, smoothly replaced by one remnant
- * Kerr-Schild perturbation.  It is inspired by Combi & Ressler,
+ * The binary metric is a time-frozen linear superposition of two unboosted
+ * Kerr-Schild perturbations at the frame positions, smoothly replaced by one
+ * remnant Kerr-Schild perturbation.  It is inspired by Combi & Ressler,
  * arXiv:2403.13308, and Combi et al., arXiv:2103.15707.  Unlike a numerical
  * relativity solution it does not solve the Einstein constraints.  Companion
  * attenuation and singularity regularization are numerical prescriptions, not
@@ -55,8 +55,13 @@ const ETA = Object.freeze([
   Object.freeze([0, 0, 1, 0]),
   Object.freeze([0, 0, 0, 1]),
 ]);
+// Companion attenuation is off by default. The companion's Kerr-Schild field
+// is smooth near the other hole, and removing it inside a window of radius
+// ~0.35 separation replaced the correct weak-field superposition with a thin
+// shell of spurious gradient (escape directions of near-hole rays moved by
+// p99 ~20-35 degrees). It remains available as an explicit option.
 const DEFAULT_ATTENUATION = Object.freeze({
-  enabled: true,
+  enabled: false,
   scaleFraction: 0.35,
   minimumScaleM: 1e-3,
   power: 4,
@@ -549,6 +554,10 @@ function boostedKerrSchildTerm(body, positionM, regularization) {
   };
 }
 
+function frozen(body) {
+  return { ...body, velocityC: [0, 0, 0] };
+}
+
 function attenuationWeight(companionRadius, scaleM, attenuation) {
   if (!attenuation.enabled) {
     return 1;
@@ -570,10 +579,14 @@ function evaluateStateAtPosition(
     attenuation.minimumScaleM,
     attenuation.scaleFraction * separationM,
   );
-  const termA = boostedKerrSchildTerm(bodyA, position, regularization);
-  const termB = boostedKerrSchildTerm(bodyB, position, regularization);
+  // Fast light freezes the body positions for the whole ray, so each hole is
+  // an unboosted Kerr-Schild term. A frozen boosted term is not a vacuum
+  // solution and moves its trailing null surface to r+ gamma^2 (1 + v)^2.
+  // Orbit velocities remain available to matter models.
+  const termA = boostedKerrSchildTerm(frozen(bodyA), position, regularization);
+  const termB = boostedKerrSchildTerm(frozen(bodyB), position, regularization);
   const remnantTerm = boostedKerrSchildTerm(
-    orbitState.remnant,
+    frozen(orbitState.remnant),
     position,
     regularization,
   );
@@ -605,7 +618,7 @@ function evaluateStateAtPosition(
   return Object.freeze({
     ...fields,
     schema: "blackhole.spacetime-3p1-sample/v1",
-    model: "boosted-superposed-kerr-schild-to-remnant-kerr",
+    model: "superposed-kerr-schild-to-remnant-kerr",
     scientificStatus: "real-time strong-field approximate metric; not NR",
     timeM: orbitState.timeM,
     positionM: freezeVector(position),
@@ -738,7 +751,7 @@ export function createStrongFieldSpacetimeProvider({
 
   return Object.freeze({
     schema: SPACETIME_PROVIDER_SCHEMA,
-    model: "boosted-superposed-kerr-schild-fast-light",
+    model: "superposed-kerr-schild-fast-light",
     scientificStatus: "strong-field approximate metric; not constraint-solved NR",
     positionsFrozenPerRay: true,
     orbitAdapter,

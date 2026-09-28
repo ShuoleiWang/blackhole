@@ -36,7 +36,7 @@ physically correct. A browser that eventually plays an NR-derived transfer map
 will still be a playback/composition layer, not an NR solver.
 
 The root binary scene, also available through its legacy `binary-approx`
-alias, uses the WebGPU boosted-superposed-Kerr-Schild strong-field fast-light
+alias, uses the WebGPU superposed-Kerr-Schild strong-field fast-light
 approximation, with an explicitly labelled weak-field WebGL2 fallback. It
 consumes pinned `SXS:BBH:0001` Lev5 waveform, event, and remnant anchors, while
 the renderer-coordinate orbit excludes gauge-dependent SXS centroids as
@@ -299,6 +299,9 @@ exists for deterministic image coordinates, not as a substitute for a physical
 observer.
 
 World/sky orientation uses mutually inverse proper right-handed 3×3 rotations.
+The bundled v1 camera bases are mirror-ordered (declared camera-right
+`= -(forward x up)`); the runtime displays their detector columns in reverse
+order, see [`kerr-reference.md`](./kerr-reference.md).
 ICRS axes are fixed as:
 
 ```text

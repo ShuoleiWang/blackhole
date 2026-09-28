@@ -714,8 +714,8 @@ def verify_manifest(manifest: Any) -> None:
         "$.source.license",
     )
     require(
-        license_data["status"] == "not-declared-in-pinned-zenodo-record"
-        and license_data["spdx"] is None
+        license_data["status"] == "declared-in-pinned-zenodo-record"
+        and license_data["spdx"] == "CC-BY-4.0"
         and boolean(
             license_data["attributionRequired"],
             "$.source.license.attributionRequired",

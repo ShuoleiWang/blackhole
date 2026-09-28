@@ -13,14 +13,15 @@ import argparse
 import json
 import math
 import struct
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Final
 
 try:
-    from scripts.verify_nr_contract import validate_contract
+    from scripts.verify_nr_contract import ContractError, validate_contract
 except ModuleNotFoundError:  # Direct ``python3 scripts/...`` execution.
-    from verify_nr_contract import validate_contract
+    from verify_nr_contract import ContractError, validate_contract
 
 
 ROOT: Final = Path(__file__).resolve().parents[1]
@@ -879,4 +880,8 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except (AssertionError, ContractError) as error:
+        print(f"Stationary Schwarzschild transfer-map physics checks failed: {error}", file=sys.stderr)
+        raise SystemExit(1)

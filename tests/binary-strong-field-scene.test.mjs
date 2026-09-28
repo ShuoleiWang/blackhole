@@ -297,6 +297,31 @@ test("binary scene wires the strong-field runtime without losing legacy fallback
     );
 
     const frame = scene.extendFrame(baseFrame(state.time));
+    // Only the photographic mode is tone mapped; modes 1-5 are false colour.
+    assert.equal(frame.diagnosticDisplay, false);
+    for (const mode of [1, 2, 3, 4, 5]) {
+      assert.equal(
+        scene.extendFrame({ ...baseFrame(state.time), mode }).diagnosticDisplay,
+        true,
+      );
+    }
+
+    // Image orientation: the camera triad must be right-handed
+    // (right x up = -forward), otherwise real sky maps render mirrored.
+    for (const [phase, orbitTilt] of [[0, 0], [0.58, 0.575], [2.1, -0.4]]) {
+      Object.assign(state, { phase, orbitTilt });
+      const camera = scene.cameraFrame();
+      const [r, u, f] = [camera.right, camera.up, camera.forward];
+      const handed = [
+        r[1] * u[2] - r[2] * u[1],
+        r[2] * u[0] - r[0] * u[2],
+        r[0] * u[1] - r[1] * u[0],
+      ];
+      handed.forEach((component, axis) => {
+        assert.ok(Math.abs(component + f[axis]) < 1e-12, "camera is not right-handed");
+      });
+    }
+    Object.assign(state, { phase: 0, orbitTilt: 0 });
     assert.ok(frame.sceneStrongFieldUniforms instanceof Float32Array);
     assert.equal(frame.sceneStrongFieldUniforms.length, 44);
     assert.ok([...frame.sceneStrongFieldUniforms].every(Number.isFinite));
@@ -304,43 +329,36 @@ test("binary scene wires the strong-field runtime without losing legacy fallback
     assert.equal(frame.sceneBinaryMasses.length, 4);
     assert.equal(frame.steps, 256);
 
+    // RK4 tiers: integrator = [minimum step, maximum step, step fraction,
+    // relative energy-drift gate]; domain = [escape radius, maximum lookback,
+    // horizon backstop, maximum RK4 steps]. The test camera sits at r = 50 M,
+    // so the escape sphere is at least 2 r + 16 = 116 M.
     const expectedTiers = {
       emergency: {
-        integrator: [0.065, 3.5, 2.7, 0.34],
-        steps: 52,
-        domain: [58, 164, 0.30, 268],
-        stepCurveExponent: 0.50,
+        integrator: [0.02, 64, 0.60, 0.05],
+        domain: [116, 296, 0.02, 48],
       },
       survival: {
-        integrator: [0.050, 3.5, 3.0, 0.25],
-        steps: 60,
-        domain: [60, 180, 0.24, 256],
-        stepCurveExponent: 0.65,
+        integrator: [0.02, 64, 0.60, 0.05],
+        domain: [116, 296, 0.02, 56],
       },
       interactive: {
-        integrator: [0.035, 3.0, 3.3, 0.18],
-        steps: 96,
-        domain: [64, 200, 0.16, 224],
-        stepCurveExponent: 0.80,
+        integrator: [0.01, 64, 0.60, 0.02],
+        domain: [116, 296, 0.02, 80],
       },
       balanced: {
-        integrator: [0.018, 1.10, 3.6, 0.10],
-        steps: 160,
-        domain: [80, 220, 0.08, 160],
-        stepCurveExponent: 1.50,
+        integrator: [0.01, 64, 0.30, 0.01],
+        domain: [160, 400, 0.01, 144],
       },
       fine: {
-        integrator: [0.010, 0.85, 4.0, 0.05],
-        steps: 288,
-        domain: [80, 220, 0.04, 32],
-        stepCurveExponent: 1.90,
+        integrator: [0.005, 64, 0.22, 0.005],
+        domain: [200, 480, 0.005, 192],
       },
     };
     for (const [tierId, expected] of Object.entries(expectedTiers)) {
       const qualityFrame = scene.applyStrongFieldQuality(
         {
           ...frame,
-          steps: expected.steps,
           strongFieldQuality: { tierId },
         },
         { qualityTierId: tierId },
@@ -352,13 +370,9 @@ test("binary scene wires the strong-field runtime without losing legacy fallback
       assert.deepEqual(qualityFrame.sceneStrongDomain, expected.domain);
       assert.deepEqual(
         qualityFrame.sceneStrongDiagnostics,
-        [4, 180, 0.055, expected.stepCurveExponent],
+        [4, 180, 0.055, 0],
       );
-      assert.ok(
-        Math.min(qualityFrame.steps, 320)
-          + qualityFrame.sceneStrongDomain[3]
-          <= 320,
-      );
+      assert.ok(qualityFrame.sceneStrongDomain[3] <= 192);
     }
     const farCameraFrame = scene.applyStrongFieldQuality(
       {
@@ -369,8 +383,8 @@ test("binary scene wires the strong-field runtime without losing legacy fallback
       },
       { qualityTierId: "survival" },
     );
-    assert.equal(farCameraFrame.sceneStrongDomain[0], 108);
-    assert.equal(farCameraFrame.sceneStrongDomain[1], 248);
+    assert.equal(farCameraFrame.sceneStrongDomain[0], 216);
+    assert.equal(farCameraFrame.sceneStrongDomain[1], 496);
 
     const webglCapabilities = Object.freeze({
       api: "webgl2",

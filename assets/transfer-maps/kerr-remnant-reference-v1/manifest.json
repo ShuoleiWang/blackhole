@@ -512,9 +512,9 @@
         "uri": "scripts/generate_nr_contract_fixture.py"
       },
       {
-        "byteLength": 8180,
+        "byteLength": 8183,
         "role": "remnant-spin-source",
-        "sha256": "a9e0b6796af5f6d604dc5ea3ed35c7cc82967c9f288ab179d608434f9c91df25",
+        "sha256": "34abc8f722b0c7920c8ae4c8e7fd3f5750bfccd08e9adebe1187ae9c745cd3f3",
         "storage": "bundled",
         "uri": "assets/scenes/binary-sxs-bbh-0001-v2.json"
       }

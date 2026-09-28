@@ -51,6 +51,12 @@ curl \
   --output "${PARTIAL}" \
   "${SOURCE_URL}"
 
-verify_file "${PARTIAL}"
+# A resumed download of a complete-but-corrupt partial file gets HTTP 416,
+# which curl reports as success; delete it so the next run starts over.
+if ! verify_file "${PARTIAL}"; then
+  rm -f "${PARTIAL}"
+  printf 'Deleted the corrupt partial download; run the script again.\n' >&2
+  exit 1
+fi
 mv -f "${PARTIAL}" "${DESTINATION}"
 printf 'Verified and installed: %s\n' "${DESTINATION}"

@@ -27,7 +27,7 @@ struct Params {
   cameraForwardFov: vec4<f32>,
   cameraRightSkyRotation: vec4<f32>,
   cameraUpDiskOuter: vec4<f32>,
-  postMotionFrame: vec4<f32>,
+  postDisplayFrame: vec4<f32>,
   observerVelocityBeta: vec4<f32>,
   displayOutput: vec4<f32>,
   sceneTransferState: vec4<f32>,
@@ -188,6 +188,10 @@ fn mapUvForCanvas(uv: vec2<f32>) -> vec3<f32> {
     mapped.y = (uv.y - 0.5) / heightFraction + 0.5;
     inside = mapped.y >= 0.0 && mapped.y <= 1.0;
   }
+  // v1 products store detector columns for a mirrored camera basis (declared
+  // camera-right = ICRS +X while forward x up = -X). Reading columns in
+  // reverse order displays the right-handed camera's image.
+  mapped.x = 1.0 - mapped.x;
   return vec3<f32>(clamp(mapped, vec2<f32>(0.0), vec2<f32>(1.0)), select(0.0, 1.0, inside));
 }
 
@@ -262,6 +266,50 @@ fn invalidDiagnosticColour() -> vec3<f32> {
   return vec3<f32>(0.95, 0.12, 0.65);
 }
 
+// Diagnostic palettes are sRGB-encoded display colours. The post pass shows
+// diagnostics without exposure or tone mapping, so decode them to the linear
+// scene target here.
+fn decodeSrgbDisplay(colour: vec3<f32>) -> vec3<f32> {
+  let encoded = clamp(colour, vec3<f32>(0.0), vec3<f32>(1.0));
+  return select(
+    pow((encoded + vec3<f32>(0.055)) / 1.055, vec3<f32>(2.4)),
+    encoded / 12.92,
+    encoded <= vec3<f32>(0.04045)
+  );
+}
+
+fn diagnosticColour(sample: TransferSample, mode: u32) -> vec3<f32> {
+  if (mode == 1u) {
+    return outcomeColour(sample.state & 255u);
+  }
+  if (mode == 2u) {
+    return select(
+      invalidDiagnosticColour(),
+      scalarColour(linearDiagnostic(sample.metrics.x)),
+      hasValidity(sample, 4u)
+    );
+  }
+  if (mode == 3u) {
+    return select(
+      invalidDiagnosticColour(),
+      frequencyColour(sample.primary.w),
+      hasValidity(sample, 2u)
+    );
+  }
+  if (mode == 4u) {
+    return select(
+      invalidDiagnosticColour(),
+      scalarColour(logarithmicDiagnostic(sample.metrics.y)),
+      hasValidity(sample, 8u)
+    );
+  }
+  return select(
+    invalidDiagnosticColour(),
+    scalarColour(logarithmicDiagnostic(sample.metrics.z)),
+    hasValidity(sample, 16u)
+  );
+}
+
 @fragment
 fn fsMain(input: FragmentInput) -> @location(0) vec4<f32> {
   let mapped = mapUvForCanvas(input.uv);
@@ -270,40 +318,8 @@ fn fsMain(input: FragmentInput) -> @location(0) vec4<f32> {
   }
   let sample = transferAt(mapped.xy);
   let mode = u32(params.sceneTransferState.x + 0.5);
-  if (mode == 1u) {
-    return vec4<f32>(outcomeColour(sample.state & 255u), 1.0);
-  }
-  if (mode == 2u) {
-    let colour = select(
-      invalidDiagnosticColour(),
-      scalarColour(linearDiagnostic(sample.metrics.x)),
-      hasValidity(sample, 4u)
-    );
-    return vec4<f32>(colour, 1.0);
-  }
-  if (mode == 3u) {
-    let colour = select(
-      invalidDiagnosticColour(),
-      frequencyColour(sample.primary.w),
-      hasValidity(sample, 2u)
-    );
-    return vec4<f32>(colour, 1.0);
-  }
-  if (mode == 4u) {
-    let colour = select(
-      invalidDiagnosticColour(),
-      scalarColour(logarithmicDiagnostic(sample.metrics.y)),
-      hasValidity(sample, 8u)
-    );
-    return vec4<f32>(colour, 1.0);
-  }
-  if (mode == 5u) {
-    let colour = select(
-      invalidDiagnosticColour(),
-      scalarColour(logarithmicDiagnostic(sample.metrics.z)),
-      hasValidity(sample, 16u)
-    );
-    return vec4<f32>(colour, 1.0);
+  if (mode >= 1u && mode <= 5u) {
+    return vec4<f32>(decodeSrgbDisplay(diagnosticColour(sample, mode)), 1.0);
   }
   if (!isEscaped(sample)) {
     return vec4<f32>(0.0, 0.0, 0.0, 1.0);
@@ -458,6 +474,9 @@ vec3 mapUvForCanvas(vec2 uv) {
     mapped.y = (uv.y - 0.5) / heightFraction + 0.5;
     inside = mapped.y >= 0.0 && mapped.y <= 1.0;
   }
+  // v1 products store detector columns for a mirrored camera basis; read
+  // them in reverse order to display the right-handed camera's image.
+  mapped.x = 1.0 - mapped.x;
   return vec3(clamp(mapped, 0.0, 1.0), inside ? 1.0 : 0.0);
 }
 
@@ -533,6 +552,41 @@ vec3 invalidDiagnosticColour() {
   return vec3(0.95, 0.12, 0.65);
 }
 
+// Diagnostic palettes are sRGB-encoded display colours; decode them to the
+// linear scene target because the post pass shows them without tone mapping.
+vec3 decodeSrgbDisplay(vec3 colour) {
+  vec3 encoded = clamp(colour, 0.0, 1.0);
+  return mix(
+    pow((encoded + 0.055) / 1.055, vec3(2.4)),
+    encoded / 12.92,
+    vec3(lessThanEqual(encoded, vec3(0.04045)))
+  );
+}
+
+vec3 diagnosticColour(TransferSample transferValue, float mode) {
+  if (abs(mode - 1.0) < 0.25) {
+    return outcomeColour(mod(transferValue.metrics.w, 256.0));
+  }
+  if (abs(mode - 2.0) < 0.25) {
+    return hasValidity(transferValue, 4.0)
+      ? scalarColour(linearDiagnostic(transferValue.metrics.x))
+      : invalidDiagnosticColour();
+  }
+  if (abs(mode - 3.0) < 0.25) {
+    return hasValidity(transferValue, 2.0)
+      ? frequencyColour(transferValue.primary.w)
+      : invalidDiagnosticColour();
+  }
+  if (abs(mode - 4.0) < 0.25) {
+    return hasValidity(transferValue, 8.0)
+      ? scalarColour(logarithmicDiagnostic(transferValue.metrics.y))
+      : invalidDiagnosticColour();
+  }
+  return hasValidity(transferValue, 16.0)
+    ? scalarColour(logarithmicDiagnostic(transferValue.metrics.z))
+    : invalidDiagnosticColour();
+}
+
 void main() {
   // Three.js UVs use a bottom-left origin; transfer-map rows are top-left.
   vec3 mapped = mapUvForCanvas(vec2(vUv.x, 1.0 - vUv.y));
@@ -542,45 +596,9 @@ void main() {
   }
   TransferSample transferValue = transferAt(mapped.xy);
   float mode = floor(uSceneTransferState.x + 0.5);
-  if (abs(mode - 1.0) < 0.25) {
+  if (mode > 0.75 && mode < 5.25) {
     gl_FragColor = vec4(
-      outcomeColour(mod(transferValue.metrics.w, 256.0)),
-      1.0
-    );
-    return;
-  }
-  if (abs(mode - 2.0) < 0.25) {
-    gl_FragColor = vec4(
-      hasValidity(transferValue, 4.0)
-        ? scalarColour(linearDiagnostic(transferValue.metrics.x))
-        : invalidDiagnosticColour(),
-      1.0
-    );
-    return;
-  }
-  if (abs(mode - 3.0) < 0.25) {
-    gl_FragColor = vec4(
-      hasValidity(transferValue, 2.0)
-        ? frequencyColour(transferValue.primary.w)
-        : invalidDiagnosticColour(),
-      1.0
-    );
-    return;
-  }
-  if (abs(mode - 4.0) < 0.25) {
-    gl_FragColor = vec4(
-      hasValidity(transferValue, 8.0)
-        ? scalarColour(logarithmicDiagnostic(transferValue.metrics.y))
-        : invalidDiagnosticColour(),
-      1.0
-    );
-    return;
-  }
-  if (abs(mode - 5.0) < 0.25) {
-    gl_FragColor = vec4(
-      hasValidity(transferValue, 16.0)
-        ? scalarColour(logarithmicDiagnostic(transferValue.metrics.z))
-        : invalidDiagnosticColour(),
+      decodeSrgbDisplay(diagnosticColour(transferValue, mode)),
       1.0
     );
     return;

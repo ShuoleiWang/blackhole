@@ -8,7 +8,9 @@
 export const SCHWARZSCHILD_ISCO_FACTOR = 6;
 export const TIDAL_TRUNCATION_FACTOR = 0.8;
 
-const REFERENCE_TEMPERATURE_K = 1.43e5;
+// Novikov-Thorne peak effective temperature at 1e8 Msun for
+// Mdot = lambda L_Edd / (0.1 c^2).
+const REFERENCE_TEMPERATURE_K = 1.086e5;
 const REFERENCE_MASS_SOLAR = 1e8;
 
 // Fifteen uniformly spaced samples spanning 380-780 nm. The XYZ weights are the
@@ -68,10 +70,17 @@ export function eggletonRocheLobeFraction(q) {
   );
 }
 
+// Page-Thorne a = 0 flux shape peak value, reached at r = 9.5509 m.
+const NOVIKOV_THORNE_PEAK_SHAPE = 1.1458947324e-4;
+export const NOVIKOV_THORNE_PEAK_RADIUS_FACTOR = 9.5509 / SCHWARZSCHILD_ISCO_FACTOR;
+
 /**
- * Dimensionless zero-torque Schwarzschild thin-disk flux profile. The inner
- * boundary is dark; outside it the Newtonian profile is
- * (r_in / r)^3 * (1 - sqrt(r_in / r)).
+ * Novikov-Thorne (Page-Thorne) zero-torque flux around a non-spinning body,
+ * normalised to one at its peak. The inner edge is the Schwarzschild ISCO,
+ * r_in = 6 m, so with x = sqrt(r / m) and x0 = sqrt(6):
+ *   F ~ [x - x0 + (sqrt3/2) ln((x+sqrt3)(x0-sqrt3) / ((x-sqrt3)(x0+sqrt3)))]
+ *       / (x^5 (x^2 - 3)).
+ * The disk is dark at and inside the inner edge.
  */
 export function zeroTorqueThinDiskFluxShape(radiusM, innerRadiusM) {
   const radius = finiteNumber(radiusM, "radiusM");
@@ -79,10 +88,15 @@ export function zeroTorqueThinDiskFluxShape(radiusM, innerRadiusM) {
   if (radius <= innerRadius) {
     return 0;
   }
-  const inverseRadius = innerRadius / radius;
-  return (
-    inverseRadius ** 3
-    * (1 - Math.sqrt(inverseRadius))
+  const root3 = Math.sqrt(3);
+  const x0 = Math.sqrt(SCHWARZSCHILD_ISCO_FACTOR);
+  const x = Math.sqrt(SCHWARZSCHILD_ISCO_FACTOR * radius / innerRadius);
+  const bracket = x - x0 + 0.5 * root3 * Math.log(
+    ((x + root3) * (x0 - root3)) / ((x - root3) * (x0 + root3)),
+  );
+  return Math.max(
+    bracket / (x ** 5 * (x * x - 3)) / NOVIKOV_THORNE_PEAK_SHAPE,
+    0,
   );
 }
 
@@ -180,7 +194,7 @@ export function analyticDiskSurfaceStructureWeight({
   const bodyMass = positiveFinite(bodyMassM, "bodyMassM");
   const time = finiteNumber(timeM, "timeM");
   const logarithmicRadius = Math.log(Math.max(radius / innerRadius, 1));
-  const referenceRadius = (49 / 36) * innerRadius;
+  const referenceRadius = NOVIKOV_THORNE_PEAK_RADIUS_FACTOR * innerRadius;
   const omegaPeak = Math.sqrt(bodyMass / referenceRadius ** 3);
   const tidal = 0.16 * Math.cos(
     2 * (angle - 0.42 * logarithmicRadius),

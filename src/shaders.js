@@ -75,6 +75,9 @@ const PI: f32 = 3.14159265358979323846;
 const TWO_PI: f32 = 6.28318530717958647692;
 const MAX_STEPS: i32 = 384;
 const ISCO: f32 = 6.0;
+// Display gain for a static emitter at the disk's flux peak (the exposure
+// anchor); ratios across the disk are physical.
+const DISK_VISIBLE_GAIN: f32 = 0.35;
 const PHOTON_IMPACT: f32 = 5.196152422706632;
 
 struct Params {
@@ -84,7 +87,7 @@ struct Params {
   cameraForwardFov: vec4<f32>,
   cameraRightSkyRotation: vec4<f32>,
   cameraUpDiskOuter: vec4<f32>,
-  postMotionFrame: vec4<f32>,
+  postDisplayFrame: vec4<f32>,
   observerVelocityBeta: vec4<f32>,
   displayOutput: vec4<f32>,
 };
@@ -439,6 +442,72 @@ fn diskNoiseField(
   return vec3<f32>(cloud, strandNoise, fine);
 }
 
+// Novikov-Thorne (Page-Thorne) zero-torque flux for a = 0, normalised to its
+// peak at r = 9.5509 M. With x = sqrt(r/M) and x0 = sqrt(6):
+//   F ~ [x - x0 + (sqrt3/2) ln((x+sqrt3)(x0-sqrt3) / ((x-sqrt3)(x0+sqrt3)))]
+//       / (x^5 (x^2 - 3)).
+fn novikovThorneFluxShape(radius: f32) -> f32 {
+  let root3 = 1.7320508;
+  let x = sqrt(max(radius, ISCO));
+  let x0 = sqrt(ISCO);
+  let bracket = x - x0 + 0.5 * root3 * log(
+    ((x + root3) * (x0 - root3)) / ((x - root3) * (x0 + root3))
+  );
+  let x2 = x * x;
+  return max(bracket / (x2 * x2 * x * (x2 - 3.0)), 0.0) / 1.1458947e-4;
+}
+
+// Visible linear sRGB of a blackbody per unit bolometric flux, normalised to
+// one at 6500 K (fifteen CIE samples over 380-780 nm; shared with the
+// strong-field dual-disk scene). Multiplying by a transferred bolometric
+// intensity g^4 F gives the visible band, whose luminance follows Y(gT)
+// rather than (gT)^4.
+fn visibleBlackbodyLinearSrgbPerBolometric(
+  temperatureKelvin: f32
+) -> vec3<f32> {
+  let cieSamples = array<vec4<f32>, 15>(
+    vec4<f32>(0.38000000, 0.000101768, 0.000126361, 0.003342521),
+    vec4<f32>(0.40857143, 0.041103205, 0.002427076, 0.171379214),
+    vec4<f32>(0.43714286, 0.345374934, 0.016094588, 1.694938040),
+    vec4<f32>(0.46571429, 0.231835560, 0.073791241, 1.489866541),
+    vec4<f32>(0.49428571, 0.013837655, 0.256028875, 0.368248028),
+    vec4<f32>(0.52285714, 0.091902156, 0.761894395, 0.070519050),
+    vec4<f32>(0.55142857, 0.457097020, 0.996550478, 0.007724523),
+    vec4<f32>(0.58000000, 0.920460516, 0.872133791, 0.000450337),
+    vec4<f32>(0.60857143, 1.014443172, 0.519281599, 0.000013971),
+    vec4<f32>(0.63714286, 0.510206266, 0.198321624, 0.000000231),
+    vec4<f32>(0.66571429, 0.109492500, 0.046801697, 0.000000002),
+    vec4<f32>(0.69428571, 0.010026499, 0.006733690, 0.000000000),
+    vec4<f32>(0.72285714, 0.000391779, 0.000589022, 0.000000000),
+    vec4<f32>(0.75142857, 0.000006532, 0.000031314, 0.000000000),
+    vec4<f32>(0.78000000, 0.000000023, 0.000000506, 0.000000000)
+  );
+  let temperature = max(temperatureKelvin, 2.0);
+  var xyz = vec3<f32>(0.0);
+  for (var sampleIndex: i32 = 0; sampleIndex < 15; sampleIndex = sampleIndex + 1) {
+    let sample = cieSamples[sampleIndex];
+    let wavelength = sample.x;
+    let wavelength2 = wavelength * wavelength;
+    let wavelength5 = wavelength2 * wavelength2 * wavelength;
+    let exponent = min(80.0, 14387.77 / (temperature * wavelength));
+    xyz = xyz + sample.yzw / (
+      wavelength5 * max(exp(exponent) - 1.0, 1.0e-12)
+    );
+  }
+  let linearSrgb = vec3<f32>(
+     3.2406 * xyz.x - 1.5372 * xyz.y - 0.4986 * xyz.z,
+    -0.9689 * xyz.x + 1.8758 * xyz.y + 0.0415 * xyz.z,
+     0.0557 * xyz.x - 0.2040 * xyz.y + 1.0570 * xyz.z
+  );
+  let referenceRatio = 6500.0 / temperature;
+  let referenceRatio2 = referenceRatio * referenceRatio;
+  return max(
+    linearSrgb * (referenceRatio2 * referenceRatio2 / 1.3256608705)
+      * vec3<f32>(0.9662282813, 1.0159099238, 0.9498410897),
+    vec3<f32>(0.0)
+  );
+}
+
 fn accretionDiskSample(
   hitPosition: vec3<f32>,
   diskNormal: vec3<f32>,
@@ -451,13 +520,9 @@ fn accretionDiskSample(
   let planarPosition = hitPosition - height * diskNormal;
   let radius = length(planarPosition);
   let outerRadius = max(params.cameraUpDiskOuter.w, ISCO + 0.5);
-  let x = ISCO / max(radius, ISCO);
-  let fluxShapeRaw = x * x * x * max(1.0 - sqrt(x), 0.0);
-  let xPeak = 36.0 / 49.0;
-  let fluxPeak = xPeak * xPeak * xPeak * (1.0 - sqrt(xPeak));
   let innerFade = smoothstep(ISCO, ISCO + 0.35, radius);
-  let outerFade = 1.0 - smoothstep(outerRadius * 0.82, outerRadius, radius);
-  let fluxShape = (fluxShapeRaw / fluxPeak) * innerFade * outerFade;
+  let outerFade = 1.0 - smoothstep(outerRadius * 0.72, outerRadius, radius);
+  let fluxShape = novikovThorneFluxShape(radius) * innerFade * outerFade;
 
   var referenceAxis = vec3<f32>(0.0, 1.0, 0.0);
   if (abs(dot(referenceAxis, diskNormal)) > 0.92) {
@@ -509,12 +574,6 @@ fn accretionDiskSample(
   // removed, and the smaller high-frequency weights below keep the effective
   // temperature smoother than the density filaments; T responds to the local
   // dissipation through the fourth root further down.
-  let densityContrast = clamp(
-    0.62 * cloud + 0.30 * strandNoise + 0.12 * fine
-    + 0.16 * (filamentRidge - 0.42),
-    -0.85,
-    0.85
-  );
   let localHeating = exp(clamp(
     0.45 * cloud + 0.30 * strandNoise + 0.14 * fine
     + 0.12 * (filamentRidge - 0.42),
@@ -522,33 +581,20 @@ fn accretionDiskSample(
     0.58
   ));
 
-  // A marginally optically thick surface layer keeps foreground absorption
-  // while allowing low-density MRI lanes and secondary images to retain depth.
-  let tauMean = 1.45
-              * pow(max(radius / 8.17, 0.1), -0.62)
-              * innerFade * outerFade;
-  let tauFace = tauMean * exp(0.75 * densityContrast);
-  let covering = mix(
-    0.82,
-    1.0,
-    smoothstep(-0.75, 0.75, densityContrast)
-  );
-
   let accretion = max(params.renderControls.x, 1.0e-6);
-  // The UI ratio is L/L_Edd with Mdot_Edd = L_Edd/(0.1 c^2).  This
-  // normalisation gives about 4500 K for the default 6.46e9 Msun,
-  // 6.3e-5-Edd disk; temperature still follows (Mdot/M)^(1/4).
-  let peakTemperature = 1.43e5 * pow(accretion * 1.0e8 / massSolar, 0.25);
+  // The UI ratio is L/L_Edd with Mdot_Edd = L_Edd/(0.1 c^2). For the
+  // Novikov-Thorne profile this puts the peak effective temperature at
+  // 1.086e5 K (L/L_Edd 1e8 Msun / M)^(1/4).
+  let peakTemperature = 1.086e5 * pow(accretion * 1.0e8 / massSolar, 0.25);
   let emittedTemperature = max(
     600.0,
     peakTemperature * pow(max(fluxShape * localHeating, 1.0e-8), 0.25)
   );
 
-  // Electron scattering hardens hot, optically thick zones without changing
-  // their bolometric flux (planckChromaticity is luminance-normalised).
+  // Electron scattering hardens hot zones (colour-corrected blackbody
+  // f^-4 B_nu(f T)) without changing their bolometric flux.
   let spectralHardening = 1.0
-    + 0.15 * smoothstep(8000.0, 30000.0, emittedTemperature)
-           * smoothstep(0.25, 2.0, tauFace);
+    + 0.15 * smoothstep(8000.0, 30000.0, emittedTemperature);
 
   // Exact circular-orbit frequency transfer in Schwarzschild.  The numerator
   // contains the moving observer's gravitational + SR Doppler factor.
@@ -560,8 +606,7 @@ fn accretionDiskSample(
   let g2 = g * g;
   let bolometricTransfer = g2 * g2;
 
-  // Convert the traced static-tetrad ray angle to the circular emitter frame.
-  // This controls both line-of-sight optical depth and thick-slab limb darkening.
+  // Emission angle in the circular emitter frame for limb darkening.
   let localLapse = sqrt(max(1.0 - 2.0 / radius, 1.0e-5));
   let emitterEnergyOverStatic = localLapse * emitterUt * orbitalDenominator;
   let muEmit = clamp(
@@ -569,18 +614,29 @@ fn accretionDiskSample(
     0.03,
     1.0
   );
-  let tauLineOfSight = min(tauFace / muEmit, 20.0);
-  let opacity = clamp(covering * (1.0 - exp(-tauLineOfSight)), 0.0, 1.0);
-  let thickLimb = (1.0 + 2.06 * muEmit) / 3.06;
-  let limbDarkening = mix(1.0, thickLimb, smoothstep(0.25, 1.5, tauFace));
+  // Electron-scattering limb darkening, normalised so the emergent flux
+  // equals F: the angular mean of (1 + 2.06 mu) mu is 2.373 / 2.
+  let limbDarkening = (1.0 + 2.06 * muEmit) / 2.373;
+  // A Shakura-Sunyaev disk is optically thick; only the radial edges fade.
+  let opacity = innerFade * outerFade;
 
-  // The colour is luminance-normalised, so g^4 is applied exactly once.
-  let radiance = max(fluxShape, 0.0)
-               * localHeating * accretion * bolometricTransfer * limbDarkening;
-  // Absolute luminosity cannot be represented by a display texture; 6500 is a
-  // single global camera calibration, while all radial and frequency ratios
-  // above remain physical.
-  let source = planckChromaticity(observedTemperature) * radiance * 6500.0;
+  // Transferred bolometric intensity times the visible fraction at the
+  // observed temperature: the visible luminance follows Y(g f T), so Doppler
+  // and radial contrasts are those of the visible band. Exposure is anchored
+  // to a static emitter at the flux peak, keeping the overall level viewable
+  // as mass and accretion rate move the disk across the spectrum.
+  let bolometric = max(fluxShape, 0.0) * localHeating
+    * bolometricTransfer * limbDarkening;
+  // The anchor emitter radiates the same colour-corrected spectrum.
+  let referenceColour = visibleBlackbodyLinearSrgbPerBolometric(
+    peakTemperature * (1.0 + 0.15 * smoothstep(8000.0, 30000.0, peakTemperature))
+  );
+  let referenceLuminance = max(
+    dot(referenceColour, vec3<f32>(0.2126, 0.7152, 0.0722)),
+    1.0e-20
+  );
+  let source = visibleBlackbodyLinearSrgbPerBolometric(observedTemperature)
+    * bolometric * (DISK_VISIBLE_GAIN / referenceLuminance);
   return vec4<f32>(source * opacity, opacity);
 }
 
@@ -859,7 +915,7 @@ struct Params {
   cameraForwardFov: vec4<f32>,
   cameraRightSkyRotation: vec4<f32>,
   cameraUpDiskOuter: vec4<f32>,
-  postMotionFrame: vec4<f32>,
+  postDisplayFrame: vec4<f32>,
   observerVelocityBeta: vec4<f32>,
   displayOutput: vec4<f32>,
 };
@@ -962,15 +1018,25 @@ fn hashPixel(pixel: vec2<f32>, frame: f32) -> f32 {
 fn fsMain(input: FragmentInput) -> @location(0) vec4<f32> {
   let resolution = max(params.resolutionTimeMass.xy, vec2<f32>(1.0));
   let texel = vec2<f32>(1.0) / resolution;
+  // Diagnostic false colour is already a display value stored as linear
+  // sRGB. Exposure, bloom, the Hubble grade and tone mapping would distort its
+  // colour scale, so only the gamut conversion and transfer encoding apply.
+  if (params.postDisplayFrame.z > 0.5) {
+    var falseColour = clamp(sampleScene(input.uv), vec3<f32>(0.0), vec3<f32>(1.0));
+    if (params.displayOutput.y > 0.5) {
+      falseColour = max(linearSrgbToDisplayP3(falseColour), vec3<f32>(0.0));
+    }
+    return vec4<f32>(encodeSrgbTransfer(falseColour), 1.0);
+  }
   let mode = clamp(params.renderControls.z, 0.0, 1.0);
   let exposure = max(params.renderControls.y, 0.0);
   // Keep the native ray-traced sample untouched: a real Hubble PSF is far
   // below one pixel at this field of view.  Only bright sources receive a
   // restrained, additive telescope halo.
   var color = sampleScene(input.uv) * exposure;
-  let bloomStrength = max(params.postMotionFrame.y, 0.0);
+  let bloomStrength = max(params.postDisplayFrame.y, 0.0);
   if (bloomStrength > 1.0e-5) {
-    let cssScale = max(params.postMotionFrame.x, 0.5);
+    let cssScale = max(params.postDisplayFrame.x, 0.5);
     let bloomRadius = texel * cssScale * mix(2.0, 3.0, mode);
     let bloomSamples = brightPart(sampleScene(input.uv + vec2<f32>( bloomRadius.x, 0.0)) * exposure, 1.0)
                      + brightPart(sampleScene(input.uv + vec2<f32>(-bloomRadius.x, 0.0)) * exposure, 1.0)
@@ -1012,7 +1078,7 @@ fn fsMain(input: FragmentInput) -> @location(0) vec4<f32> {
   }
   color = encodeSrgbTransfer(color);
 
-  let dither = (hashPixel(input.position.xy, params.postMotionFrame.w) - 0.5) / 255.0;
+  let dither = (hashPixel(input.position.xy, params.postDisplayFrame.w) - 0.5) / 255.0;
   color = clamp(color + vec3<f32>(dither), vec3<f32>(0.0), vec3<f32>(1.0));
   return vec4<f32>(color, 1.0);
 }
@@ -1063,6 +1129,7 @@ const float PI = 3.14159265358979323846;
 const float TWO_PI = 6.28318530717958647692;
 const int MAX_STEPS = 384;
 const float ISCO = 6.0;
+const float DISK_VISIBLE_GAIN = 0.35;
 const float PHOTON_IMPACT = 5.196152422706632;
 
 vec3 safeNormalize(vec3 v) {
@@ -1367,6 +1434,64 @@ vec3 diskNoiseField(
   return vec3(cloud, strandNoise, fine);
 }
 
+// Novikov-Thorne (Page-Thorne) zero-torque flux for a = 0, normalised to its
+// peak at r = 9.5509 M (see the WGSL twin).
+float novikovThorneFluxShape(float radius) {
+  float root3 = 1.7320508;
+  float x = sqrt(max(radius, ISCO));
+  float x0 = sqrt(ISCO);
+  float bracket = x - x0 + 0.5 * root3 * log(
+    ((x + root3) * (x0 - root3)) / ((x - root3) * (x0 + root3))
+  );
+  float x2 = x * x;
+  return max(bracket / (x2 * x2 * x * (x2 - 3.0)), 0.0) / 1.1458947e-4;
+}
+
+const vec4 CIE_VISIBLE_SAMPLES[15] = vec4[15](
+  vec4(0.38000000, 0.000101768, 0.000126361, 0.003342521),
+  vec4(0.40857143, 0.041103205, 0.002427076, 0.171379214),
+  vec4(0.43714286, 0.345374934, 0.016094588, 1.694938040),
+  vec4(0.46571429, 0.231835560, 0.073791241, 1.489866541),
+  vec4(0.49428571, 0.013837655, 0.256028875, 0.368248028),
+  vec4(0.52285714, 0.091902156, 0.761894395, 0.070519050),
+  vec4(0.55142857, 0.457097020, 0.996550478, 0.007724523),
+  vec4(0.58000000, 0.920460516, 0.872133791, 0.000450337),
+  vec4(0.60857143, 1.014443172, 0.519281599, 0.000013971),
+  vec4(0.63714286, 0.510206266, 0.198321624, 0.000000231),
+  vec4(0.66571429, 0.109492500, 0.046801697, 0.000000002),
+  vec4(0.69428571, 0.010026499, 0.006733690, 0.000000000),
+  vec4(0.72285714, 0.000391779, 0.000589022, 0.000000000),
+  vec4(0.75142857, 0.000006532, 0.000031314, 0.000000000),
+  vec4(0.78000000, 0.000000023, 0.000000506, 0.000000000)
+);
+
+// Visible linear sRGB of a blackbody per unit bolometric flux, normalised to
+// one at 6500 K (see the WGSL twin).
+vec3 visibleBlackbodyLinearSrgbPerBolometric(float temperatureKelvin) {
+  float temperature = max(temperatureKelvin, 2.0);
+  vec3 xyz = vec3(0.0);
+  for (int sampleIndex = 0; sampleIndex < 15; sampleIndex++) {
+    vec4 sampleValue = CIE_VISIBLE_SAMPLES[sampleIndex];
+    float wavelength = sampleValue.x;
+    float wavelength2 = wavelength * wavelength;
+    float wavelength5 = wavelength2 * wavelength2 * wavelength;
+    float exponent = min(80.0, 14387.77 / (temperature * wavelength));
+    xyz += sampleValue.yzw / (wavelength5 * max(exp(exponent) - 1.0, 1.0e-12));
+  }
+  vec3 linearSrgb = vec3(
+     3.2406 * xyz.x - 1.5372 * xyz.y - 0.4986 * xyz.z,
+    -0.9689 * xyz.x + 1.8758 * xyz.y + 0.0415 * xyz.z,
+     0.0557 * xyz.x - 0.2040 * xyz.y + 1.0570 * xyz.z
+  );
+  float referenceRatio = 6500.0 / temperature;
+  float referenceRatio2 = referenceRatio * referenceRatio;
+  return max(
+    linearSrgb * (referenceRatio2 * referenceRatio2 / 1.3256608705)
+      * vec3(0.9662282813, 1.0159099238, 0.9498410897),
+    vec3(0.0)
+  );
+}
+
 vec4 accretionDiskSample(
   vec3 hitPosition,
   vec3 diskNormal,
@@ -1379,13 +1504,9 @@ vec4 accretionDiskSample(
   vec3 planarPosition = hitPosition - height * diskNormal;
   float radius = length(planarPosition);
   float outerRadius = max(uDiskOuterRadius, ISCO + 0.5);
-  float x = ISCO / max(radius, ISCO);
-  float fluxShapeRaw = x * x * x * max(1.0 - sqrt(x), 0.0);
-  float xPeak = 36.0 / 49.0;
-  float fluxPeak = xPeak * xPeak * xPeak * (1.0 - sqrt(xPeak));
   float innerFade = smoothstep(ISCO, ISCO + 0.35, radius);
-  float outerFade = 1.0 - smoothstep(outerRadius * 0.82, outerRadius, radius);
-  float fluxShape = (fluxShapeRaw / fluxPeak) * innerFade * outerFade;
+  float outerFade = 1.0 - smoothstep(outerRadius * 0.72, outerRadius, radius);
+  float fluxShape = novikovThorneFluxShape(radius) * innerFade * outerFade;
 
   vec3 referenceAxis = vec3(0.0, 1.0, 0.0);
   if (abs(dot(referenceAxis, diskNormal)) > 0.92) {
@@ -1427,37 +1548,21 @@ vec4 accretionDiskSample(
     0.82,
     0.62 * strandNoise + 0.38 * cloud
   );
-  float densityContrast = clamp(
-    0.62 * cloud + 0.30 * strandNoise + 0.12 * fine
-    + 0.16 * (filamentRidge - 0.42),
-    -0.85,
-    0.85
-  );
   float localHeating = exp(clamp(
     0.45 * cloud + 0.30 * strandNoise + 0.14 * fine
     + 0.12 * (filamentRidge - 0.42),
     -0.50,
     0.58
   ));
-  float tauMean = 1.45
-                * pow(max(radius / 8.17, 0.1), -0.62)
-                * innerFade * outerFade;
-  float tauFace = tauMean * exp(0.75 * densityContrast);
-  float covering = mix(
-    0.82,
-    1.0,
-    smoothstep(-0.75, 0.75, densityContrast)
-  );
 
   float accretion = max(uAccretion, 1.0e-6);
-  float peakTemperature = 1.43e5 * pow(accretion * 1.0e8 / massSolar, 0.25);
+  float peakTemperature = 1.086e5 * pow(accretion * 1.0e8 / massSolar, 0.25);
   float emittedTemperature = max(
     600.0,
     peakTemperature * pow(max(fluxShape * localHeating, 1.0e-8), 0.25)
   );
   float spectralHardening = 1.0
-    + 0.15 * smoothstep(8000.0, 30000.0, emittedTemperature)
-           * smoothstep(0.25, 2.0, tauFace);
+    + 0.15 * smoothstep(8000.0, 30000.0, emittedTemperature);
   float emitterUt = inversesqrt(max(1.0 - 3.0 / radius, 1.0e-5));
   float orbitalDenominator = max(1.0 - omega * lambdaZ, 0.015);
   float transferDenominator = emitterUt * orbitalDenominator;
@@ -1471,13 +1576,18 @@ vec4 accretionDiskSample(
     0.03,
     1.0
   );
-  float tauLineOfSight = min(tauFace / muEmit, 20.0);
-  float opacity = clamp(covering * (1.0 - exp(-tauLineOfSight)), 0.0, 1.0);
-  float thickLimb = (1.0 + 2.06 * muEmit) / 3.06;
-  float limbDarkening = mix(1.0, thickLimb, smoothstep(0.25, 1.5, tauFace));
-  float radiance = max(fluxShape, 0.0)
-                 * localHeating * accretion * g2 * g2 * limbDarkening;
-  vec3 source = planckChromaticity(observedTemperature) * radiance * 6500.0;
+  float limbDarkening = (1.0 + 2.06 * muEmit) / 2.373;
+  float opacity = innerFade * outerFade;
+  float bolometric = max(fluxShape, 0.0) * localHeating * g2 * g2 * limbDarkening;
+  vec3 referenceColour = visibleBlackbodyLinearSrgbPerBolometric(
+    peakTemperature * (1.0 + 0.15 * smoothstep(8000.0, 30000.0, peakTemperature))
+  );
+  float referenceLuminance = max(
+    dot(referenceColour, vec3(0.2126, 0.7152, 0.0722)),
+    1.0e-20
+  );
+  vec3 source = visibleBlackbodyLinearSrgbPerBolometric(observedTemperature)
+    * bolometric * (DISK_VISIBLE_GAIN / referenceLuminance);
   return vec4(source * opacity, opacity);
 }
 
@@ -1748,7 +1858,7 @@ uniform vec3 uUp;
 uniform float uDiskOuterRadius;
 uniform float uRenderScale;
 uniform float uBloom;
-uniform float uMotion;
+uniform float uDiagnosticDisplay;
 uniform float uFrame;
 uniform vec3 uObserverVelocity;
 uniform float uObserverBeta;
@@ -1808,6 +1918,11 @@ float hashPixel(vec2 pixel, float frame) {
 void main() {
   vec2 resolution = max(uResolution, vec2(1.0));
   vec2 texel = 1.0 / resolution;
+  // Diagnostic false colour is already a display value stored as linear sRGB.
+  if (uDiagnosticDisplay > 0.5) {
+    gl_FragColor = vec4(encodeSrgbTransfer(clamp(sampleScene(vUv), 0.0, 1.0)), 1.0);
+    return;
+  }
   float mode = clamp(uMode, 0.0, 1.0);
   float exposure = max(uExposure, 0.0);
   vec3 color = sampleScene(vUv) * exposure;

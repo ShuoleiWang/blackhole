@@ -13,15 +13,20 @@ H=\alpha\sqrt{\gamma^{ij}p_i p_j}-\beta^i p_i=-p_t
 with negative coordinate-time steps using a midpoint integrator and central
 spatial differences. The resulting path is past-directed. This sign convention
 is tested independently of the WGSL text because it controls the direction of
-Kerr frame dragging and the escaped sky direction. The oracle does not reuse
+Kerr frame dragging and the escaped sky direction. The oracle keeps the
+Eulerian (ADM-normal) camera and derives its screen boundaries in that frame;
+the production WebGPU camera is the static observer, whose energy
+`E = alpha_s` and shadow edge `b = r sin(psi) / sqrt(1 - 2M/r)` are checked
+separately in `tests/strong-field-shaders.test.mjs`. The oracle does not reuse
 the WGSL dual-number derivatives or judge correctness from a rendered image.
 
 In ingoing Kerr-Schild coordinate time, a past-directed shadow ray can approach
 the past horizon asymptotically. The CPU trace therefore declares a `0.02 M`
 just-outside-horizon excision for its analytic boundary tests. That surface is
-an isolated-Kerr numerical proxy, not an apparent/event horizon. It is tighter
-than every production quality-tier padding and is intentionally separate from
-the WebGPU failure-only capture guard.
+an isolated-Kerr numerical proxy, not an apparent/event horizon. The WebGPU
+tracer instead captures rays at the innermost photon orbit (see
+[`strong-field-equations.md`](./strong-field-equations.md)), so its horizon
+padding is only a backstop.
 
 The deterministic gates are:
 

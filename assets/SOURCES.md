@@ -28,9 +28,12 @@ README must be accompanied by the `ESO/S. Brunier` credit, source, and license.
 - CSV MD5: `17cca777db64b17170f06f67ce9d3ab7`
 - Bundled official metadata SHA-256: `03abcaecf4e63d77045ef57c4514b52c8bb1a46dd18e1f93a50044a0f4f481c8`
 
-No module on `main` currently consumes this table. It is retained, with its
-official metadata and checksums, for spectral colour work: the planned offline
-renderer rewrite and real-time colour calibration. The previous consumer,
+No module reads this table at runtime. The shaders weight 15 samples
+(380–780 nm) with the Wyman–Sloan–Shirley analytic fit to the CIE 1931
+observer; `tests/binary-accretion-model.test.mjs` checks that response against
+golden values integrated from this table (within 1%). The table is retained,
+with its official metadata and checksums, to regenerate those goldens and for
+future spectral colour work such as the planned offline renderer rewrite. The previous consumer,
 `offline/cie_color.py`, is preserved on the `archive/offline-v1` branch. This
 is a standard-observer colourimetric table, not a camera-sensor or
 absolute-appearance model.
@@ -59,12 +62,20 @@ not bundled in this repository:
 | A/B/common horizons | <https://zenodo.org/api/records/3273935/files/SXS:BBH:0001/Lev5/Horizons.h5/content> | 3,501,232 | `484ea88842209e64983793159bcc7d7c` | `cf97de4a60a4cd5c6a56f219ea9fa81f1849647f134250e95ae79e40be4dd957` |
 | CoM-corrected asymptotic waveform | <https://zenodo.org/api/records/3273935/files/SXS:BBH:0001/Lev5/rhOverM_Asymptotic_GeometricUnits_CoM.h5/content> | 142,641,207 | `c271e0b905c74f434f00c9b14f67850c` | `d760add0693e458781f8db9958b4669971e816d7c026cdbe5f09b7d8fd6bd21f` |
 
-The pinned Zenodo record does **not declare a license**. Accordingly, the Phase
-2 manifest records `spdx = null` and
-`status = not-declared-in-pinned-zenodo-record`. This repository preserves the
-SXS/Zenodo attribution and records integrity metadata, but it does not invent
-an SPDX identifier or infer a license from a catalog-wide statement, another
-record, or another web page.
+- Title: *Binary black-hole simulation SXS:BBH:0001*
+- Creators: Geoffrey Lovelace, Harald Pfeiffer, Mike Boyle, Mark Scheel,
+  Larry Kidder, Anil Zenginoglu, Abdul Mroue, Dan Hemberger, Bela Szilagyi,
+  Nicholas Taylor (SXS Collaboration)
+- Record: Zenodo, published 2019-07-09,
+  <https://doi.org/10.5281/zenodo.3273935>
+- License: [Creative Commons Attribution 4.0 International
+  (CC BY 4.0)](https://creativecommons.org/licenses/by/4.0/), as declared in
+  the record's metadata; the Phase 2 manifest records `spdx = "CC-BY-4.0"` and
+  `status = declared-in-pinned-zenodo-record`
+- Changes: the original files are not redistributed. The generator extracts the
+  horizon centroid tracks, the `(2,2)` strain mode and the remnant metadata,
+  resamples them onto the protocol time grid and stores the derived samples
+  below; the renderer does not use any SXS spacetime data.
 
 The track uses `AhA.dir/CoordCenterInertial.dat` and
 `AhB.dir/CoordCenterInertial.dat` for the gauge-dependent coordinate separation
@@ -81,11 +92,12 @@ The generated sample sidecar has 2,732 rows, is 202,606 bytes (approximately
 Its maximum measured orbital-phase interpolation residual is
 `0.000644202687 rad` (`6.442e-4 rad`).
 
-These source diagnostics drive the motion and waveform display only. The
-sidecar contains no SXS near-zone metric, four-dimensional spacetime, null
-geodesics, or ray-transfer data. The existing shader remains a frame-frozen
-multi-centre **weak-field fast-light** approximation; the resulting image is
-**not NR ray tracing**.
+These source diagnostics drive the waveform display, event timing and remnant
+parameters. The centroid channels are gauge dependent and feed only the WebGL2
+weak-field fallback; the WebGPU strong-field scenes derive body positions from
+the waveform phase instead. The sidecar contains no SXS near-zone metric,
+four-dimensional spacetime, null geodesics, or ray-transfer data, so no
+rendered image is **NR ray tracing**.
 
 ## `scenes/binary-pn-equal-mass-v1.json` (project-generated preview data)
 
@@ -97,8 +109,8 @@ multi-centre **weak-field fast-light** approximation; the resulting image is
 - Pinned dataset: <https://doi.org/10.5281/zenodo.3273935>
 - Metadata file: `SXS:BBH:0001/Lev5/metadata.json`
 - Metadata MD5 published by Zenodo: `099d4c93d9466fe4b7ecad6c94499cf3`
-- License status in the pinned Zenodo record: not declared; no SPDX identifier
-  is asserted by this project
+- License of the pinned Zenodo record: CC BY 4.0 (see the Phase 2 entry above
+  for the full attribution)
 
 The rounded remnant mass and dimensionless spin are taken from the pinned SXS
 metadata. The manifest's orbital samples, waveform strip, merger interpolation,
@@ -142,6 +154,28 @@ black-hole simulation. See
 [`docs/nr-transfer-map-v1.md`](../docs/nr-transfer-map-v1.md) for the normative
 field and safety semantics.
 
+## `transfer-maps/schwarzschild-reference-v1/` (project-generated analytic reference)
+
+- Description: deterministic 1024×576 stationary Schwarzschild vacuum transfer
+  map for a static observer at `r = 40M` with a 40° vertical field of view
+- Dataset ID: `schwarzschild-reference-v1`
+- Metric: exact analytic Schwarzschild solution, normalized to `M = 1`
+- Generator:
+  [`scripts/generate_schwarzschild_transfer_map.py`](../scripts/generate_schwarzschild_transfer_map.py)
+- Independent verifier:
+  [`scripts/verify_schwarzschild_transfer_map.py`](../scripts/verify_schwarzschild_transfer_map.py)
+- Scientific specification:
+  [`docs/nr-transfer-map-v1.md`](../docs/nr-transfer-map-v1.md)
+- License declaration in manifest: `NOASSERTION` (project-generated; covered
+  by the repository's MIT License)
+- Records: 589,824 (`escaped=557,772`, `captured=32,052`, `unusable=0`)
+- Manifest SHA-256:
+  `b70898ebe36f9f72147481c68fbd1ac31053cc6718da5258c60f84f4f0723e20`
+
+Every record is computed from the analytic Schwarzschild orbit equation; the
+product contains no SXS or NR data. It is a stationary calibration reference,
+**not NR ray tracing** and not a binary-merger frame.
+
 ## `transfer-maps/kerr-remnant-reference-v1/` (project-generated analytic reference)
 
 - Description: deterministic 1024×576 stationary Kerr vacuum transfer map
@@ -160,7 +194,7 @@ field and safety semantics.
 - License declaration in manifest: `NOASSERTION`
 - Records: 589,824 (`escaped=558,684`, `captured=31,140`, `unusable=0`)
 - Manifest SHA-256:
-  `5b0022ab963c0cc35d3d8acab17190bd1294bc72da2b49003d785f964ac81d99`
+  `596690e62b65d874c2cf99c55d65d8069145eaddc251695f5a60166406ba0851`
 
 The SXS-derived input to this product is exactly one remnant-spin parameter.
 Its magnitude is computed from the full pinned three-vector, and the manifest
@@ -236,3 +270,15 @@ redistributed.
 ### Integrity
 
 - Local 6K original JPEG SHA-256: `60400c92c54b7c1bd12299c69e83b16e5b6256e7dabacc478c021758ecd28179`
+
+## `../vendor/three.module.js` (vendored dependency)
+
+- Upstream: [three.js](https://github.com/mrdoob/three.js) r165, unmodified
+  ES module build
+- Copyright: 2010-2024 three.js authors
+- License: MIT; the full notice is in
+  [`../vendor/three.LICENSE`](../vendor/three.LICENSE)
+- SHA-256: `5916c8dfb5f4e3eede312de305345868d4a0a8105383b080c6985565d6e79b46`
+- Byte size: 1,284,652
+- Used by: `src/webgl-renderer.js` for the WebGL2 fallback. It is imported
+  statically, so browsers also download it when WebGPU renders.

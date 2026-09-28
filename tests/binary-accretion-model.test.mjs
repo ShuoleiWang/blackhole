@@ -253,32 +253,53 @@ test("zero-torque flux is non-negative and dark at or within the inner edge", ()
   }
 });
 
-test("zero-torque flux has its analytic maximum at 49 r_in / 36", () => {
-  const innerRadiusM = 4;
-  const peakRadiusM = 49 * innerRadiusM / 36;
-  const peakFlux = zeroTorqueThinDiskFluxShape(
-    peakRadiusM,
-    innerRadiusM,
-  );
-  const expectedPeakFlux = (36 / 49) ** 3 * (1 - 6 / 7);
-  close(peakFlux, expectedPeakFlux);
+test("Novikov-Thorne flux peaks at 9.5509 m with unit normalisation", () => {
+  // Inner edge at the Schwarzschild ISCO (r_in = 6 m): the Page-Thorne a = 0
+  // flux peaks at r = 9.5509 m = 1.59182 r_in.
+  const innerRadiusM = 3;
+  const peakRadiusM = 9.5509 * innerRadiusM / 6;
+  const peakFlux = zeroTorqueThinDiskFluxShape(peakRadiusM, innerRadiusM);
+  close(peakFlux, 1, 1e-9);
   assert.ok(
-    peakFlux > zeroTorqueThinDiskFluxShape(
-      peakRadiusM * 0.999,
-      innerRadiusM,
-    ),
+    peakFlux > zeroTorqueThinDiskFluxShape(peakRadiusM * 0.99, innerRadiusM),
   );
   assert.ok(
-    peakFlux > zeroTorqueThinDiskFluxShape(
-      peakRadiusM * 1.001,
-      innerRadiusM,
-    ),
+    peakFlux > zeroTorqueThinDiskFluxShape(peakRadiusM * 1.01, innerRadiusM),
   );
+  // Independent check against the direct integral f(r) = -Omega_r /
+  // (E - Omega L)^2 / r * integral (E - Omega L) L_r dr (units m = 1).
+  const circular = (r) => ({
+    E: (1 - 2 / r) / Math.sqrt(1 - 3 / r),
+    L: Math.sqrt(r) / Math.sqrt(1 - 3 / r),
+    Omega: r ** -1.5,
+  });
+  const direct = (r) => {
+    const steps = 4000;
+    let sum = 0;
+    for (let i = 0; i < steps; i += 1) {
+      const rr = 6 + (r - 6) * (i + 0.5) / steps;
+      const { E, L, Omega } = circular(rr);
+      const h = 1e-5;
+      const dL = (circular(rr + h).L - circular(rr - h).L) / (2 * h);
+      sum += (E - Omega * L) * dL;
+    }
+    sum *= (r - 6) / steps;
+    const { E, L, Omega } = circular(r);
+    return 1.5 * r ** -2.5 / (E - Omega * L) ** 2 / r * sum;
+  };
+  const peakDirect = direct(9.5509);
+  for (const radius of [7, 12, 20, 40]) {
+    close(
+      zeroTorqueThinDiskFluxShape(radius * innerRadiusM / 6, innerRadiusM),
+      direct(radius) / peakDirect,
+      2e-6,
+    );
+  }
 });
 
 test("far-field disk temperature approaches the r^-3/4 law", () => {
   const innerRadiusM = 3;
-  const firstRadiusM = innerRadiusM * 1e8;
+  const firstRadiusM = innerRadiusM * 1e12;
   const radiusRatio = 16;
   const first = zeroTorqueThinDiskTemperatureShape(
     firstRadiusM,

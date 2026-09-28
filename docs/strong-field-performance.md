@@ -41,38 +41,74 @@ it cannot select a smaller raster:
 | `fine` | 1.00 | 12.0 MP | 288 | Paused, strictest settled convergence |
 
 The scene's corresponding numerical policy is explicit rather than hidden in
-the shader:
+the shader. Rays are integrated with classical RK4 whose step is a fraction of
+`max(r - w r+, r/2)` for the nearest term. The scheduler's "base steps" above
+no longer reach the RK4 tracer (its budgets are in the table below); they only
+distinguish render domains for history invalidation.
 
-| Tier | Minimum / maximum step | Residual gate | Capture padding | Critical-zone bonus | Escape / lookback floor |
-| --- | ---: | ---: | ---: | ---: | ---: |
-| `emergency` | 0.065 / 3.50 M | 0.34 | 0.30 M | 268 | 56 / 164 M |
-| `survival` | 0.050 / 3.50 M | 0.25 | 0.24 M | 256 | 60 / 180 M |
-| `interactive` | 0.035 / 3.00 M | 0.18 | 0.16 M | 224 | 64 / 200 M |
-| `balanced` | 0.018 / 1.10 M | 0.10 | 0.08 M | 160 | 80 / 220 M |
-| `fine` | 0.010 / 0.85 M | 0.05 | 0.04 M | 64 | 80 / 220 M |
+| Tier | Step fraction | Minimum / maximum step | Energy-drift gate | Maximum RK4 steps | Horizon backstop | Escape / lookback floor |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| `emergency` | 0.60 | 0.02 / 64 M | 0.05 | 48 | 0.02 M | 96 / 260 M |
+| `survival` | 0.60 | 0.02 / 64 M | 0.05 | 56 | 0.02 M | 96 / 260 M |
+| `interactive` | 0.60 | 0.01 / 64 M | 0.02 | 80 | 0.02 M | 96 / 260 M |
+| `balanced` | 0.30 | 0.01 / 64 M | 0.01 | 144 | 0.01 M | 160 / 400 M |
+| `fine` | 0.22 | 0.005 / 64 M | 0.005 | 192 | 0.005 M | 200 / 480 M |
 
 The scheduler applies both the tier ceiling and the global twelve-million-pixel
 ceiling, and limits device pixel ratio to 2×. A 1280×720 CSS viewport therefore
 renders at 2560×1440 on a 2× Retina display; the reported 1836×1376 case renders
-at 3672×2752 (about 10.1 MP), without the former 1.43× clamp. All base step
-budgets stay below the shader's 320-step compile-time maximum; a scene-owned
-critical-zone bonus must also clamp the combined budget to that maximum.
-The scene uses `max(tier floor, camera radius + 8 M)` for its finite escape
-sphere and limits the interactive camera to 34–70 M. This keeps even the
-52-step emergency tier able to traverse the central domain instead of turning a
-large fraction of ordinary sky rays into false unresolved pixels. Rays that
-enter a horizon/photon critical zone receive the tier-specific bonus above,
-but the base-plus-bonus total never exceeds 320.
+at 3672×2752 (about 10.1 MP), without the former 1.43× clamp. The escape
+sphere is `max(tier floor, 2 r_camera + 16 M)` and the lookback budget
+`max(tier floor, 2 r_escape + 64 M)`; far-field RK4 steps grow geometrically,
+so the larger sphere costs only a few steps while keeping the coordinate
+direction within `~M b^3 / r^4` of the asymptotic sky direction.
 
-Capture padding is measured outward from an isolated Kerr radius; it is a
-declared excision surface, not a computed binary apparent/event horizon. The
-reduced coordinate-time tracer also has a failure-only analytic guard inside
-the relevant isolated-Kerr photon shell (`0.95 M` for the non-spinning
-individual holes, tapering to `0.25 M` for the pinned remnant). It is consulted
-only when energy projection fails; outside it the ray remains `unresolved`.
-The larger padding, longer steps, and looser residual gates in `emergency`,
-`survival`, and `interactive` are latency tradeoffs. Settled `fine` is deliberately stricter,
-but no tier upgrades the approximate metric to NR.
+Rays are captured at the innermost photon orbit of the nearest term (radii
+scaled by metric weight during the merger blend), which a ray from outside
+cannot leave; the horizon padding is only a backstop. A metric failure or an
+exhausted budget inside the unscaled photon orbit of any term present in the
+metric is also a capture; elsewhere the ray remains `unresolved`. The larger
+step fraction of the motion tiers is a latency tradeoff; fractions above 0.6
+start flipping capture outcomes, so no tier uses one. Settled `fine` is
+deliberately stricter, but no tier upgrades the approximate metric to NR.
+
+#### RK4 accuracy and cost on M3 Pro (2026-09-29)
+
+Sky-direction errors are measured with the production WGSL through the
+compute probe of `src/strong-field-gpu-probe.js`, driven by a local harness
+that is not part of the repository. The reference is the same tracer at step
+fraction 0.04 with a 1,900-step budget; frames are SXS:BBH:0001 at
+`t = -9210, -1000, -60, -8, +10 M` on a 192×108 full-frame grid (camera 42 M,
+57° inclination, 52° vertical field of view). "Near" rays are those whose
+reference path passes within 8 M of a horizon. Frame times are for the
+production renderer tracing a full native-Retina 3456×2234 frame at
+`t = -1000 M` (offscreen canvas, 6K sky, SDR post).
+
+| Tier | All rays: median / p99 error | Near rays: median / p90 error | Outcome flips per 20,736 rays | Native 3456×2234 frame |
+| --- | ---: | ---: | ---: | ---: |
+| `interactive` | 0.3–0.4′ / 9–21′ | 2.7–8.0′ / 6.6–22′ | 0–3 | 238 ms |
+| `balanced` | 0.2–0.3′ / 0.6–0.7′ | 0.14–0.28′ / 0.22–0.61′ | 0–2 | 485 ms |
+| `fine` | 0.2–0.25′ / 0.6–0.7′ | 0.06–0.10′ / 0.09–0.19′ | 0–2 | 673 ms |
+
+A native-Retina pixel at this field of view is about 1.4′, so moving frames
+displace lensed features near the holes by several pixels (most near merger,
+when the holes are closest), and a paused view visibly settles when it refines
+to `balanced`/`fine`. The error falls roughly as the fifth power of the step
+fraction (0.5 would cut it by 60% for 20% more frame time, 0.4 by 87% for
+47%). Scaling the fraction with local curvature or capping the far-field step
+was measured to be less efficient than a uniform fraction.
+
+With the native-resolution lock, the `interactive` tier therefore runs at about
+4 FPS on a full-screen Retina panel; the frame time scales linearly with pixel
+count (about 31 ns per pixel), so a 1728×1117 raster takes 65 ms. The previous
+symplectic-Euler `interactive` tier took 59 ms at that raster while
+misplacing directions by 0.55–0.61° (median) and 13–45° (p99), with a
+Schwarzschild shadow radius 17% too large.
+
+Against exact Schwarzschild orbit integrals (same harness), the photon-orbit
+capture reproduces the shadow edge `b_c = 3 sqrt(3) M` within the 0.1% sampling
+bracket in every tier, and at pixel resolution no ray across the Kerr remnant's
+shadow edge ends `unresolved`.
 
 These are M3 Pro policy values, not general physics-accuracy claims;
 shader-specific acceptance must still prove each declared convergence
@@ -88,7 +124,7 @@ excluded because it includes allocation and resize work rather than steady
 tracing cost.
 
 Startup begins at `balanced`; a moving M3 Pro timeline and active dragging use
-the 12 MP `interactive` raster with 72 base steps. Once paused, the static
+the 12 MP `interactive` raster and RK4 tier. Once paused, the static
 controller starts at `balanced`, then enters `fine` at the same spatial raster.
 Accumulation starts with an explicit
 unjittered sample zero; the first jittered sample is index one with weight one
@@ -137,7 +173,7 @@ Hamiltonian residual, iteration count, and minimum horizon distance. This is
 the acceptance boundary for future algebra, pipeline, or native-backend work;
 a shader-string test or visually similar screenshot is not sufficient.
 
-#### Controlled local result (2026-08-04)
+#### Controlled local result (2026-08-04, previous symplectic-Euler integrator)
 
 One local Apple M3 Pro A/B used the same 1280x720 CSS viewport at DPR 2
 (`2560x1440` internal raster), ESO 6K sky, SDR output, binary protocol time
@@ -167,7 +203,7 @@ ray is painted as escaped sky -- but they are not claimed as bitwise
 equivalence. The paused fine tier reached all 32 accumulation samples; two
 full-page captures two seconds apart were byte identical after `steady`.
 
-#### Controlled dual-disk result (2026-08-08)
+#### Controlled dual-disk result (2026-08-08, previous symplectic-Euler integrator)
 
 The independent dual-disk scene was exercised on the local Apple M3 Pro at the
 native `2560x1440` internal raster. The browser reported `WebGPU · Metal`,
@@ -209,6 +245,14 @@ Metal. The compute corpus still ends before the shared post stage; the separate
 full application smoke above is what exercised the HDR/P3 `rgba16float` canvas
 and native sky uploads. Neither check is silently substituted for the other.
 
+With the RK4 tracer, static-observer camera and Novikov-Thorne mini-disks
+(2026-09-29, production `fine` tier) the same 64×36 probe records 94 disk
+hits, zero transfer failures, and 2,265 escaped, 39 captured and zero
+unresolved rays; maximum scene-linear disk radiance is 1.0096. The probe page
+now also compiles every production WGSL module (Schwarzschild trace, post,
+progressive accumulation, both strong-field traces and the transfer-map
+compositor) and fails on any compilation error.
+
 ## Progressive sequence
 
 After input stops, the scheduler progresses through:
@@ -243,7 +287,7 @@ const decision = scheduler.nextFrame({
   physicsRevision,
   transportRevision,
   interactionActive: state.dragging,
-  timelineRunning: state.running,
+  timelineRunning: timelineAdvancing(), // running, time scale > 0, not held
   backend: renderer.capabilities.api,
   visible: !document.hidden,
 });

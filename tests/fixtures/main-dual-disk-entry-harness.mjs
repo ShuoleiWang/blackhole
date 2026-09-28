@@ -75,9 +75,10 @@ class FakeClassList {
 }
 
 class FakeElement extends FakeEventTarget {
-  constructor(id = "") {
+  constructor(id = "", tagName = "div") {
     super();
     this.id = id;
+    this.tagName = tagName;
     this.attributeValues = new Map();
     this.classList = new FakeClassList();
     this.dataset = {};
@@ -147,6 +148,11 @@ class FakeElement extends FakeEventTarget {
     this.children = [...(this.children ?? []), ...children];
   }
 
+  closest(selector) {
+    const tags = selector.split(",").map((part) => part.trim().split("[")[0]);
+    return tags.includes(this.tagName) ? this : null;
+  }
+
   setPointerCapture() {}
 
   releasePointerCapture() {}
@@ -195,6 +201,8 @@ element("transferReferenceSwitch").hidden = true;
 element("transferMapInspector").hidden = true;
 element("sceneStatus").hidden = true;
 element("toggleMotion").mark = new FakeElement("toggle-motion-mark");
+element("languageSelect").tagName = "select";
+element("skySource").tagName = "select";
 element("binaryPlayPause").mark = new FakeElement("binary-play-mark");
 
 const root = new FakeElement("html");
@@ -296,6 +304,7 @@ globalThis.fetch = async (input) => {
 };
 
 const rendererCalls = [];
+let renderCount = 0;
 WebGPURenderer.create = async (canvas, skyUrls, options) => {
   rendererCalls.push({
     canvasId: canvas.id,
@@ -321,7 +330,9 @@ WebGPURenderer.create = async (canvas, skyUrls, options) => {
     lost: false,
     pendingRuntimeError: null,
     resize() {},
-    render() {},
+    render() {
+      renderCount += 1;
+    },
     canSubmitFrame() {
       return true;
     },
@@ -351,6 +362,64 @@ if (element("backendStatus").textContent !== "Stub WebGPU · Metal") {
     `main.js did not finish startup: ${[...startupErrors, ...startupInfo].join(" | ")}`,
   );
 }
+
+const rafCountAtStartup = animationFrames.length;
+// Robustness probes on the live frame loop and keyboard handler.
+let clock = performance.now() + 1_000;
+const runAnimationFrame = () => {
+  clock += 16;
+  animationFrames[animationFrames.length - 1](clock);
+};
+const locationBeforeProbes = locationUrl.href;
+const errorsBeforeProbes = startupErrors.length;
+windowTarget.innerWidth = 0;
+const rendersBeforeEmpty = renderCount;
+runAnimationFrame();
+runAnimationFrame();
+const emptyViewport = {
+  renders: renderCount - rendersBeforeEmpty,
+  locationUnchanged: locationUrl.href === locationBeforeProbes,
+  errors: startupErrors.slice(errorsBeforeProbes),
+};
+windowTarget.innerWidth = 1440;
+const rendersBeforeRestore = renderCount;
+for (let frame = 0; frame < 3; frame += 1) {
+  runAnimationFrame();
+}
+emptyViewport.rendersAfterRestore = renderCount - rendersBeforeRestore;
+
+const keyPrevented = (key, target, modifiers = {}) => {
+  let prevented = false;
+  windowTarget.dispatchEvent({
+    type: "keydown",
+    key,
+    target,
+    repeat: false,
+    metaKey: false,
+    ctrlKey: false,
+    altKey: false,
+    defaultPrevented: false,
+    ...modifiers,
+    preventDefault() {
+      prevented = true;
+    },
+  });
+  return prevented;
+};
+const body = new FakeElement("", "body");
+const keyboard = {
+  arrowOnSelect: keyPrevented("ArrowDown", element("languageSelect")),
+  spaceOnSelect: keyPrevented(" ", element("skySource")),
+  spaceOnSummary: keyPrevented(" ", new FakeElement("", "summary")),
+  browserZoom: keyPrevented("=", body, { metaKey: true }),
+  historyBack: keyPrevented("ArrowLeft", body, { altKey: true }),
+  spaceRepeatToggles: (() => {
+    const before = element("toggleMotion").dataset.state;
+    keyPrevented(" ", body, { repeat: true });
+    return element("toggleMotion").dataset.state !== before;
+  })(),
+  arrowOnBody: keyPrevented("ArrowLeft", body),
+};
 
 const attribute = (id, name) => element(id).getAttribute(name);
 const report = {
@@ -382,8 +451,10 @@ const report = {
     radius: element("rsValue").textContent,
     sceneStatus: element("sceneStatus").textContent,
   },
-  rafCount: animationFrames.length,
-  startupErrors,
+  rafCount: rafCountAtStartup,
+  startupErrors: startupErrors.slice(0, errorsBeforeProbes),
+  emptyViewport,
+  keyboard,
 };
 
 process.stdout.write(`${JSON.stringify(report)}\n`);

@@ -93,6 +93,14 @@ test("language preference and URL switching preserve the full observation route"
   }
   assert.equal(chinese.hash, "#pixel");
   assert.equal(new URL(languageUrl(chinese.href, "en")).searchParams.has("lang"), false);
+  // An automatic WebGPU recovery does not stick across a language switch.
+  const recovered = new URL(languageUrl(
+    "https://blackhole.test/?renderer=webgl&fallback=webgpu-device-lost&binaryTime=12",
+    "zh-CN",
+  ));
+  assert.equal(recovered.searchParams.has("renderer"), false);
+  assert.equal(recovered.searchParams.has("fallback"), false);
+  assert.equal(recovered.searchParams.get("binaryTime"), "12");
 });
 
 test("English and Chinese catalogs have exact key parity and preserve native sky contracts", () => {
@@ -119,7 +127,7 @@ test("English and Chinese catalogs have exact key parity and preserve native sky
     ].join(" ");
     assert.match(sky, /6000×3000/);
     assert.match(sky, /16000×8000/);
-    assert.match(sky, /236 MB/);
+    assert.match(sky, /236 MiB/);
     assert.match(sky, /488 MiB/);
   }
   assert.throws(() => english.t("missing.key"), /Unknown i18n key/);

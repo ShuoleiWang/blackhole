@@ -40,7 +40,7 @@ export const TRUSTED_REFERENCE_REGISTRY = Object.freeze({
     titleKey: "reference.kerrTitle",
     manifestUrl: KERR_REMNANT_MANIFEST_URL.href,
     expectedManifestSha256: (
-      "5b0022ab963c0cc35d3d8acab17190bd1294bc72da2b49003d785f964ac81d99"
+      "596690e62b65d874c2cf99c55d65d8069145eaddc251695f5a60166406ba0851"
     ),
   }),
 });
@@ -393,14 +393,16 @@ export function canvasPointToTransferPixel(
   ) {
     return null;
   }
+  // Stored detector columns follow the products' mirrored camera basis; the
+  // display reads them in reverse (see mapUvForCanvas in the shaders).
   return Object.freeze({
-    x: Math.min(mapWidth - 1, Math.floor(mapUv[0] * mapWidth)),
+    x: Math.min(mapWidth - 1, Math.floor((1 - mapUv[0]) * mapWidth)),
     y: Math.min(mapHeight - 1, Math.floor(mapUv[1] * mapHeight)),
   });
 }
 
 export function transferPixelToCanvasPoint(x, y, rect, mapWidth, mapHeight) {
-  const mapUv = [(x + 0.5) / mapWidth, (y + 0.5) / mapHeight];
+  const mapUv = [1 - (x + 0.5) / mapWidth, (y + 0.5) / mapHeight];
   const canvasAspect = rect.width / rect.height;
   const mapAspect = mapWidth / mapHeight;
   const canvasUv = [...mapUv];
@@ -751,7 +753,12 @@ export async function createTransferMapReferenceScene({
   }
 
   function inspectWithKeyboard(event) {
-    if (event.target !== currentCanvas()) {
+    if (
+      event.target !== currentCanvas()
+      || event.metaKey
+      || event.ctrlKey
+      || event.altKey
+    ) {
       return;
     }
     const step = event.shiftKey ? 10 : 1;
@@ -760,10 +767,11 @@ export async function createTransferMapReferenceScene({
       y: Math.floor(dataset.height / 2),
     };
     let handled = true;
+    // Displayed columns run opposite to stored columns.
     if (event.key === "ArrowLeft") {
-      next = { ...next, x: Math.max(0, next.x - step) };
-    } else if (event.key === "ArrowRight") {
       next = { ...next, x: Math.min(dataset.width - 1, next.x + step) };
+    } else if (event.key === "ArrowRight") {
+      next = { ...next, x: Math.max(0, next.x - step) };
     } else if (event.key === "ArrowUp") {
       next = { ...next, y: Math.max(0, next.y - step) };
     } else if (event.key === "ArrowDown") {
@@ -934,9 +942,11 @@ export async function createTransferMapReferenceScene({
         ...baseFrame,
         time: 0,
         // Keep the shared post pass scientifically neutral. Diagnostic mode is
-        // carried separately so false-colour values are not Hubble-graded.
+        // carried separately so false-colour values are not Hubble-graded,
+        // and diagnostics bypass exposure and tone mapping entirely.
         mode: 0,
         bloom: 0,
+        diagnosticDisplay: state.mode !== 0,
         motion: 0,
         cameraPos: fixedCamera.cameraPos,
         cameraRadius: readouts.affineCameraDistance,

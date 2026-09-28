@@ -695,19 +695,25 @@ export class WebGPURenderer {
     // the scientific Gaia sky is not silently downgraded to the 6K fallback.
     const negotiation = await requestCompatibleDevice(adapter);
     const { device } = negotiation;
-    const context = canvas.getContext("webgpu");
-    if (!context) {
-      throw new Error("Unable to create a WebGPU canvas context");
+    let instance;
+    try {
+      const context = canvas.getContext("webgpu");
+      if (!context) {
+        throw new Error("Unable to create a WebGPU canvas context");
+      }
+      instance = new WebGPURenderer(
+        canvas,
+        context,
+        adapter,
+        device,
+        negotiation,
+        options,
+      );
+    } catch (error) {
+      // Nothing owns the device yet; release it before the WebGL2 fallback.
+      device.destroy?.();
+      throw error;
     }
-
-    const instance = new WebGPURenderer(
-      canvas,
-      context,
-      adapter,
-      device,
-      negotiation,
-      options,
-    );
     try {
       await instance.init(skyUrl);
       return instance;
@@ -788,9 +794,16 @@ export class WebGPURenderer {
     device.addEventListener?.("uncapturederror", this.handleUncapturedError);
   }
 
+  screenIsHDR() {
+    this.dynamicRangeQuery ??= typeof matchMedia === "function"
+      ? matchMedia("(dynamic-range: high)")
+      : { matches: false };
+    return this.dynamicRangeQuery.matches === true;
+  }
+
   get hdrMode() {
     if (this.outputHDR) {
-      return matchMedia("(dynamic-range: high)").matches
+      return this.screenIsHDR()
         ? "HDR · P3 · FP16"
         : this.i18n.t("renderer.p3ExtendedSdr");
     }
@@ -831,6 +844,12 @@ export class WebGPURenderer {
       alphaMode: "opaque",
     };
     const hdrDisabled = new URLSearchParams(location.search).get("hdr") === "0";
+    // The extended canvas is configured whenever the browser supports it, but
+    // the post pass only uses its HDR shoulder while the current screen is
+    // high dynamic range (see screenIsHDR); on an SDR screen the compositor
+    // would clamp values above 1 per channel, so frames there take the
+    // tone-mapped path. Windows can move between screens, so this is decided
+    // per frame rather than here.
     this.outputHDR = false;
     this.displayP3 = false;
     this.hdrPeak = 1;
@@ -922,7 +941,7 @@ export class WebGPURenderer {
       canvasFormat: this.format,
       canvasColorSpace: this.displayP3 ? "display-p3" : "srgb",
       canvasToneMapping: this.outputHDR ? "extended" : "standard",
-      screenDynamicRange: matchMedia("(dynamic-range: high)").matches ? "high" : "standard",
+      screenDynamicRange: this.screenIsHDR() ? "high" : "standard",
       skyTexture: this.skyTexture
         ? `${this.skyTextureWidth}×${this.skyTextureHeight}`
         : "unavailable",
@@ -1264,11 +1283,14 @@ export class WebGPURenderer {
     data[23] = frame.diskOuterRadius;
     data[24] = frame.renderScale;
     data[25] = frame.bloom;
-    data[26] = frame.motion;
+    // Slot 26 selects the post display transform: 1 shows diagnostic false
+    // colour without exposure, grade or tone mapping.
+    data[26] = frame.diagnosticDisplay === true ? 1 : 0;
     data[27] = frame.frame;
     data.set(frame.observerVelocity, 28);
     data[31] = frame.observerBeta;
-    data[32] = this.outputHDR ? 1 : 0;
+    // The HDR shoulder is only valid while the current screen can show it.
+    data[32] = this.outputHDR && this.screenIsHDR() ? 1 : 0;
     data[33] = this.displayP3 ? 1 : 0;
     data[34] = this.hdrPeak;
     data[35] = this.skyRadianceScale;
