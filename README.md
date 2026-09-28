@@ -71,6 +71,11 @@ renderers.
 | `?scene=schwarzschild` | Implemented | Interactive single-hole Schwarzschild geodesics and an idealized disk |
 | Stationary Schwarzschild/Kerr workbench | Implemented | Fixed-camera analytic vacuum calibration, authenticated delivery, and regression oracles; not a merger renderer |
 | WebGL2 binary fallback | Implemented | Explicit legacy weak-field preview with no claim of physical parity with the WebGPU strong-field path |
+| Offline exact-Kerr/Novikov–Thorne spectral frame | Implemented analytic reference | Float64 exact-Kerr rays, Page-Thorne flux, colour-corrected spectra, KERRBB-D20 angular emission, adaptive pixels, resumable tiles, structural verification, deterministic replay, independent selected-ray RK4, and authenticated 1 nm CIE XYZ/linear-sRGB derivation; stationary zero-thickness disk, not a solved atmosphere, GRMHD, or NR |
+| Offline Kerr finite-thickness spectral frame | Implemented analytic product | Publishes authenticated exact-471-bin tiles from literature-bounded upper/lower photospheres, exact-Kerr local matter/launch frames, deterministic first-visible replay, and fine/coarse `g^3 I_nu` transfer; full products pass byte-exact same-code replay, while selected upper/lower/capture/escape rays are cross-checked by an independent canonical-BL fixed-RK4 transport oracle; this is not a full-frame independent proof, hydrostatic structure, GRMHD, or NR |
+| Offline returning-radiation foundation | Implemented forward and receiver-centred finite-grid energy kernels, fixed point, certified thermal profile, and directional transport | Two four-block constructions evaluate the same local-comoving operator from forward `g^2` deposition and receiver-sky `mu_i g^4 D20(mu_e)` integration, with proper-area averaging, fine/coarse bin-topology gates, and coefficient-wise comparison; the thermal layer accepts physical watts only from a replayed Kerr kernel and enforces a non-relaxable equation-residual gate; both kernel paths share the exact-Kerr transport family and are not independent geodesic or continuum oracles; no KERRBB `F_S`, atmosphere, returning-coupled frame, GRMHD, or complete KERRBB |
+| Offline SDR display derivative | Implemented display-only quicklook | Converts an authenticated signed linear-sRGB frame into a separately versioned, manually exposed, luminance-Reinhard, uniformly gamut-scaled, sRGB-encoded RGB16 PPM product with independent byte replay; it is SDR, not HDR, does not alter the scientific linear master, and does not verify input physics |
+| Offline scientific-rendering core | Implemented foundation | Full-4D provider rays, scalar surface transfer plus standalone Stokes formal solver, deterministic resume, and independently verified vacuum/spectral artifacts; no current product is NR- or GRMHD-backed |
 | Four-dimensional NR slow-light offline rendering | Planned | Requires ray bundles/Jacobi fields and, for luminous output, separately sourced GRMHD/GRRT, spectral, and polarization data |
 
 [`docs/rendering-modes.md`](./docs/rendering-modes.md) defines these two
@@ -356,6 +361,131 @@ Primary implementation files:
 - [`scripts/generate_kerr_transfer_map.py`](./scripts/generate_kerr_transfer_map.py) — Deterministic Kerr null-geodesic generator with full-ray tolerance refinement
 - [`scripts/verify_kerr_transfer_map.py`](./scripts/verify_kerr_transfer_map.py) — Independent finite-ZAMO shadow, Kerr-Schild identity, and fixed-step ray verifier
 - [`docs/kerr-reference.md`](./docs/kerr-reference.md) — Kerr configuration, equations, validation boundary, and reproduction guide
+- [`offline/`](./offline) — Provider-based float64 Hamiltonian rays,
+  exact Kerr/Novikov–Thorne spectral surfaces, invariant radiative transfer,
+  adaptive pixels, typed composition, and deterministic resumable tile jobs
+- [`offline/cie_color.py`](./offline/cie_color.py) — Authenticated official
+  CIE 1931 2-degree 1 nm integration to scientific XYZ and unclamped linear
+  sRGB, with a separate chromaticity-preserving display transform
+- [`offline/cie_product.py`](./offline/cie_product.py) — Transactional,
+  versioned exact-471-bin spectral-to-XYZ tiles with source-record hashes,
+  propagated estimated errors, complete producer closure, and no display
+  transform
+- [`offline/linear_rgb_product.py`](./offline/linear_rgb_product.py) —
+  Transactional signed, unclamped D65 scene-linear-sRGB derivative of the
+  verified XYZ product; no exposure, HDR, tone map, gamut map, transfer curve,
+  or quantization
+- [`offline/display_product.py`](./offline/display_product.py) — Transactional
+  SDR-only RGB16 PPM quicklook derived from the verified signed linear-sRGB
+  product; exposure, tone/gamut mapping, transfer encoding, and quantization
+  remain outside the scientific master
+- [`offline/kerr_finite_thickness.py`](./offline/kerr_finite_thickness.py) —
+  Literature-bounded upper/lower Kerr photosphere calibration geometry
+- [`offline/kerr_finite_thickness_surface.py`](./offline/kerr_finite_thickness_surface.py) —
+  Shared-probe multi-surface first-visible adapter with radial transparency
+  and no implicit sidewall
+- [`offline/kerr_finite_thickness_emitter.py`](./offline/kerr_finite_thickness_emitter.py) —
+  Actual-face Kerr-normalized circular matter frame and signed local photon
+  projection; not a hydrostatic or off-equatorial geodesic solution
+- [`offline/kerr_finite_thickness_area.py`](./offline/kerr_finite_thickness_area.py) —
+  Exact-metric, comoving-projected photosphere area density and converged
+  annulus proper area; not a coordinate or Euclidean area proxy
+- [`offline/kerr_finite_thickness_launch.py`](./offline/kerr_finite_thickness_launch.py) —
+  Authenticated face-tangent tetrad and future-null local emission launch;
+  no ray tracing or returning-radiation kernel
+- [`offline/kerr_finite_thickness_transfer.py`](./offline/kerr_finite_thickness_transfer.py) —
+  Deterministically replayed first-visible `g^3 I_nu` transfer with exact
+  worldtube, topology, signed-angle, provenance, and policy-limit gates
+- [`offline/kerr_finite_thickness_frame.py`](./offline/kerr_finite_thickness_frame.py) —
+  Independent fine/coarse finite-height ray sampler used by the authenticated
+  tiled spectral-frame producer
+- [`offline/kerr_finite_thickness_replay_certificate.py`](./offline/kerr_finite_thickness_replay_certificate.py) —
+  Process-local, non-serializable replay authority that removes duplicate
+  geodesic work without bypassing scalar, topology, source, or spectrum gates
+- [`offline/kerr_finite_thickness_replay.py`](./offline/kerr_finite_thickness_replay.py) —
+  Same-code-family byte-exact full-product replay with closed sampler,
+  source/CIE/backend, TOCTOU, and resource-limit checks
+- [`offline/kerr_finite_thickness_selected_oracle.py`](./offline/kerr_finite_thickness_selected_oracle.py) —
+  Independent canonical-Boyer-Lindquist fixed-RK4 selected-ray transport for
+  the prescribed finite faces, including first-visible upper/lower events,
+  capture/escape, actual-face `g`, signed emission cosine, and D20 spectra;
+  shares the Page-Thorne radial scalar and is not a full-frame proof
+- [`offline/returning_radiation.py`](./offline/returning_radiation.py) —
+  Receiver-first local bolometric energy-kernel contract and fail-closed
+  absorbed/reradiated fixed point; ray-generated matrices live in the separate
+  forward/receiver kernel modules, while `F_S`, scattering, atmosphere,
+  polarization, and GRMHD remain absent
+- [`offline/kerr_returning_radiation_rays.py`](./offline/kerr_returning_radiation_rays.py) —
+  Self-replayed fine/coarse fate and receiver transport for one local emission
+  direction; explicitly not the area/solid-angle normalized kernel `K`
+- [`offline/kerr_returning_radiation_receiver_rays.py`](./offline/kerr_returning_radiation_receiver_rays.py) —
+  Receiver-centred backward-sky source primitive with authenticated affine-zero
+  surface contact, public replay, and a directional `mu_i g^4 D20(mu_e)`
+  integrand; still not a solid-angle-integrated kernel coefficient
+- [`offline/returning_radiation_fate_quadrature.py`](./offline/returning_radiation_fate_quadrature.py) —
+  Finite-grid KERRBB-D20 emitter-local bolometric energy-fate quadrature with
+  independent mu-, azimuth-, and half-cell-phase agreement gates; neither a
+  photon-number probability nor a returning-radiation kernel
+- [`offline/kerr_returning_radiation_kernel.py`](./offline/kerr_returning_radiation_kernel.py) —
+  Same-code finite-grid four-face energy kernel using actual-face comoving
+  proper area, the D20 emitted-flux measure, forward `g^2`, receiver-bin
+  topology agreement, and per-column area-energy closure
+- [`offline/kerr_returning_radiation_receiver_kernel.py`](./offline/kerr_returning_radiation_receiver_kernel.py) —
+  Complementary four-face receiver-sky kernel using proper-area receiver
+  averaging and `mu_i g^4 D20(mu_e)`, with source-bin topology agreement,
+  full-grid replay, and coefficient-wise comparison against the forward kernel;
+  the comparison shares the exact-Kerr transport code family
+- [`offline/kerr_returning_radiation_thermal_profile.py`](./offline/kerr_returning_radiation_thermal_profile.py) —
+  Absorbed local-energy fixed point and annulus temperature profile. The
+  certified entry replays a complete Kerr kernel and derives its geometry;
+  generic external matrices remain explicitly unverified and publish no watts
+- [`offline/kerr_returning_radiation_kernel_jobs.py`](./offline/kerr_returning_radiation_kernel_jobs.py) —
+  Canonical bounded direction-task/cache substrate for deterministic parallel
+  kernel evaluation; this foundation does not yet replace either kernel's
+  monolithic integrator
+- [`offline/ray_bundle.py`](./offline/ray_bundle.py) — Converged screen-space
+  finite-difference Jacobian/parity/magnification diagnostics; deliberately
+  not labelled as along-ray Sachs/Jacobi transport
+- [`scripts/render_offline_kerr_nt_frame.py`](./scripts/render_offline_kerr_nt_frame.py) —
+  Authenticated exact-Kerr/Novikov–Thorne adaptive spectral-frame renderer
+- [`scripts/render_offline_kerr_finite_thickness_frame.py`](./scripts/render_offline_kerr_finite_thickness_frame.py) —
+  Authenticated exact-Kerr prescribed-photosphere 471-bin adaptive
+  spectral-frame renderer
+- [`scripts/verify_offline_spectral_frame.py`](./scripts/verify_offline_spectral_frame.py) —
+  Independent schema, topology, ABI, hash, diagnostic, and product-identity
+  verifier; it intentionally does not claim to retrace the physics
+- [`scripts/convert_offline_spectral_to_cie_xyz.py`](./scripts/convert_offline_spectral_to_cie_xyz.py) —
+  Exact-grid spectral-frame to scientific CIE XYZ product converter
+- [`scripts/verify_offline_cie_xyz.py`](./scripts/verify_offline_cie_xyz.py) —
+  Independent artifact/input replay to one binary64 ULP; it shares the
+  canonical CIE integrator and is not an independent colour-algorithm oracle
+- [`scripts/convert_offline_cie_xyz_to_linear_srgb.py`](./scripts/convert_offline_cie_xyz_to_linear_srgb.py) —
+  Verified XYZ to signed, unclamped scene-linear-sRGB product converter
+- [`scripts/convert_offline_linear_srgb_to_sdr_display.py`](./scripts/convert_offline_linear_srgb_to_sdr_display.py) —
+  Manual-exposure conversion into the separate SDR RGB16 PPM quicklook product
+- [`scripts/verify_offline_sdr_display.py`](./scripts/verify_offline_sdr_display.py) —
+  Strict lineage, runtime, artifact, and independent display-byte replay for
+  the SDR derivative; it makes no HDR or input-physics claim
+- [`scripts/verify_offline_linear_srgb.py`](./scripts/verify_offline_linear_srgb.py) —
+  Independent artifact and input-chain replay of every linear-sRGB record to
+  one binary64 ULP; it intentionally shares the canonical D65 matrix
+- [`scripts/verify_offline_kerr_nt_replay.py`](./scripts/verify_offline_kerr_nt_replay.py) —
+  Same-code-family deterministic full-product replay with exact source/backend
+  binding; explicitly not an independent physics oracle
+- [`scripts/verify_offline_kerr_finite_thickness_replay.py`](./scripts/verify_offline_kerr_finite_thickness_replay.py) —
+  Same-code-family byte-exact replay of the finite-height spectral product;
+  explicitly not an independent physics oracle
+- [`scripts/verify_offline_kerr_nt_selected_rays.py`](./scripts/verify_offline_kerr_nt_selected_rays.py) —
+  Independent fixed-RK4 selected-ray Kerr/event/frequency/intensity oracle;
+  high-accuracy calibration rather than a full-frame proof
+- [`scripts/render_offline_vacuum.py`](./scripts/render_offline_vacuum.py) —
+  Streaming observer-frequency compositor for authenticated stationary vacuum
+  transfer maps
+- [`scripts/verify_offline_vacuum.py`](./scripts/verify_offline_vacuum.py) —
+  Independent schema, topology, hash, state-policy, and Planck/Liouville
+  numerical verifier for the vacuum spectral product
+- [`docs/offline-renderer.md`](./docs/offline-renderer.md) — Implemented offline
+  core, equations, evidence boundary, performance contract, and NR/GRMHD plan
 - [`assets/scenes/binary-sxs-bbh-0001-v2.json`](./assets/scenes/binary-sxs-bbh-0001-v2.json) — Phase 2 source, scientific-status, event, integrity, error, renderer-boundary, and playback manifest
 - [`assets/scenes/binary-sxs-bbh-0001-v2.samples.json`](./assets/scenes/binary-sxs-bbh-0001-v2.samples.json) — 2,732-sample compact SXS dynamics and waveform track
 - [`scripts/generate_binary_sxs_dynamics.py`](./scripts/generate_binary_sxs_dynamics.py) — Offline, deterministic generator from three pinned official SXS files

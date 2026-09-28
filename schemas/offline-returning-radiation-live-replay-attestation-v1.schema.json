@@ -1,0 +1,229 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/ShuoleiWang/blackhole/schemas/offline-returning-radiation-live-replay-attestation-v1.schema.json",
+  "title": "Blackhole returning-radiation live replay attestation v1",
+  "description": "Immutable evidence that one exact returning-radiation spectral product was byte-replayed by its same production sampler in the publishing process. This is historical same-code evidence, not an independent physics oracle.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "bindings",
+    "directionCacheRecordsReplayed",
+    "directionRaysRetraced",
+    "evidence",
+    "id",
+    "independentPhysicsOracle",
+    "integrity",
+    "physicsVerified",
+    "sameCodeReplayAttested",
+    "sameCodeReplayReperformed",
+    "schema",
+    "scientificStatus",
+    "subject",
+    "thermalFixedPointReplayed"
+  ],
+  "properties": {
+    "bindings": {"$ref": "#/$defs/bindings"},
+    "directionCacheRecordsReplayed": {"const": false},
+    "directionRaysRetraced": {"const": false},
+    "evidence": {"$ref": "#/$defs/evidence"},
+    "id": {
+      "type": "string",
+      "pattern": "^returning-radiation-live-replay-attestation-[0-9a-f]{24}$"
+    },
+    "independentPhysicsOracle": {"const": false},
+    "integrity": {"$ref": "#/$defs/integrity"},
+    "physicsVerified": {"const": false},
+    "sameCodeReplayAttested": {"const": true},
+    "sameCodeReplayReperformed": {"const": false},
+    "schema": {
+      "const": "blackhole.returning-radiation-live-replay-attestation/v1"
+    },
+    "scientificStatus": {"$ref": "#/$defs/scientificStatus"},
+    "subject": {"$ref": "#/$defs/subject"},
+    "thermalFixedPointReplayed": {"const": false}
+  },
+  "$defs": {
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "subject": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "jobKey",
+        "manifestByteLength",
+        "manifestSha256",
+        "productId",
+        "productSha256",
+        "schema"
+      ],
+      "properties": {
+        "jobKey": {"$ref": "#/$defs/sha256"},
+        "manifestByteLength": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 67108864
+        },
+        "manifestSha256": {"$ref": "#/$defs/sha256"},
+        "productId": {
+          "type": "string",
+          "pattern": "^scientific-spectral-frame-[0-9a-f]{24}$"
+        },
+        "productSha256": {"$ref": "#/$defs/sha256"},
+        "schema": {"const": "blackhole.scientific-spectral-frame/v1"}
+      }
+    },
+    "bindings": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "inputArtifactsSha256",
+        "numericBackendDescriptorSha256",
+        "producerSourceHashesSha256",
+        "samplerDescriptorSha256",
+        "thermalSnapshotIdentity"
+      ],
+      "properties": {
+        "inputArtifactsSha256": {"$ref": "#/$defs/sha256"},
+        "numericBackendDescriptorSha256": {"$ref": "#/$defs/sha256"},
+        "producerSourceHashesSha256": {"$ref": "#/$defs/sha256"},
+        "samplerDescriptorSha256": {"$ref": "#/$defs/sha256"},
+        "thermalSnapshotIdentity": {"$ref": "#/$defs/thermalSnapshotIdentity"}
+      }
+    },
+    "thermalSnapshotIdentity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "axisymmetricKernelDescriptorSha256",
+        "descriptorSha256",
+        "novikovThorneDiskDescriptorSha256",
+        "profileDescriptorSha256",
+        "providerDescriptorSha256",
+        "sourceEvidenceDescriptorSha256",
+        "sourceKernelDescriptorSha256",
+        "sourceKernelKind",
+        "surfaceIdentityDescriptorSha256",
+        "underlyingKernelDescriptorSha256"
+      ],
+      "properties": {
+        "axisymmetricKernelDescriptorSha256": {"$ref": "#/$defs/sha256"},
+        "descriptorSha256": {"$ref": "#/$defs/sha256"},
+        "novikovThorneDiskDescriptorSha256": {"$ref": "#/$defs/sha256"},
+        "profileDescriptorSha256": {"$ref": "#/$defs/sha256"},
+        "providerDescriptorSha256": {"$ref": "#/$defs/sha256"},
+        "sourceEvidenceDescriptorSha256": {"$ref": "#/$defs/sha256"},
+        "sourceKernelDescriptorSha256": {"$ref": "#/$defs/sha256"},
+        "sourceKernelKind": {"type": "string", "minLength": 1, "maxLength": 256},
+        "surfaceIdentityDescriptorSha256": {"$ref": "#/$defs/sha256"},
+        "underlyingKernelDescriptorSha256": {"$ref": "#/$defs/sha256"}
+      }
+    },
+    "evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "directionCacheRecordsReplayed",
+        "directionRaysRetraced",
+        "frameGeodesicsReplayed",
+        "frozenThermalSnapshotBound",
+        "id",
+        "independentPhysicsOracle",
+        "jobSpecVerified",
+        "numericBackendCurrentMatch",
+        "pixelBytesExact",
+        "producerIdentityCurrentMatch",
+        "recordCount",
+        "replayScope",
+        "samplerDescriptorLiveMatch",
+        "scientificScope",
+        "sourceArtifactsCurrentMatch",
+        "sourceHashScope",
+        "status",
+        "structuralContractVerified",
+        "thermalFixedPointReplayed",
+        "tileCount",
+        "totalFrameGeodesicsReplayed",
+        "totalRaySamples"
+      ],
+      "properties": {
+        "directionCacheRecordsReplayed": {"const": false},
+        "directionRaysRetraced": {"const": false},
+        "frameGeodesicsReplayed": {"const": true},
+        "frozenThermalSnapshotBound": {"const": true},
+        "id": {
+          "type": "string",
+          "pattern": "^scientific-spectral-frame-[0-9a-f]{24}$"
+        },
+        "independentPhysicsOracle": {"const": false},
+        "jobSpecVerified": {"const": true},
+        "numericBackendCurrentMatch": {"const": true},
+        "pixelBytesExact": {"const": true},
+        "producerIdentityCurrentMatch": {"const": true},
+        "recordCount": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 16777216
+        },
+        "replayScope": {"type": "string", "minLength": 1, "maxLength": 4096},
+        "samplerDescriptorLiveMatch": {"const": true},
+        "scientificScope": {"type": "string", "minLength": 1, "maxLength": 4096},
+        "sourceArtifactsCurrentMatch": {"const": true},
+        "sourceHashScope": {"type": "string", "minLength": 1, "maxLength": 4096},
+        "status": {
+          "const": "returning-radiation-live-sampler-byte-replay-conformant"
+        },
+        "structuralContractVerified": {"const": true},
+        "thermalFixedPointReplayed": {"const": false},
+        "tileCount": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 65536
+        },
+        "totalFrameGeodesicsReplayed": {
+          "type": "integer",
+          "minimum": 2,
+          "maximum": 10000000
+        },
+        "totalRaySamples": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 5000000
+        }
+      }
+    },
+    "scientificStatus": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "classification",
+        "directionCacheRecordsReplayed",
+        "directionRaysRetraced",
+        "independentPhysicsOracle",
+        "prohibitedClaim",
+        "thermalFixedPointReplayed"
+      ],
+      "properties": {
+        "classification": {
+          "const": "historical same-code returning-radiation live sampler byte replay"
+        },
+        "directionCacheRecordsReplayed": {"const": false},
+        "directionRaysRetraced": {"const": false},
+        "independentPhysicsOracle": {"const": false},
+        "prohibitedClaim": {
+          "const": "This attestation must not be described as an independent physics oracle or as replay of the thermal fixed point, direction-cache records, or direction rays."
+        },
+        "thermalFixedPointReplayed": {"const": false}
+      }
+    },
+    "integrity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["claimsSha256"],
+      "properties": {
+        "claimsSha256": {"$ref": "#/$defs/sha256"}
+      }
+    }
+  }
+}

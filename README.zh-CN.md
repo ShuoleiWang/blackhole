@@ -55,6 +55,11 @@ stationary analytic **Schwarzschild 与 Kerr** 参考图验证 transfer-map
 | `?scene=schwarzschild` | 已实现 | 交互式单黑洞 Schwarzschild 测地线与理想薄盘 |
 | Stationary Schwarzschild/Kerr 工作台 | 已实现 | 固定相机解析真空校准、认证交付和回归 oracle；不是 merger renderer |
 | WebGL2 双黑洞回退 | 已实现 | 明确标注的旧 weak-field 兼容预览，不声称与 WebGPU 强场路径物理等价 |
+| 离线 exact-Kerr/Novikov–Thorne 光谱帧 | 解析参考已实现 | Float64 exact-Kerr 光线、Page-Thorne 通量、颜色修正光谱、KERRBB-D20 角向发射、自适应像素、可恢复 tile、结构验证、确定性 replay、独立 selected-ray RK4 与认证的 1 nm CIE XYZ/linear-sRGB 派生；是 stationary 零厚度盘，不是已求解大气、GRMHD 或 NR |
+| 离线 Kerr 有限厚度光谱帧 | 解析产品已实现 | 从有文献边界的上下光球面、exact-Kerr 局域物质/发射框架、确定性 first-visible 重放与 fine/coarse `g^3 I_nu` 发布认证的 exact-471-bin tiles；整帧通过同代码族逐字节回放，选定 upper/lower/capture/escape 光线另由独立 canonical-BL fixed-RK4 传输核对；这不是整帧独立证明、流体静力、GRMHD 或 NR |
+| 离线返回辐射基础 | 前向/接收端有限网格能量核、固定点、认证热剖面与单方向传输已实现 | 两个四矩阵块构造分别执行前向 `g^2` 沉积和接收端天空 `mu_i g^4 D20(mu_e)` 积分，并门控共动固有面积、fine/coarse 环带拓扑、全/半网格及逐系数对照；热剖面只有在完整重放 Kerr 核并通过不可放宽的方程残差门后才发布物理瓦特；两条核路径共享 exact-Kerr 传输代码族，不是独立测地线或连续极限 oracle；无 KERRBB `F_S`、返回辐射耦合帧、大气、GRMHD 或完整 KERRBB |
+| 离线 SDR 显示派生 | 仅显示 quicklook 已实现 | 把认证的有符号 linear-sRGB 另行派生为固定手动曝光、亮度域 Reinhard、统一 gamut scale、sRGB 编码的 RGB16 PPM，并独立逐字节重放；它不是 HDR，不改科学 linear master，也不验证输入物理 |
+| 离线科学渲染核心 | 基础已实现 | 全 4D provider 光线、标量表面传输与独立 Stokes 形式解算器、确定性断点续跑及独立验证的真空/光谱产物；当前没有 NR 或 GRMHD 背书的产品 |
 | 4D NR slow-light 极致离线渲染 | 规划中 | 需要 ray bundles/Jacobi；若要发光画面，还需独立来源的 GRMHD/GRRT、光谱和偏振数据 |
 
 [`docs/rendering-modes.md`](./docs/rendering-modes.md) 详细定义两条开发路线、
@@ -291,6 +296,111 @@ bundles 与独立版本的辐射产品，而不会扩张 v1 32-byte vacuum ABI �
 - [`scripts/generate_kerr_transfer_map.py`](./scripts/generate_kerr_transfer_map.py)：带完整光线 tolerance refinement 的确定性 Kerr 生成器
 - [`scripts/verify_kerr_transfer_map.py`](./scripts/verify_kerr_transfer_map.py)：有限 ZAMO 阴影、Kerr-Schild 身份与独立 fixed-step 光线验证器
 - [`docs/kerr-reference.md`](./docs/kerr-reference.md)：Kerr 配置、方程、验证边界与复现说明
+- [`offline/`](./offline)：基于 provider 的 float64 Hamiltonian 光线、exact
+  Kerr/Novikov–Thorne 光谱表面、协变辐射转移、自适应像素、显式组合与
+  确定性断点续跑任务
+- [`offline/cie_color.py`](./offline/cie_color.py)：认证官方 CIE 1931
+  2-degree 1 nm 数据并积分科学 XYZ 与未裁剪 linear sRGB；显示曝光与色调
+  映射作为独立、保色度的派生步骤
+- [`offline/cie_product.py`](./offline/cie_product.py)：把 exact-471-bin
+  光谱帧事务化发布为版本化 XYZ tile，绑定原始 record 哈希、传播的估计误差、
+  完整生产源码闭包，并且不混入显示变换
+- [`offline/linear_rgb_product.py`](./offline/linear_rgb_product.py)：把已验证
+  XYZ 事务化派生为有符号、未裁剪的 D65 scene-linear-sRGB；不加入曝光、HDR、
+  tone map、gamut map、transfer curve 或整数化
+- [`offline/display_product.py`](./offline/display_product.py)：把已验证的
+  有符号 linear-sRGB 事务化派生为单独的 SDR RGB16 PPM quicklook；曝光、
+  tone/gamut map、transfer encoding 与量化不写回科学 master
+- [`offline/kerr_finite_thickness.py`](./offline/kerr_finite_thickness.py)：
+  有文献边界的 Kerr 上/下光球面几何校准
+- [`offline/kerr_finite_thickness_surface.py`](./offline/kerr_finite_thickness_surface.py)：
+  共享 Hamiltonian 探针的多表面 first-visible 适配器，ISCO/Rout 外透明且不制造侧壁
+- [`offline/kerr_finite_thickness_emitter.py`](./offline/kerr_finite_thickness_emitter.py)：
+  在实际离面 Kerr 度规上归一化的处方圆周物质框架与有符号局域光子投影；
+  不是流体静力或离面测地线解
+- [`offline/kerr_finite_thickness_area.py`](./offline/kerr_finite_thickness_area.py)：
+  在精确度规与共动空间投影上计算光球面面积密度及收敛的环带固有面积；
+  不是坐标面积或欧氏近似
+- [`offline/kerr_finite_thickness_launch.py`](./offline/kerr_finite_thickness_launch.py)：
+  认证的表面切向四标架与 future-null 局域发射构造；不包含测地线追踪或
+  returning-radiation 核
+- [`offline/kerr_finite_thickness_transfer.py`](./offline/kerr_finite_thickness_transfer.py)：
+  完整确定性重放 first-visible 光路后执行 `g^3 I_nu`，并认证世界管、拓扑、
+  有符号角度、来源与硬容差策略
+- [`offline/kerr_finite_thickness_frame.py`](./offline/kerr_finite_thickness_frame.py)：
+  独立 fine/coarse 的有限高度光线采样器，已由认证 tiled 光谱帧生产器使用
+- [`offline/kerr_finite_thickness_replay_certificate.py`](./offline/kerr_finite_thickness_replay_certificate.py)：
+  进程内不可序列化的重放权限；消除重复测地线计算，但不绕过标量、拓扑、
+  来源或光谱门
+- [`offline/kerr_finite_thickness_replay.py`](./offline/kerr_finite_thickness_replay.py)：
+  同代码族整帧逐字节重放，闭合认证 sampler、源码/CIE/backend、TOCTOU 与资源上限
+- [`offline/kerr_finite_thickness_selected_oracle.py`](./offline/kerr_finite_thickness_selected_oracle.py)：
+  用独立 canonical Boyer-Lindquist fixed-RK4 传输核对处方有限光球面的选定
+  upper/lower/capture/escape 光线，并独立重算实际面 `g`、有符号发射角与 D20 光谱；
+  共享 Page-Thorne 径向标量，不是整帧独立证明
+- [`offline/returning_radiation.py`](./offline/returning_radiation.py)：
+  Receiver-first 局域 bolometric 能量核契约与失败即拒绝的吸收/热再辐射固定点；
+  光线生成矩阵由独立的前向/接收端核模块负责，`F_S`、散射、大气、偏振与
+  GRMHD 仍未实现
+- [`offline/kerr_returning_radiation_rays.py`](./offline/kerr_returning_radiation_rays.py)：
+  对一个局域发射方向执行自重放的 fine/coarse 命运与接收传输；明确不是经
+  面积/立体角归一的核 `K`
+- [`offline/kerr_returning_radiation_receiver_rays.py`](./offline/kerr_returning_radiation_receiver_rays.py)：
+  从接收面局域天空反追首个盘面源，认证 affine-zero 表面接触并公开自重放，
+  输出单方向 `mu_i g^4 D20(mu_e)`；仍不是完成立体角积分的核系数
+- [`offline/returning_radiation_fate_quadrature.py`](./offline/returning_radiation_fate_quadrature.py)：
+  以 KERRBB-D20 发射通量测度计算有限网格的发射端局域 bolometric 能量命运，
+  分别门控 `mu`、方位角和半格相位；既不是光子数概率，也不是返回辐射核
+- [`offline/kerr_returning_radiation_kernel.py`](./offline/kerr_returning_radiation_kernel.py)：
+  同代码族有限网格的四面能量核；使用实际表面共动固有面积、D20 发射通量
+  测度、前向 `g^2`、接收环 fine/coarse 拓扑一致与逐列面积能量闭合
+- [`offline/kerr_returning_radiation_receiver_kernel.py`](./offline/kerr_returning_radiation_receiver_kernel.py)：
+  互补的四面接收端天空能量核；按接收环共动固有面积平均
+  `mu_i g^4 D20(mu_e)`，门控发射源环 fine/coarse 拓扑，并逐系数对照前向核；
+  两者共享 exact-Kerr 传输代码族，因此不冒充独立测地线 oracle
+- [`offline/kerr_returning_radiation_thermal_profile.py`](./offline/kerr_returning_radiation_thermal_profile.py)：
+  吸收返回能量的固定点与环带温度剖面；认证入口完整重放 Kerr 核并自动派生
+  几何，通用外部矩阵永久标为未认证且不发布物理瓦特
+- [`offline/kerr_returning_radiation_kernel_jobs.py`](./offline/kerr_returning_radiation_kernel_jobs.py)：
+  为确定性并行核计算提供 canonical、有界、可恢复的方向任务/cache 底座；
+  当前尚未替换两个核的整体积分器
+- [`offline/ray_bundle.py`](./offline/ray_bundle.py)：收敛的 screen-space
+  有限差分 Jacobian、奇偶性与放大率诊断；明确不冒充沿光线 Sachs/Jacobi
+  传输
+- [`scripts/render_offline_kerr_nt_frame.py`](./scripts/render_offline_kerr_nt_frame.py)：
+  生成带认证的 exact-Kerr/Novikov–Thorne 自适应光谱帧
+- [`scripts/render_offline_kerr_finite_thickness_frame.py`](./scripts/render_offline_kerr_finite_thickness_frame.py)：
+  生成带认证的 exact-Kerr 处方光球面 exact-471-bin 自适应光谱帧
+- [`scripts/verify_offline_spectral_frame.py`](./scripts/verify_offline_spectral_frame.py)：
+  独立验证 schema、拓扑、ABI、哈希、诊断与产品身份；明确不冒充物理重追
+- [`scripts/convert_offline_spectral_to_cie_xyz.py`](./scripts/convert_offline_spectral_to_cie_xyz.py)：
+  将 exact-grid 光谱帧转换为科学 CIE XYZ 产品
+- [`scripts/verify_offline_cie_xyz.py`](./scripts/verify_offline_cie_xyz.py)：
+  独立回放产物与输入并限制在一个 binary64 ULP；复用 canonical CIE integrator，
+  因而不冒充独立色度算法 oracle
+- [`scripts/convert_offline_cie_xyz_to_linear_srgb.py`](./scripts/convert_offline_cie_xyz_to_linear_srgb.py)：
+  将已验证 XYZ 转成有符号、未裁剪的 scene-linear-sRGB 产品
+- [`scripts/convert_offline_linear_srgb_to_sdr_display.py`](./scripts/convert_offline_linear_srgb_to_sdr_display.py)：
+  以显式手动曝光生成单独的 SDR RGB16 PPM quicklook
+- [`scripts/verify_offline_sdr_display.py`](./scripts/verify_offline_sdr_display.py)：
+  严格复核输入链、数值后端、产物与显示字节；不声称 HDR 或输入物理验证
+- [`scripts/verify_offline_linear_srgb.py`](./scripts/verify_offline_linear_srgb.py)：
+  对 linear-sRGB 产物及完整输入链逐 record 回放到一个 binary64 ULP；明确复用
+  canonical D65 矩阵
+- [`scripts/verify_offline_kerr_finite_thickness_replay.py`](./scripts/verify_offline_kerr_finite_thickness_replay.py)：
+  对有限高度光谱产品做同代码族逐字节整帧重放；明确不冒充独立物理 oracle
+- [`scripts/verify_offline_kerr_nt_replay.py`](./scripts/verify_offline_kerr_nt_replay.py)：
+  同代码族确定性全产品重放，并精确绑定源码与数值后端；明确不是独立物理 oracle
+- [`scripts/verify_offline_kerr_nt_selected_rays.py`](./scripts/verify_offline_kerr_nt_selected_rays.py)：
+  独立 fixed-RK4 selected-ray Kerr/事件/频移/强度 oracle；属于高精度校准，
+  不是全帧证明
+- [`scripts/render_offline_vacuum.py`](./scripts/render_offline_vacuum.py)：
+  面向认证 stationary vacuum transfer map 的流式观测频率合成器
+- [`scripts/verify_offline_vacuum.py`](./scripts/verify_offline_vacuum.py)：
+  面向真空光谱产品的独立 schema、拓扑、哈希、状态策略及
+  Planck/Liouville 数值验证器
+- [`docs/offline-renderer.md`](./docs/offline-renderer.md)：已实现离线核心、方程、
+  证据边界、性能契约与 NR/GRMHD 后续路线
 - [`assets/scenes/binary-sxs-bbh-0001-v2.json`](./assets/scenes/binary-sxs-bbh-0001-v2.json)：Phase 2 来源、科学状态、事件、完整性、误差、渲染边界与播放 manifest
 - [`assets/scenes/binary-sxs-bbh-0001-v2.samples.json`](./assets/scenes/binary-sxs-bbh-0001-v2.samples.json)：2,732 个样本的紧凑 SXS 动力学与波形轨迹
 - [`scripts/generate_binary_sxs_dynamics.py`](./scripts/generate_binary_sxs_dynamics.py)：从三个固定官方 SXS 文件离线确定性生成轨迹

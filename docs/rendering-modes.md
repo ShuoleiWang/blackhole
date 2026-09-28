@@ -15,10 +15,18 @@ claims.
 | Interactive Schwarzschild scene at `?scene=schwarzschild` | Implemented | Reconstructs the camera and numerically traces its Schwarzschild rays on the GPU for every rendered frame | Real-time single-hole Schwarzschild visualization with an idealized disk |
 | Stationary Schwarzschild/Kerr workbench | Implemented | Plays authenticated fixed-camera analytic vacuum maps and exposes record-level diagnostics | Stationary analytic calibration, delivery validation, and regression oracle |
 | WebGL2 binary compatibility path | Implemented | Runs the previous two-centre weak-field shader when WebGPU is unavailable or forced off | Explicit weak-field preview; no physical-parity claim with WebGPU |
-| High-fidelity offline renderer | Planned, not implemented | Would trace ray bundles through a pinned four-dimensional NR spacetime and optionally perform physical radiative transfer | No current repository output qualifies |
+| Offline exact-Kerr/Novikov–Thorne spectral frame | Implemented analytic product | Traces fine/coarse exact-Kerr rays to the first visible Page-Thorne surface, applies a declared colour correction and KERRBB-D20 angular law, adaptively integrates binary64 spectral pixels, publishes/replays authenticated tiles, checks selected rays with independent fixed RK4, and derives XYZ/linear sRGB from authenticated official 1 nm CIE data | Stationary analytic zero-thickness disk ray tracing; no solved atmosphere, returning radiation, GRMHD, or NR |
+| Offline Kerr finite-thickness spectral frame | Implemented analytic product | Publishes authenticated exact-471-bin adaptive tiles from bounded upper/lower fiducial photospheres, certified local matter/launch frames, deterministic first-visible topology, and fine/coarse `g^3 I_nu`; a closed full-product verifier replays all pixels byte-exactly, and an independent canonical-BL fixed-RK4 oracle checks selected upper/lower/capture/escape rays | Stationary phenomenological surface plus equatorial NT-at-rho proxy; selected rays are not an independent full-frame proof; no hydrostatic structure, solved atmosphere, returning radiation in the frame, GRMHD, or NR |
+| Offline returning-radiation foundation | Implemented same-code forward and receiver-centred finite-grid energy kernels plus certified absorbed thermal fixed point | Builds four face-resolved `K[receiver][emitter]` blocks both from proper-area forward `g^2` deposition and from receiver-sky `mu_i g^4 D20(mu_e)` integration; checks fine/coarse source and receiver bin topology, area-energy closure, radial/angular/phase convergence, face symmetry, conservative coarsening, coefficient-wise agreement, and a non-relaxable fixed-point residual; physical watts require replayed Kerr geometry | Both kernel paths share the exact-Kerr geodesic family, so their comparison is not an independent transport oracle or continuum theorem; the profile is not yet wired into a published spectral frame; no KERRBB `F_S`, scattering, spectral redistribution, polarization, solved atmosphere, GRMHD, or NR |
+| Offline SDR display quicklook | Implemented derived product | Converts the authenticated signed linear-sRGB frame to a separate RGB16 PPM using explicit manual exposure, a Rec.709-luminance Reinhard scale, uniform gamut scaling, and the sRGB transfer curve; independently replays the output bytes | Display-only SDR derivative; it does not modify scientific linear RGB, is not HDR, and does not verify the upstream physics |
+| Offline scientific-rendering core | Implemented foundation | Provides float64 full-4D provider rays, a fail-closed scalar pipeline and standalone Stokes formal solver, deterministic resumable tile jobs, and independently verified vacuum/spectral artifacts | No current output is NR- or GRMHD-backed |
+| High-fidelity NR/GRMHD offline product | Planned, not implemented | Would trace ray bundles through a pinned four-dimensional NR spacetime and optionally perform physical radiative transfer | No current repository output qualifies |
 
 The stationary references are not intermediate frames from the root binary scene.
 They are deliberately separate analytic products with fixed cameras.
+
+The implemented offline core and its remaining evidence boundary are specified
+in [`offline-renderer.md`](./offline-renderer.md).
 
 ## Route A: real-time interactive rendering
 
@@ -183,11 +191,20 @@ The repository currently provides:
 - deterministic stationary Schwarzschild and Kerr vacuum generators;
 - independent stationary physics verifiers;
 - authenticated v1 map playback, diagnostics, and record inspection.
+- a provider-based float64 full-4D offline Hamiltonian integrator with exact
+  Minkowski, Schwarzschild, and arbitrary-spin Kerr-Schild metrics;
+- a typed scalar reversal from observer-traced paths, a standalone invariant
+  Stokes formal solver, an exact-Kerr/Page-Thorne first-surface reference,
+  adaptive binary64 spectral pixels, deterministic resumable tile jobs,
+  transactional scientific-frame artifacts, and independent structural
+  verification.
 
 It does not currently provide four-dimensional NR metric data, NR slow-light
-pixel rays, ray bundles or Jacobi fields, GRMHD matter data,
-spectral/polarized GR radiative transfer, or multilayer OpenEXR scientific
-masters.
+pixel rays, along-ray Sachs/Jacobi transport, GRMHD matter data, a physical
+polarized-plasma producer, or multilayer OpenEXR scientific masters. The
+implemented screen-space finite-difference bundle remains a calibration and
+adaptive-sampling diagnostic. The matrix transfer core alone is not evidence
+for a GRMHD/GRRT-backed image.
 
 The implemented metric and ray conventions are specified in
 [`strong-field-equations.md`](./strong-field-equations.md); scheduling and

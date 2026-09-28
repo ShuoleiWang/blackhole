@@ -95,3 +95,134 @@ This is deliberately a **seven-record narrow gate**. A qualified report states
 that it does not prove parity over all 38,144 authenticated directions and does
 not prove native execution provenance. Full-corpus differential execution plus
 backend-binary/runtime provenance remain mandatory before production use.
+
+## Expanded phase-space golden
+
+`phase_space_golden.py` is the milestone-2 full-ray differential gate.  Its
+checked-in `nested16_phase_space_golden.json` is externally frozen at SHA-256
+`8ff7391df7a39992ba2733a61aec9c63460fa1ff33ad458f3e70dae8b137cc67`;
+its internal manifest SHA-256 is
+`47bafc7c1ee27e6200bdb4b2d5ca58f549e7c9ad83464195b3d23fc6d5e16ecd`.
+
+The reference contains the seven authenticated-cache ordinals above plus the
+critical noncached ordinal 75,785.  Every cached ordinal was freshly traced by
+the unchanged Python backend and accepted only after its primitive descriptor
+SHA matched the authenticated cache.  Ordinal 75,785 is explicitly marked as
+noncached; no cache provenance is fabricated for it.
+
+For both independent fine and coarse whole rays, each record retains:
+
+- terminal event/covector, outcome, target, and affine length;
+- every accepted segment's start, reconstructed midpoint, end, affine length,
+  and midpoint null residual;
+- accepted/rejected counters and maximum null/metric errors;
+- the ordered two-face crossing topology, localized phase-space states,
+  classifications, root diagnostics, N/2N probe evidence, and work counters;
+- receiver event, model descriptor, radius, face, frequency ratio, incidence,
+  g4, and incidence-weighted g4 where applicable; and
+- every fine/coarse convergence gate and scalar difference.
+
+The reference additionally binds the exact scientific document, production
+source closure, CPython executable, native `math` extension, numeric-runtime
+descriptor, and all per-record/record-set/configuration hashes.  Generation
+rebuilds the frozen cache/scientific keys before tracing and rechecks the
+source/runtime closure after tracing.  It opens the original cache only through
+the milestone-1 read-only authenticator and never invokes a cache runner.
+
+Re-generate to a new path (roughly several minutes on the M3 Pro):
+
+```sh
+python3 tools/native/phase_space_golden.py generate \
+  /private/tmp/blackhole-native-opt.Ze0wcI/golden-cache/d8286face863a0755d70c20c1638c6a5dc4d9d9037c0227626fb805bb4d0f751 \
+  --output /private/tmp/rebuilt-phase-space-golden.json
+
+cmp tools/native/nested16_phase_space_golden.json \
+  /private/tmp/rebuilt-phase-space-golden.json
+```
+
+Verify the checked-in bytes and every embedded invariant/hash:
+
+```sh
+python3 tools/native/phase_space_golden.py verify \
+  "$(pwd)/tools/native/nested16_phase_space_golden.json"
+```
+
+A native backend candidate has the exact top-level schema
+`blackhole.native-kerr-phase-space-candidate/v1`, binds the frozen golden SHA,
+identifies its own backend provenance, and supplies the same ordered
+`{coordinate, sample, phaseSpace}` records.  Build a reference-copy candidate
+and exercise the comparator with:
+
+```sh
+python3 tools/native/phase_space_golden.py make-reference-candidate \
+  "$(pwd)/tools/native/nested16_phase_space_golden.json" \
+  --output /private/tmp/reference-phase-space-candidate.json
+
+python3 tools/native/phase_space_golden.py compare \
+  "$(pwd)/tools/native/nested16_phase_space_golden.json" \
+  /private/tmp/reference-phase-space-candidate.json \
+  --require-byte-exact
+```
+
+Topology, strings, booleans, integers, array lengths/order, object schemas, and
+the sign of zero are always exact.  Floats are exact by default; a qualification
+run must explicitly declare any absolute, relative, or ULP allowance.  The
+expanded eight-record gate is still a differential qualification corpus, not
+an independent geodesic/physics oracle and not proof over all 229,376 planned
+directions.
+
+Run both harness suites with:
+
+```sh
+python3 -m unittest -v \
+  tools.native.tests.test_golden_cache \
+  tools.native.tests.test_phase_space_golden
+```
+
+## Read-only mu x psi x phase interaction analysis
+
+`mu_psi_phase_interaction.py` accepts an externally authenticated native
+`rho16/mu32/psi64` parent checkpoint and a native `rho16/mu16/psi64` target
+checkpoint. Both must pass the public checkpoint verifier against the same
+explicit dylib. It extracts cells A--F, requires target `full` to reproduce the
+parent `half-mu` physical summary, raw identity-free physical sample-audit SHA,
+and pass-normalized retained evidence, emits the seven available v2 edge
+diagnostics, and evaluates the identifiable `mu-by-phase` and `mu-by-psi`
+mixed differences.
+
+An optional parent cache job enables an additional read-only parity gate. The
+tool authenticates every task/receipt without importing a runner, selects the
+even and odd directions of the parent phase-shifted psi64 pass, doubles and
+canonically re-closes the angular weights, and requires the B-even normalized
+record stream to reproduce E exactly. B-odd is retained as a bound psi32,
+phase-0.5 stream with no five-pass comparator.
+
+```sh
+python3 tools/native/mu_psi_phase_interaction.py \
+  --parent-manifest /absolute/parent/manifest.json \
+  --parent-sha256 PARENT_EXTERNAL_SHA256 \
+  --target-manifest /absolute/target/manifest.json \
+  --target-sha256 TARGET_EXTERNAL_SHA256 \
+  --native-library /absolute/libblackhole_cpu.dylib \
+  --parent-cache-job /absolute/parent-cache/CACHE_JOB_KEY \
+  --parent-cache-payload-set-sha256 EXTERNAL_PAYLOAD_SET_SHA256 \
+  --parent-cache-direction-stream-sha256 EXTERNAL_DIRECTION_STREAM_SHA256 \
+  --output /absolute/new-interaction-report.json
+```
+
+Both cache snapshot digests must have been retained outside the cache. A job
+specification plus freshly resealed payload/receipt pairs is not an
+authentication anchor, so the cache replay option refuses to run without both
+external digests.
+
+The output is a no-overwrite atomic new file and permanently sets
+`qualified=false`, `productionQualified=false`, `productEligible=false`, and
+`automaticEscalation=false`. Missing phase-shifted psi32 cells are explicit;
+the tool neither changes the production five-pass contract nor starts another
+checkpoint.
+
+The no-ray synthetic suite is:
+
+```sh
+python3 -m unittest -v tools.native.tests.test_mu_psi_phase_interaction
+```
