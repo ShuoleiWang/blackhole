@@ -110,10 +110,10 @@ function dualDiskRun(records, overrides = {}) {
 
 test("GPU probe appends a compute entry to the exact production tracer", () => {
   assert.ok(strongFieldGpuProbeWGSL.startsWith(strongFieldBinaryTraceFragmentWGSL));
-  assert.equal(strongFieldGpuProbeWGSL.length, 55795);
+  assert.equal(strongFieldGpuProbeWGSL.length, 63293);
   assert.equal(
     createHash("sha256").update(strongFieldGpuProbeWGSL).digest("hex"),
-    "81a06106919372578bdb2f1eaee51d13474d4cd3630f2942a2e6d0409b955565",
+    "9f537b860325b5c87c342d4944eb44c0c2947c429abcc091214f1777a0f35d91",
   );
   assert.match(strongFieldGpuProbeWGSL, /fn strongFieldProbeMain/);
   assert.match(

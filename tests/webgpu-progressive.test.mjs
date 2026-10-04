@@ -451,6 +451,104 @@ test("dynamic frames encode trace and post only, then invalidate history", () =>
   }
 });
 
+function sparseHarness() {
+  return renderHarness({
+    coarsePass: Object.freeze({
+      entryPoint: "fsCoarse",
+      format: "rgba32float",
+      stride: 4,
+      binding: 3,
+    }),
+    coarseView: { id: "coarse-view" },
+    coarsePipelines: { binary: { id: "coarse-pipeline-binary" } },
+    coarseBindGroups: { binary: { id: "coarse-bind-group-binary" } },
+    traceDefaultSpecialization: "binary",
+    traceBindGroup: { id: "trace-bind-group" },
+  });
+}
+
+test("sparse frames trace the coarse field before the full-resolution pass", () => {
+  const { renderer, passes } = sparseHarness();
+  const moving = frame({
+    motion: 1,
+    sceneStrongDiagnostics: [4, 180, 0.055, 4],
+  });
+
+  assert.equal(renderer.render(moving), true);
+  assert.deepEqual(
+    passes.map((pass) => pass.pipeline.id),
+    ["coarse-pipeline-binary", "trace-pipeline", "post-pipeline"],
+  );
+  assert.equal(passes[0].bindGroup.id, "coarse-bind-group-binary");
+  assert.equal(passes[0].descriptor.colorAttachments[0].view.id, "coarse-view");
+  assert.equal(passes[0].descriptor.colorAttachments[0].loadOp, "clear");
+  assert.equal(passes[0].drawCount, 3);
+  assert.equal(passes[0].ended, true);
+});
+
+test("frames that do not request the declared stride skip the coarse field", () => {
+  for (const stride of [0, 1, 2, 8]) {
+    const { renderer, passes } = sparseHarness();
+    const moving = frame({
+      motion: 1,
+      sceneStrongDiagnostics: [4, 180, 0.055, stride],
+    });
+    assert.equal(renderer.render(moving), true);
+    assert.deepEqual(
+      passes.map((pass) => pass.pipeline.id),
+      ["trace-pipeline", "post-pipeline"],
+    );
+  }
+});
+
+test("the coarse target holds every stride-th pixel plus a stencil ring", () => {
+  const textures = [];
+  const bindGroups = [];
+  const previous = { destroyed: false, destroy() { this.destroyed = true; } };
+  const originalUsage = globalThis.GPUTextureUsage;
+  globalThis.GPUTextureUsage = { RENDER_ATTACHMENT: 16, TEXTURE_BINDING: 4 };
+  try {
+    const renderer = Object.assign(Object.create(WebGPURenderer.prototype), {
+      coarsePass: { entryPoint: "fsCoarse", format: "rgba32float", stride: 4, binding: 3 },
+      coarsePipelines: {
+        binary: { getBindGroupLayout: (index) => `binary-layout-${index}` },
+        remnant: { getBindGroupLayout: (index) => `remnant-layout-${index}` },
+      },
+      coarseTexture: previous,
+      uniformBuffer: { id: "uniforms" },
+      device: {
+        createTexture(descriptor) {
+          textures.push(descriptor);
+          return { createView: () => ({ id: "coarse-view" }), destroy() {} };
+        },
+        createBindGroup(descriptor) {
+          bindGroups.push(descriptor);
+          return { id: descriptor.layout };
+        },
+      },
+    });
+    renderer.createCoarseTarget(3456, 2234);
+    assert.equal(previous.destroyed, true);
+    assert.equal(textures.length, 1);
+    // Nodes 0..floor((n - 1) / 4) cover the image; one extra node on each
+    // side plus the far neighbour of the last cell complete the stencil.
+    assert.deepEqual(textures[0].size, [867, 562, 1]);
+    assert.equal(textures[0].format, "rgba32float");
+    assert.equal(textures[0].usage, 16 | 4);
+    assert.equal(renderer.coarseView.id, "coarse-view");
+    assert.deepEqual(Object.keys(renderer.coarseBindGroups), ["binary", "remnant"]);
+    assert.deepEqual(
+      bindGroups.map((descriptor) => descriptor.entries),
+      [
+        [{ binding: 0, resource: { buffer: { id: "uniforms" } } }],
+        [{ binding: 0, resource: { buffer: { id: "uniforms" } } }],
+      ],
+    );
+  } finally {
+    globalThis.GPUTextureUsage = originalUsage;
+  }
+});
+
 test("the first static sample still seeds FP16 history before post", () => {
   const { renderer, passes, queueWrites } = renderHarness({
     progressiveHistoryValid: false,
@@ -786,6 +884,7 @@ test("dispose releases renderer-owned resources and is idempotent", () => {
     sceneResourceState: { dispose: () => calls.push("dispose-scene") },
     destroyProgressiveTargets: () => calls.push("destroy-history"),
     traceTexture: { destroy: () => calls.push("destroy-trace") },
+    coarseTexture: { destroy: () => calls.push("destroy-coarse") },
     skyTexture: { destroy: () => calls.push("destroy-sky") },
     accumulationBuffer: { destroy: () => calls.push("destroy-accumulation") },
     uniformBuffer: { destroy: () => calls.push("destroy-uniforms") },
@@ -807,6 +906,7 @@ test("dispose releases renderer-owned resources and is idempotent", () => {
     "dispose-scene",
     "destroy-history",
     "destroy-trace",
+    "destroy-coarse",
     "destroy-sky",
     "destroy-accumulation",
     "destroy-uniforms",

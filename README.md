@@ -108,9 +108,10 @@ rendering format.
 - **Photon-orbit capture and fail-closed outcomes** — A ray inside an
   innermost (prograde) photon orbit and moving inward cannot escape an
   isolated Kerr hole, so it is captured there; radii are scaled by each term's
-  metric weight during the merger blend. Metric failures or exhausted budgets
-  inside an unscaled photon orbit are captures; elsewhere they remain visibly
-  `unresolved` and are never sampled as sky.
+  metric weight during the merger blend. Metric failures, exhausted budgets
+  and rays slowed below coordinate speed 0.2 near a horizon (photons peeling
+  off a trapped surface) inside an unscaled photon orbit are captures; failures
+  elsewhere remain visibly `unresolved` and are never sampled as sky.
 - **Interactive binary transport** — The waveform timeline can be scrubbed,
   paused from either transport control, and replayed with an optional
   presentation-only `0.12×` slow-motion window around merger. Slow motion
@@ -278,14 +279,15 @@ a static observer (`u = ∂ₜ/α_s`), the same kind of camera as the Schwarzsch
 scene. It stores the future-directed momentum of the photon arriving at the
 camera, then advances the Hamiltonian flow with negative coordinate-time steps
 so the traced path is past-directed. The shader
-evaluates a frozen superposed Kerr-Schild metric, decomposes it into lapse,
-shift, and spatial metric, and integrates
+evaluates a frozen superposed Kerr-Schild metric through its exact low-rank
+(Woodbury) inverse, which gives the lapse, shift and the null Hamiltonian in
+closed form, and integrates
 
 ```text
 H(x,p) = α sqrt(γⁱʲ pᵢ pⱼ) - βⁱpᵢ = -pₜ
 ```
 
-with classical fourth-order Runge-Kutta, analytic spatial derivatives, and
+with classical fourth-order Runge-Kutta, closed-form spatial derivatives, and
 an exact energy-surface projection (H is homogeneous in p, so the projection
 does not change the path). Rays terminate as captured at the innermost photon
 orbit, escaped, or unresolved. The escape sphere lies well outside the camera,
@@ -306,7 +308,7 @@ computed apparent or event horizons, and the plain superposition makes each
 hole's shadow roughly `2 m_companion / d` too large. The motion tiers use a
 larger RK4 step fraction (sky errors near the holes of a few arcminutes, i.e.
 several native-Retina pixels); the paused `fine` tier is the strictest settled
-configuration (about 0.1′). These policies trade numerical resolution for
+configuration (about 0.02–0.06′ near the holes). These policies trade numerical resolution for
 latency and do not change the model's scientific classification. On WebGL2, the scene intentionally supplies the
 old separation/phase compatibility payload to the labelled weak-field shader.
 
@@ -355,7 +357,7 @@ Primary implementation files:
   Kerr-Schild/3+1 physics oracle, provider ABI, Hamiltonian, and fail-closed
   domain checks
 - [`src/strong-field-shaders.js`](./src/strong-field-shaders.js) — Production
-  WebGPU metric jets, static-observer camera, RK4 Hamiltonian tracer,
+  WebGPU low-rank Kerr-Schild Hamiltonian, static-observer camera, RK4 tracer,
   photon-orbit capture, outcomes, diagnostics, and the explicit WebGL2
   fallback declaration
 - [`src/strong-field-quality.js`](./src/strong-field-quality.js) — M3 Pro
@@ -454,9 +456,13 @@ the `interactive` RK4 tier; paused refinement uses the `balanced` and then
 For example, a 1280×720 CSS viewport renders at 2560×1440 on a 2× Retina display,
 and a 1836×1376 viewport renders at 3672×2752. These settings can stutter by
 design; completed-frame timing is telemetry rather than authority to downscale.
-On an M3 Pro a full-screen 3456×2234 Retina raster takes about 240 ms per
-`interactive` frame (about 4 FPS while moving) and 670 ms per `fine` sample;
-see [`docs/strong-field-performance.md`](./docs/strong-field-performance.md).
+Moving frames trace one ray per 4×4 pixels first and interpolate the escape
+direction only where the lens map is provably smooth (bilinear error below
+0.25 px, never across captures, disks or critical curves); all other pixels
+are traced. On an M3 Pro a full-screen 3456×2234 Retina raster then takes
+about 11 ms per `interactive` frame (36 ms with every pixel traced; about
+20 ms during the merger blend) and 96 ms per `fine` sample; see
+[`docs/strong-field-performance.md`](./docs/strong-field-performance.md).
 
 ## Validation
 

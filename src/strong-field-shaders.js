@@ -46,6 +46,11 @@ export const STRONG_FIELD_ACCRETION_UNIFORM_TAIL_FLOATS = 80;
 // field steps grow geometrically. This ceiling only bounds a single step; the
 // per-tier step fraction controls accuracy.
 export const STRONG_FIELD_MAXIMUM_STEP_M = 64;
+// Sparse tracing for moving frames: fsCoarse traces every
+// STRONG_FIELD_SPARSE_STRIDE-th pixel into an rgba32float field that fsMain
+// interpolates where it is provably smooth; frames opt in with
+// sceneStrongDiagnostics.w = stride.
+export const STRONG_FIELD_SPARSE_STRIDE = 4;
 
 export const STRONG_FIELD_UNIFORM_LAYOUT = Object.freeze({
   shared: Object.freeze({ offset: 0, floats: 36 }),
@@ -408,6 +413,82 @@ fn segmentDiskIntersection(
   return result;
 }
 
+// Sparse tracing: whether a chord passes within footprint (M) of a disk
+// annulus in the hole's rest frame. The part of the chord inside the slab
+// |z| <= footprint is tested against the annulus widened by footprint.
+// Non-finite input counts as near (fail closed).
+fn chordNearDisk(
+  segmentStart: vec3<f32>,
+  segmentEnd: vec3<f32>,
+  centre: vec3<f32>,
+  normalInput: vec3<f32>,
+  innerRadius: f32,
+  outerRadius: f32,
+  activeWeight: f32,
+  footprint: f32
+) -> bool {
+  if (activeWeight <= 1.0e-6 || outerRadius <= innerRadius) {
+    return false;
+  }
+  let normal = safeNormalize(normalInput);
+  let start = bodyRestDisplacement(segmentStart, centre, FROZEN_METRIC_VELOCITY);
+  let end = bodyRestDisplacement(segmentEnd, centre, FROZEN_METRIC_VELOCITY);
+  let sideStart = dot(start, normal);
+  let sideEnd = dot(end, normal);
+  if (!finiteScalar(sideStart) || !finiteScalar(sideEnd)) {
+    return true;
+  }
+  let rise = sideEnd - sideStart;
+  var low = 0.0;
+  var high = 1.0;
+  if (abs(rise) > 1.0e-9) {
+    let lowerCrossing = (-footprint - sideStart) / rise;
+    let upperCrossing = (footprint - sideStart) / rise;
+    low = max(low, min(lowerCrossing, upperCrossing));
+    high = min(high, max(lowerCrossing, upperCrossing));
+  } else if (abs(sideStart) > footprint) {
+    return false;
+  }
+  if (low > high) {
+    return false;
+  }
+  let first = mix(start, end, low);
+  let last = mix(start, end, high);
+  let planarFirst = first - normal * dot(first, normal);
+  let chord = (last - normal * dot(last, normal)) - planarFirst;
+  let nearestFraction = clamp(
+    -dot(planarFirst, chord) / max(dot(chord, chord), 1.0e-12),
+    0.0,
+    1.0
+  );
+  let nearest = length(planarFirst + nearestFraction * chord);
+  let farthest = max(length(planarFirst), length(planarFirst + chord));
+  return nearest <= outerRadius + footprint
+    && farthest >= innerRadius - footprint;
+}
+
+fn chordNearDisks(
+  segmentStart: vec3<f32>,
+  segmentEnd: vec3<f32>,
+  footprint: f32
+) -> bool {
+  if (params.sceneDiskControl.x < 0.5) {
+    return false;
+  }
+  return chordNearDisk(
+      segmentStart, segmentEnd, params.bodyAPositionMass.xyz,
+      params.diskANormalInner.xyz, params.diskANormalInner.w,
+      params.diskAOuterAccretionWeight.x, params.diskAOuterAccretionWeight.z,
+      footprint
+    )
+    || chordNearDisk(
+      segmentStart, segmentEnd, params.bodyBPositionMass.xyz,
+      params.diskBNormalInner.xyz, params.diskBNormalInner.w,
+      params.diskBOuterAccretionWeight.x, params.diskBOuterAccretionWeight.z,
+      footprint
+    );
+}
+
 fn visibleBlackbodyLinearSrgbPerBolometric(
   temperatureKelvin: f32
 ) -> vec3<f32> {
@@ -487,7 +568,7 @@ fn annulusEdgeCoverage(
   return innerCoverage * outerCoverage;
 }
 
-fn spatialDot(fields: ADMFields, a: vec3<f32>, b: vec3<f32>) -> f32 {
+fn spatialDot(fields: MetricValues, a: vec3<f32>, b: vec3<f32>) -> f32 {
   return dot(a, fields.spatialMetric * b);
 }
 
@@ -496,7 +577,7 @@ fn spatialDot(fields: ADMFields, a: vec3<f32>, b: vec3<f32>) -> f32 {
 // spatial metric defines all local dot products. Invalid/superluminal states
 // fail closed in diskTransferAtIntersection().
 fn composeEulerianVelocities(
-  fields: ADMFields,
+  fields: MetricValues,
   bodyCoordinateVelocity: vec3<f32>,
   orbitalRestVelocity: vec3<f32>
 ) -> vec3<f32> {
@@ -615,10 +696,7 @@ fn diskTransferAtIntersection(
     invalid.opacity = 0.0;
     return invalid;
   }
-  let fields = sampleSpacetime(
-    params.spacetimeControl.x,
-    intersection.position
-  );
+  let fields = metricValuesAt(intersection.position);
   // Direct evaluation at the event orders a disk crossing against capture
   // without paying for an additional metric sample on segments with no hit.
   if (
@@ -953,11 +1031,24 @@ function createStrongFieldBinaryTraceFragmentWGSL({ dualDisk = false } = {}) {
   const diskResultFields = dualDisk ? /* wgsl */ `
   diskRadiance: vec3<f32>,
   diskTransmittance: f32,
-  diskTransferFailure: f32,` : "";
+  diskTransferFailure: f32,
+  // Sparse coarse nodes only: the node's beam passed within its footprint
+  // of a disk annulus.
+  diskProximity: f32,` : "";
+  const sparseDiskFlag = dualDisk ? /* wgsl */ `
+  if (
+    result.diskTransmittance < 1.0
+    || any(result.diskRadiance > vec3<f32>(0.0))
+    || result.diskTransferFailure > 0.0
+    || result.diskProximity > 0.5
+  ) {
+    code = code + 4.0;
+  }` : "";
   const diskResultInitialization = dualDisk ? /* wgsl */ `
   result.diskRadiance = vec3<f32>(0.0);
   result.diskTransmittance = 1.0;
-  result.diskTransferFailure = 0.0;` : "";
+  result.diskTransferFailure = 0.0;
+  result.diskProximity = 0.0;` : "";
   // Disk crossings are located on two chords per RK4 step through the
   // third-order continuous-extension midpoint
   //   y(1/2) = y0 + h (5/24 k1 + 1/6 k2 + 1/6 k3 - 1/24 k4),
@@ -996,7 +1087,16 @@ function createStrongFieldBinaryTraceFragmentWGSL({ dualDisk = false } = {}) {
       conservedEnergy,
       observerQ,
       capturePadding
-    );` : "";
+    );
+    if (footprintAngle > 0.0 && result.diskProximity < 0.5) {
+      let footprint = footprintAngle * (lookback + stepSize);
+      if (
+        chordNearDisks(stepPosition, midPosition, footprint)
+        || chordNearDisks(midPosition, nextPosition, footprint)
+      ) {
+        result.diskProximity = 1.0;
+      }
+    }` : "";
   const capturedPhotographicResult = dualDisk
     ? "return result.diskRadiance;"
     : "return vec3<f32>(0.0);";
@@ -1015,14 +1115,34 @@ diagnostic(off, derivative_uniformity);
 const PI: f32 = 3.14159265358979323846;
 const TWO_PI: f32 = 6.28318530717958647692;
 const MAX_RK4_STEPS: i32 = 192;
+// Outbound rays beyond this radius only move into weaker field, so their RK4
+// step fraction grows by FAR_FIELD_GROWTH (capped at FAR_FIELD_MAXIMUM_FRACTION)
+// without losing accuracy. Inbound rays keep the tier fraction: a large step
+// set from the start-of-step distance would overshoot into the strong field.
+const FAR_FIELD_RADIUS_M: f32 = 30.0;
+const FAR_FIELD_GROWTH: f32 = 2.0;
+const FAR_FIELD_MAXIMUM_FRACTION: f32 = 2.0;
+// Sparse tracing: coarse nodes every SPARSE_STRIDE pixels. A pixel is
+// interpolated only if the bilinear error bound from the node second
+// differences stays below SPARSE_CURVATURE_PIXELS.
+const SPARSE_STRIDE: f32 = ${STRONG_FIELD_SPARSE_STRIDE.toFixed(1)};
+const SPARSE_CURVATURE_PIXELS: f32 = 0.25;
+// A coarse node also stands for the beam around its ray, of this many node
+// spacings in angular half-width (a pixel is within 0.71 spacings of a node of
+// its cell; the margin absorbs mild lensing distortion of the beam). A disk
+// thinner than the node spacing, e.g. seen edge-on, is caught through it.
+const SPARSE_FOOTPRINT_SPACINGS: f32 = 2.0;
 const RAY_UNRESOLVED: u32 = 0u;
 const RAY_CAPTURED: u32 = 1u;
 const RAY_ESCAPED: u32 = 2u;
-const DUAL_EPSILON: f32 = 1.0e-12;
 // Render pipelines specialize this override to 0=binary, 1=remnant, or
 // 2=transition.  The default keeps the complete provider available to the GPU
 // probe and any consumer that does not opt into pipeline specialization.
 override SPACETIME_PHASE_MODE: i32 = -1;
+// 0 when both binary bodies are non-spinning (as in SXS:BBH:0001). The Kerr
+// branch of their terms is then compiled out; although never taken, it
+// otherwise costs the binary pipeline ~40% of its speed in register pressure.
+override BINARY_SPIN_MODE: i32 = 1;
 // Positions are frozen for the whole ray (fast light), so each hole enters the
 // metric as an unboosted Kerr-Schild term. A Lorentz-boosted term is a vacuum
 // solution only while its centre moves as X0 + v t; frozen, it is not, and its
@@ -1074,46 +1194,62 @@ struct Dual3 {
   gradient: vec3<f32>,
 };
 
-struct DualVector3 {
-  x: Dual3,
-  y: Dual3,
-  z: Dual3,
-};
-
-struct DualMatrix3 {
-  c0: DualVector3,
-  c1: DualVector3,
-  c2: DualVector3,
-};
-
-struct HoleContribution {
-  g00: Dual3,
-  g0: DualVector3,
-  spatial: DualMatrix3,
-  horizonDistance: f32,
-  cartesianRadius: Dual3,
-  curvatureScale: f32,
-  regularized: f32,
+// One weighted Kerr-Schild term of the frozen metric at a point,
+//   g_mu_nu += c l_mu l_nu,   l = (1, n),   |n| = 1,   c = 2 w H,
+// with gradients taken at the evaluation point. The Jacobian dn/dx is applied
+// in closed form (see termJacobianTranspose); for a spinning term it needs
+// jacobianW, spin and inverseNormalization = 1/(r^2 + a^2).
+struct KerrSchildTerm {
+  c: f32,
+  cGradient: vec3<f32>,
+  n: vec3<f32>,
+  jacobianW: vec3<f32>,
+  spin: vec3<f32>,
+  inverseNormalization: f32,
+  inverseRadius: f32,
+  spinning: f32,
   kerrRadius: f32,
   kerrRadiusGradient: vec3<f32>,
-  horizonRadius: f32,
-  photonRadius: f32,
+  regularized: f32,
 };
 
-struct ADMFields {
-  lapse: f32,
-  lapseGradient: vec3<f32>,
-  shift: vec3<f32>,
-  shiftDerivativeX: vec3<f32>,
-  shiftDerivativeY: vec3<f32>,
-  shiftDerivativeZ: vec3<f32>,
-  inverseSpatialMetric: mat3x3<f32>,
-  inverseMetricDerivativeX: mat3x3<f32>,
-  inverseMetricDerivativeY: mat3x3<f32>,
-  inverseMetricDerivativeZ: mat3x3<f32>,
-  spatialMetric: mat3x3<f32>,
+// The weighted terms of the current frame: A and B are the binary, R is the
+// remnant. Phase 0 = binary (A, B), 1 = remnant (R), 2 = transition (A, B, R).
+struct SpacetimeTerms {
+  a: KerrSchildTerm,
+  b: KerrSchildTerm,
+  r: KerrSchildTerm,
+  weightA: f32,
+  weightB: f32,
+  weightR: f32,
+};
+
+// Horizon and innermost photon-orbit radii of the three terms. They depend
+// only on frame uniforms, so a ray computes them once.
+struct SpacetimeRadii {
+  horizonA: f32,
+  photonA: f32,
+  horizonB: f32,
+  photonB: f32,
+  horizonR: f32,
+  photonR: f32,
+};
+
+// Reduced Hamiltonian H(x,p) = -p_t of the null cone and its flow
+// (dx/dt, dp/dt) at one point, from the low-rank form of the inverse metric.
+struct LowRankHamiltonian {
+  velocity: vec3<f32>,
+  momentumRate: vec3<f32>,
+  hamiltonian: f32,
+  metricValid: f32,
+  valid: f32,
+};
+
+struct GeodesicSample {
+  velocity: vec3<f32>,
+  momentumRate: vec3<f32>,
+  hamiltonian: f32,
   horizonDistance: f32,
-  curvatureScale: f32,
   // Distance inside (<0) or outside (>0) the innermost photon orbit of the
   // nearest active term, and the gradient of that term's Kerr radius.
   photonMargin: f32,
@@ -1122,27 +1258,26 @@ struct ADMFields {
   // Kerr radius. Ingoing Kerr-Schild data are smooth at the horizon, so the
   // orbit scale r, not r - r+, limits accuracy near prograde photon orbits.
   stepDistance: f32,
-  // Distance inside (<0) the unscaled innermost photon orbit of any active
-  // term. During the merger blend the region around the merging holes lies
-  // inside the common event horizon, so an unrecoverable metric sample there
-  // is classified as captured.
+  // Distance inside (<0) the unscaled innermost photon orbit of any term
+  // present in the metric. During the merger blend the region around the
+  // merging holes lies inside the common event horizon, so an unrecoverable
+  // sample there is classified as captured.
   failureCaptureMargin: f32,
+  // Weighted Kerr-Schild fields summed along their null directions,
+  // |sum 2 w H n| (see hover capture).
+  alignedField: f32,
+  metricValid: f32,
   valid: f32,
 };
 
-struct HamiltonianRhs {
-  velocity: vec3<f32>,
-  momentumRate: vec3<f32>,
-  eulerianFrequency: f32,
-  reducedHamiltonian: f32,
-  nullResidual: f32,
-  valid: f32,
-};
-
-struct HamiltonianKinematics {
-  velocity: vec3<f32>,
-  eulerianFrequency: f32,
-  reducedHamiltonian: f32,
+// Metric values without derivatives, for the camera frame and disk hits.
+struct MetricValues {
+  gtt: f32,
+  shiftCovariant: vec3<f32>,
+  spatialMetric: mat3x3<f32>,
+  lapse: f32,
+  shift: vec3<f32>,
+  horizonDistance: f32,
   valid: f32,
 };
 
@@ -1160,6 +1295,8 @@ struct RayResult {
 @group(0) @binding(0) var<uniform> params: Params;
 @group(0) @binding(1) var tSky: texture_2d<f32>;
 @group(0) @binding(2) var skySampler: sampler;
+// Sparse tracing: escape directions of every S-th pixel (see fsCoarse).
+@group(0) @binding(3) var coarseField: texture_2d<f32>;
 
 fn safeNormalize(value: vec3<f32>) -> vec3<f32> {
   return value * inverseSqrt(max(dot(value, value), 1.0e-18));
@@ -1179,849 +1316,690 @@ fn finiteVector(value: vec3<f32>) -> bool {
   ));
 }
 
-fn dualConstant(value: f32) -> Dual3 {
-  var result: Dual3;
-  result.value = value;
-  result.gradient = vec3<f32>(0.0);
-  return result;
+fn zeroKerrSchildTerm() -> KerrSchildTerm {
+  var term: KerrSchildTerm;
+  term.c = 0.0;
+  term.cGradient = vec3<f32>(0.0);
+  term.n = vec3<f32>(0.0);
+  term.jacobianW = vec3<f32>(0.0);
+  term.spin = vec3<f32>(0.0);
+  term.inverseNormalization = 0.0;
+  term.inverseRadius = 0.0;
+  term.spinning = 0.0;
+  term.kerrRadius = 1.0e6;
+  term.kerrRadiusGradient = vec3<f32>(0.0);
+  term.regularized = 0.0;
+  return term;
 }
 
-fn dualVariable(value: f32, gradient: vec3<f32>) -> Dual3 {
-  var result: Dual3;
-  result.value = value;
-  result.gradient = gradient;
-  return result;
-}
-
-fn dualAdd(a: Dual3, b: Dual3) -> Dual3 {
-  var result: Dual3;
-  result.value = a.value + b.value;
-  result.gradient = a.gradient + b.gradient;
-  return result;
-}
-
-fn dualSub(a: Dual3, b: Dual3) -> Dual3 {
-  var result: Dual3;
-  result.value = a.value - b.value;
-  result.gradient = a.gradient - b.gradient;
-  return result;
-}
-
-fn dualScale(a: Dual3, scale: f32) -> Dual3 {
-  var result: Dual3;
-  result.value = a.value * scale;
-  result.gradient = a.gradient * scale;
-  return result;
-}
-
-fn dualMul(a: Dual3, b: Dual3) -> Dual3 {
-  var result: Dual3;
-  result.value = a.value * b.value;
-  result.gradient = a.gradient * b.value + b.gradient * a.value;
-  return result;
-}
-
-fn dualReciprocal(a: Dual3) -> Dual3 {
-  let denominator = max(abs(a.value), DUAL_EPSILON);
-  let signedValue = select(-denominator, denominator, a.value >= 0.0);
-  var result: Dual3;
-  result.value = 1.0 / signedValue;
-  result.gradient = -a.gradient / (signedValue * signedValue);
-  return result;
-}
-
-fn dualDiv(a: Dual3, b: Dual3) -> Dual3 {
-  return dualMul(a, dualReciprocal(b));
-}
-
-fn dualSqrt(a: Dual3) -> Dual3 {
-  let root = sqrt(max(a.value, DUAL_EPSILON));
-  var result: Dual3;
-  result.value = root;
-  result.gradient = a.gradient / (2.0 * root);
-  return result;
-}
-
-fn dualVectorConstant(value: vec3<f32>) -> DualVector3 {
-  var result: DualVector3;
-  result.x = dualConstant(value.x);
-  result.y = dualConstant(value.y);
-  result.z = dualConstant(value.z);
-  return result;
-}
-
-fn dualPosition(value: vec3<f32>) -> DualVector3 {
-  var result: DualVector3;
-  result.x = dualVariable(value.x, vec3<f32>(1.0, 0.0, 0.0));
-  result.y = dualVariable(value.y, vec3<f32>(0.0, 1.0, 0.0));
-  result.z = dualVariable(value.z, vec3<f32>(0.0, 0.0, 1.0));
-  return result;
-}
-
-fn dualVectorAdd(a: DualVector3, b: DualVector3) -> DualVector3 {
-  var result: DualVector3;
-  result.x = dualAdd(a.x, b.x);
-  result.y = dualAdd(a.y, b.y);
-  result.z = dualAdd(a.z, b.z);
-  return result;
-}
-
-fn dualVectorSub(a: DualVector3, b: DualVector3) -> DualVector3 {
-  var result: DualVector3;
-  result.x = dualSub(a.x, b.x);
-  result.y = dualSub(a.y, b.y);
-  result.z = dualSub(a.z, b.z);
-  return result;
-}
-
-fn dualVectorScaleDual(a: DualVector3, scale: Dual3) -> DualVector3 {
-  var result: DualVector3;
-  result.x = dualMul(a.x, scale);
-  result.y = dualMul(a.y, scale);
-  result.z = dualMul(a.z, scale);
-  return result;
-}
-
-fn dualDot(a: DualVector3, b: DualVector3) -> Dual3 {
-  return dualAdd(
-    dualAdd(dualMul(a.x, b.x), dualMul(a.y, b.y)),
-    dualMul(a.z, b.z)
+// Horizon radius m(1 + sqrt(1 - chi^2)) and innermost (prograde equatorial)
+// circular photon orbit r = 2m[1 + cos(2/3 acos(-chi))] (3m at chi = 0, m at
+// chi = 1) of an isolated Kerr hole.
+fn kerrRadii(massInput: f32, dimensionlessSpin: vec3<f32>) -> vec2<f32> {
+  let mass = max(massInput, 1.0e-5);
+  let chi = min(0.998, length(dimensionlessSpin));
+  return vec2<f32>(
+    mass * (1.0 + sqrt(max(1.0 - chi * chi, 1.0e-5))),
+    2.0 * mass * (1.0 + cos((2.0 / 3.0) * acos(-chi)))
   );
 }
 
-fn dualDotConstant(a: DualVector3, b: vec3<f32>) -> Dual3 {
-  return dualAdd(
-    dualAdd(dualScale(a.x, b.x), dualScale(a.y, b.y)),
-    dualScale(a.z, b.z)
-  );
+fn spacetimeRadii() -> SpacetimeRadii {
+  let radiiA = kerrRadii(params.bodyAPositionMass.w, params.bodyASpin.xyz);
+  let radiiB = kerrRadii(params.bodyBPositionMass.w, params.bodyBSpin.xyz);
+  let radiiR = kerrRadii(params.remnantPositionMass.w, params.remnantSpinBlend.xyz);
+  var radii: SpacetimeRadii;
+  radii.horizonA = radiiA.x;
+  radii.photonA = radiiA.y;
+  radii.horizonB = radiiB.x;
+  radii.photonB = radiiB.y;
+  radii.horizonR = radiiR.x;
+  radii.photonR = radiiR.y;
+  return radii;
 }
 
-fn dualLength(value: DualVector3) -> Dual3 {
-  return dualSqrt(dualDot(value, value));
-}
-
-fn dualVectorNormalize(value: DualVector3) -> DualVector3 {
-  return dualVectorScaleDual(value, dualReciprocal(dualLength(value)));
-}
-
-fn dualVectorValue(value: DualVector3) -> vec3<f32> {
-  return vec3<f32>(value.x.value, value.y.value, value.z.value);
-}
-
-fn dualVectorDerivative(value: DualVector3, axis: u32) -> vec3<f32> {
-  return vec3<f32>(
-    value.x.gradient[axis],
-    value.y.gradient[axis],
-    value.z.gradient[axis]
-  );
-}
-
-fn zeroDualMatrix() -> DualMatrix3 {
-  var result: DualMatrix3;
-  result.c0 = dualVectorConstant(vec3<f32>(0.0));
-  result.c1 = dualVectorConstant(vec3<f32>(0.0));
-  result.c2 = dualVectorConstant(vec3<f32>(0.0));
-  return result;
-}
-
-fn identityDualMatrix() -> DualMatrix3 {
-  var result: DualMatrix3;
-  result.c0 = dualVectorConstant(vec3<f32>(1.0, 0.0, 0.0));
-  result.c1 = dualVectorConstant(vec3<f32>(0.0, 1.0, 0.0));
-  result.c2 = dualVectorConstant(vec3<f32>(0.0, 0.0, 1.0));
-  return result;
-}
-
-fn addDualMatrix(a: DualMatrix3, b: DualMatrix3) -> DualMatrix3 {
-  var result: DualMatrix3;
-  result.c0 = dualVectorAdd(a.c0, b.c0);
-  result.c1 = dualVectorAdd(a.c1, b.c1);
-  result.c2 = dualVectorAdd(a.c2, b.c2);
-  return result;
-}
-
-fn scaleDualMatrixDual(
-  value: DualMatrix3,
-  scale: Dual3
-) -> DualMatrix3 {
-  var result: DualMatrix3;
-  result.c0 = dualVectorScaleDual(value.c0, scale);
-  result.c1 = dualVectorScaleDual(value.c1, scale);
-  result.c2 = dualVectorScaleDual(value.c2, scale);
-  return result;
-}
-
-fn dualMatrixValue(value: DualMatrix3) -> mat3x3<f32> {
-  return mat3x3<f32>(
-    dualVectorValue(value.c0),
-    dualVectorValue(value.c1),
-    dualVectorValue(value.c2)
-  );
-}
-
-fn dualMatrixDerivative(value: DualMatrix3, axis: u32) -> mat3x3<f32> {
-  return mat3x3<f32>(
-    dualVectorDerivative(value.c0, axis),
-    dualVectorDerivative(value.c1, axis),
-    dualVectorDerivative(value.c2, axis)
-  );
-}
-
-fn inverse3x3(value: mat3x3<f32>) -> mat3x3<f32> {
-  let row0 = cross(value[1], value[2]);
-  let row1 = cross(value[2], value[0]);
-  let row2 = cross(value[0], value[1]);
-  let determinant = dot(value[0], row0);
-  let safeDeterminant = select(
-    -max(abs(determinant), 1.0e-8),
-    max(abs(determinant), 1.0e-8),
-    determinant >= 0.0
-  );
-  return mat3x3<f32>(
-    vec3<f32>(row0.x, row1.x, row2.x) / safeDeterminant,
-    vec3<f32>(row0.y, row1.y, row2.y) / safeDeterminant,
-    vec3<f32>(row0.z, row1.z, row2.z) / safeDeterminant
-  );
-}
-
-fn outerDual(vector: DualVector3, amplitude: Dual3) -> DualMatrix3 {
-  var result: DualMatrix3;
-  result.c0 = dualVectorScaleDual(
-    vector,
-    dualMul(amplitude, vector.x)
-  );
-  result.c1 = dualVectorScaleDual(
-    vector,
-    dualMul(amplitude, vector.y)
-  );
-  result.c2 = dualVectorScaleDual(
-    vector,
-    dualMul(amplitude, vector.z)
-  );
-  return result;
-}
-
-fn zeroHoleContribution() -> HoleContribution {
-  var result: HoleContribution;
-  result.g00 = dualConstant(0.0);
-  result.g0 = dualVectorConstant(vec3<f32>(0.0));
-  result.spatial = zeroDualMatrix();
-  result.horizonDistance = 1.0e6;
-  result.cartesianRadius = dualConstant(1.0e6);
-  result.curvatureScale = 0.0;
-  result.regularized = 0.0;
-  result.kerrRadius = 1.0e6;
-  result.kerrRadiusGradient = vec3<f32>(0.0);
-  result.horizonRadius = 0.0;
-  result.photonRadius = 0.0;
-  return result;
-}
-
-// One instantaneously Lorentz-boosted Kerr-Schild term.  Position, velocity,
-// and the arbitrary dimensionless spin vector are supplied by the declared
-// PN/EOB coordinate adapter; SXS horizon centroids never enter this function.
-fn boostedKerrSchildContribution(
-  position: DualVector3,
+// One unweighted (c = 2H) Kerr-Schild term. Positions are frozen for the
+// whole ray, so the term is unboosted (see FROZEN_METRIC_VELOCITY).
+fn kerrSchildTerm(
+  position: vec3<f32>,
   centre: vec3<f32>,
-  velocity: vec3<f32>,
   massInput: f32,
   dimensionlessSpin: vec3<f32>,
-  activeFlag: f32
-) -> HoleContribution {
-  let mass = max(massInput, 1.0e-5);
+  activeFlag: f32,
+  allowSpin: bool
+) -> KerrSchildTerm {
   if (activeFlag < 0.5 || massInput <= 0.0) {
-    return zeroHoleContribution();
+    return zeroKerrSchildTerm();
   }
-
-  let speedSquared = dot(velocity, velocity);
-  if (speedSquared >= 0.9999) {
-    var invalid = zeroHoleContribution();
-    invalid.regularized = 1.0;
-    return invalid;
-  }
-  let boostGamma = inverseSqrt(max(1.0 - speedSquared, 1.0e-5));
-  let displacement = dualVectorSub(
-    position,
-    dualVectorConstant(centre)
-  );
-  let velocityProjection = dualDotConstant(displacement, velocity);
-  let contractionCoefficient = select(
-    0.5,
-    (boostGamma - 1.0) / max(speedSquared, 1.0e-12),
-    speedSquared > 1.0e-12
-  );
-  let restPosition = dualVectorAdd(
-    displacement,
-    dualVectorScaleDual(
-      dualVectorConstant(velocity),
-      dualScale(velocityProjection, contractionCoefficient)
-    )
-  );
-  let rhoSquared = dualDot(restPosition, restPosition);
+  let mass = max(massInput, 1.0e-5);
   let spinNorm = length(dimensionlessSpin);
-  let safeChi = dimensionlessSpin
-    * min(0.998, spinNorm) / max(spinNorm, 1.0e-12);
-  let spin = safeChi * mass;
   let radiusFloor = max(
     params.spacetimeLimits.z,
     params.spacetimeControl.w * mass
   );
-  var kerrRadius: Dual3;
-  var kerrH: Dual3;
-  var restDirection: DualVector3;
-  var regularized = select(0.0, 1.0, spinNorm >= 0.999);
-  if (spinNorm < 1.0e-5) {
-    // The source binary is non-spinning.  This exact Schwarzschild
-    // Kerr-Schild branch removes most dual-number work during inspiral.
-    kerrRadius = dualSqrt(rhoSquared);
-    if (kerrRadius.value < radiusFloor) {
-      kerrRadius = dualConstant(radiusFloor);
-      regularized = 1.0;
-    }
-    kerrH = dualScale(dualReciprocal(kerrRadius), mass);
-    restDirection = dualVectorScaleDual(
-      restPosition,
-      dualReciprocal(kerrRadius)
-    );
-  } else {
-    let spinDotPosition = dualDotConstant(restPosition, spin);
-    let spinSquared = dot(spin, spin);
-    let radialDiscriminant = dualAdd(
-      dualMul(
-        dualSub(rhoSquared, dualConstant(spinSquared)),
-        dualSub(rhoSquared, dualConstant(spinSquared))
-      ),
-      dualScale(dualMul(spinDotPosition, spinDotPosition), 4.0)
-    );
-    let kerrRadiusSquared = dualScale(
-      dualAdd(
-        dualSub(rhoSquared, dualConstant(spinSquared)),
-        dualSqrt(radialDiscriminant)
-      ),
-      0.5
-    );
-    kerrRadius = dualSqrt(kerrRadiusSquared);
-    if (kerrRadius.value < radiusFloor) {
-      kerrRadius = dualConstant(radiusFloor);
-      regularized = 1.0;
-    }
-    let radiusSquared = dualMul(kerrRadius, kerrRadius);
-    let radiusCubed = dualMul(radiusSquared, kerrRadius);
-    let radiusFourth = dualMul(radiusSquared, radiusSquared);
-    let kerrDenominator = dualAdd(
-      radiusFourth,
-      dualMul(spinDotPosition, spinDotPosition)
-    );
-    kerrH = dualScale(
-      dualDiv(radiusCubed, kerrDenominator),
-      mass
-    );
-
-    // l = [r x + x cross a + a(a.x)/r] / (r^2 + a^2)
-    var positionCrossSpin: DualVector3;
-    positionCrossSpin.x = dualSub(
-      dualScale(restPosition.y, spin.z),
-      dualScale(restPosition.z, spin.y)
-    );
-    positionCrossSpin.y = dualSub(
-      dualScale(restPosition.z, spin.x),
-      dualScale(restPosition.x, spin.z)
-    );
-    positionCrossSpin.z = dualSub(
-      dualScale(restPosition.x, spin.y),
-      dualScale(restPosition.y, spin.x)
-    );
-    let numerator = dualVectorAdd(
-      dualVectorAdd(
-        dualVectorScaleDual(restPosition, kerrRadius),
-        positionCrossSpin
-      ),
-      dualVectorScaleDual(
-        dualVectorConstant(spin),
-        dualDiv(spinDotPosition, kerrRadius)
-      )
-    );
-    restDirection = dualVectorScaleDual(
-      numerator,
-      dualReciprocal(dualAdd(radiusSquared, dualConstant(spinSquared)))
-    );
-  }
-  restDirection = dualVectorNormalize(restDirection);
-
-  let velocityDotDirection = dualDotConstant(restDirection, velocity);
-  let transformedFactor = dualSub(
-    dualScale(
-      velocityDotDirection,
-      contractionCoefficient
-    ),
-    dualConstant(boostGamma)
-  );
-  let boostedDirection = dualVectorAdd(
-    restDirection,
-    dualVectorScaleDual(
-      dualVectorConstant(velocity),
-      transformedFactor
-    )
-  );
-  let boostedTime = dualScale(
-    dualSub(dualConstant(1.0), velocityDotDirection),
-    boostGamma
-  );
   let maximumH = max(params.spacetimeLimits.w, 1.0);
-  if (kerrH.value > maximumH) {
-    kerrH = dualConstant(maximumH);
-    regularized = 1.0;
-  }
-  let amplitude = dualScale(kerrH, 2.0);
+  var term = zeroKerrSchildTerm();
+  term.regularized = select(0.0, 1.0, spinNorm >= 0.999);
 
-  var result: HoleContribution;
-  result.g00 = dualMul(
-    amplitude,
-    dualMul(boostedTime, boostedTime)
+  if (!allowSpin || spinNorm < 1.0e-5) {
+    // Schwarzschild: r = |x|, H = m/r, n = x/r, dn/dx = (I - n n^T)/r and
+    // dH/dx = -H n/r, all in closed form.
+    let displacement = position - centre;
+    let radiusSquared = dot(displacement, displacement);
+    let inverseCartesian = inverseSqrt(max(radiusSquared, 1.0e-24));
+    var radius = radiusSquared * inverseCartesian;
+    var inverseRadius = inverseCartesian;
+    term.n = displacement * inverseCartesian;
+    var clamped = false;
+    if (radius < radiusFloor) {
+      radius = radiusFloor;
+      inverseRadius = 1.0 / radiusFloor;
+      clamped = true;
+      term.regularized = 1.0;
+    }
+    term.inverseRadius = inverseRadius;
+    term.kerrRadius = radius;
+    term.kerrRadiusGradient = term.n;
+    var kerrH = mass * inverseRadius;
+    var hGradient = -kerrH * inverseRadius * term.n;
+    if (clamped) {
+      hGradient = vec3<f32>(0.0);
+    }
+    if (kerrH > maximumH) {
+      kerrH = maximumH;
+      hGradient = vec3<f32>(0.0);
+      term.regularized = 1.0;
+    }
+    term.c = 2.0 * kerrH;
+    term.cGradient = 2.0 * hGradient;
+    return term;
+  }
+
+  // Kerr: the spheroidal radius solves r^4 - (rho^2 - a^2) r^2 - (a.x)^2 = 0,
+  // H = m r^3 / W with W = r^4 + (a.x)^2, and
+  // n = [r x + x cross a + a (a.x)/r] / (r^2 + a^2), which is unit exactly.
+  // Implicit differentiation gives grad r = r (r^2 x + (a.x) a) / W and
+  // grad H = m r^2 [(3 (a.x)^2 - r^4) grad r - 2 r (a.x) a] / W^2.
+  let displacement = position - centre;
+  let spin = dimensionlessSpin * (mass * min(0.998, spinNorm) / max(spinNorm, 1.0e-12));
+  let spinSquared = dot(spin, spin);
+  let spinDotPosition = dot(spin, displacement);
+  let reduced = dot(displacement, displacement) - spinSquared;
+  var radiusSquared = 0.5 * (
+    reduced + sqrt(reduced * reduced + 4.0 * spinDotPosition * spinDotPosition)
   );
-  result.g0 = dualVectorScaleDual(
-    boostedDirection,
-    dualMul(amplitude, boostedTime)
+  var radius = sqrt(max(radiusSquared, 0.0));
+  var clamped = false;
+  if (radius < radiusFloor) {
+    radius = radiusFloor;
+    radiusSquared = radius * radius;
+    clamped = true;
+    term.regularized = 1.0;
+  }
+  let radiusFourth = radiusSquared * radiusSquared;
+  let inverseW = 1.0 / (radiusFourth + spinDotPosition * spinDotPosition);
+  let radiusGradient = (radius * inverseW)
+    * (radiusSquared * displacement + spinDotPosition * spin);
+  var kerrH = mass * radius * radiusSquared * inverseW;
+  var hGradient = (mass * radiusSquared * inverseW * inverseW) * (
+    (3.0 * spinDotPosition * spinDotPosition - radiusFourth) * radiusGradient
+    - (2.0 * radius * spinDotPosition) * spin
   );
-  result.spatial = outerDual(boostedDirection, amplitude);
-  let horizonRadius = mass * (
-    1.0 + sqrt(max(1.0 - dot(safeChi, safeChi), 1.0e-5))
-  );
-  // Innermost (prograde equatorial) circular photon orbit of an isolated Kerr
-  // hole: r = 2m[1 + cos(2/3 acos(-chi))], i.e. 3m at chi=0 and m at chi=1.
-  let photonRadius = 2.0 * mass * (
-    1.0 + cos((2.0 / 3.0) * acos(-clamp(length(safeChi), 0.0, 1.0)))
-  );
-  result.horizonDistance = kerrRadius.value - horizonRadius;
-  result.cartesianRadius = dualLength(restPosition);
-  result.curvatureScale = mass
-    / max(kerrRadius.value * kerrRadius.value, 0.02);
-  result.regularized = regularized;
-  result.kerrRadius = kerrRadius.value;
-  result.kerrRadiusGradient = kerrRadius.gradient;
-  result.horizonRadius = horizonRadius;
-  result.photonRadius = photonRadius;
+  if (clamped) {
+    hGradient = vec3<f32>(0.0);
+  }
+  if (kerrH > maximumH) {
+    kerrH = maximumH;
+    hGradient = vec3<f32>(0.0);
+    term.regularized = 1.0;
+  }
+  let inverseRadius = 1.0 / radius;
+  let inverseNormalization = 1.0 / (radiusSquared + spinSquared);
+  term.n = (
+    radius * displacement
+    + cross(displacement, spin)
+    + (spinDotPosition * inverseRadius) * spin
+  ) * inverseNormalization;
+  if (clamped) {
+    // Off the exact Kerr radius n is no longer unit; the low-rank form
+    // assumes null l, so restore |n| = 1 (the sample is regularized anyway).
+    term.n = safeNormalize(term.n);
+  }
+  term.jacobianW = displacement
+    - (spinDotPosition * inverseRadius * inverseRadius) * spin
+    - (2.0 * radius) * term.n;
+  term.spin = spin;
+  term.inverseNormalization = inverseNormalization;
+  term.c = 2.0 * kerrH;
+  term.cGradient = 2.0 * hGradient;
+  term.inverseRadius = inverseRadius;
+  term.spinning = 1.0;
+  term.kerrRadius = radius;
+  term.kerrRadiusGradient = radiusGradient;
+  return term;
+}
+
+// J^T v for a term, i.e. the gradient of n . v with v held fixed. From
+//   dn/dx^j = [(dr/dx^j) w + r e_j + e_j cross a + (a_j / r) a] / (r^2 + a^2),
+//   w = x - (a.x) a / r^2 - 2 r n,
+// J^T v = [(w.v) grad r + r v + a cross v + (a.v / r) a] / (r^2 + a^2); for
+// a = 0 this is (v - n (n.v)) / r.
+fn termJacobianTranspose(
+  term: KerrSchildTerm,
+  value: vec3<f32>,
+  allowSpin: bool
+) -> vec3<f32> {
+  if (allowSpin && term.spinning > 0.5) {
+    return (
+      dot(term.jacobianW, value) * term.kerrRadiusGradient
+      + term.kerrRadius * value
+      + cross(term.spin, value)
+      + (dot(term.spin, value) * term.inverseRadius) * term.spin
+    ) * term.inverseNormalization;
+  }
+  return (value - term.n * dot(term.n, value)) * term.inverseRadius;
+}
+
+fn scaleTerm(term: KerrSchildTerm, weight: f32) -> KerrSchildTerm {
+  var result = term;
+  result.c = term.c * weight;
+  result.cGradient = term.cGradient * weight;
   return result;
 }
 
-fn attenuationWeight(radius: Dual3) -> Dual3 {
-  if (params.spacetimeLimits.x < 0.5) {
-    return dualConstant(1.0);
-  }
+// Optional companion attenuation A = 1 - exp[-(r_companion / sigma)^p]
+// (disabled by default), with its gradient.
+fn companionAttenuation(position: vec3<f32>, companionCentre: vec3<f32>) -> Dual3 {
+  let displacement = position - companionCentre;
+  let radius = max(length(displacement), 1.0e-6);
   let scale = max(params.spacetimeControl.z, 1.0e-5);
   let power = max(params.spacetimeLimits.y, 2.0);
-  let ratio = dualScale(radius, 1.0 / scale);
-  let safeRatio = max(ratio.value, 0.0);
-  let powered = pow(safeRatio, power);
-  let poweredGradient = power
-    * pow(max(safeRatio, 1.0e-8), power - 1.0)
-    * ratio.gradient;
-  let exponential = exp(-powered);
+  let ratio = radius / scale;
+  let exponential = exp(-pow(ratio, power));
   var result: Dual3;
   result.value = 1.0 - exponential;
-  result.gradient = exponential * poweredGradient;
+  result.gradient = exponential * power
+    * pow(max(ratio, 1.0e-8), power - 1.0) / scale
+    * (displacement / radius);
   return result;
 }
 
-// Unified strong-field spacetime provider.  PR5 samples it at one frozen frame
-// time; its explicit (t, x) interface is retained for slow-light and NR data.
-fn sampleSpacetime(
-  coordinateTime: f32,
-  positionValue: vec3<f32>
-) -> ADMFields {
-  let providerInput = SpacetimeProviderInput(coordinateTime, positionValue);
-  let position = dualPosition(providerInput.position);
-  // spacetimeControl.y is already quintic smootherstep(rawMergerBlend), packed
-  // by the CPU provider.  This preserves a C2 metric transition.
-  let blend = clamp(params.spacetimeControl.y, 0.0, 1.0);
-  var holeA = zeroHoleContribution();
-  var holeB = zeroHoleContribution();
-  var remnant = zeroHoleContribution();
-  var weightA = dualConstant(0.0);
-  var weightB = dualConstant(0.0);
-  var weightRemnant = dualConstant(0.0);
+fn attenuateTerm(term: KerrSchildTerm, attenuation: Dual3) -> KerrSchildTerm {
+  var result = term;
+  result.c = term.c * attenuation.value;
+  result.cGradient = term.cGradient * attenuation.value
+    + term.c * attenuation.gradient;
+  return result;
+}
 
-  // The endpoint phase is a frame-uniform value.  Branching here skips the
-  // inactive Kerr-Schild providers and, in the remnant phase, both companion
-  // attenuation evaluations.  The open interval retains the general C2 blend.
-  if (
-    SPACETIME_PHASE_MODE == 0
-    || (SPACETIME_PHASE_MODE < 0 && blend == 0.0)
-  ) {
-    holeA = boostedKerrSchildContribution(
-      position,
-      params.bodyAPositionMass.xyz,
-      FROZEN_METRIC_VELOCITY,
-      params.bodyAPositionMass.w,
-      params.bodyASpin.xyz,
-      params.bodyAVelocityActive.w
+// The endpoint phase is frame-uniform. Render pipelines specialize it, so the
+// inactive Kerr-Schild providers are removed at compile time.
+fn spacetimePhase() -> i32 {
+  let blend = clamp(params.spacetimeControl.y, 0.0, 1.0);
+  if (SPACETIME_PHASE_MODE == 1 || (SPACETIME_PHASE_MODE < 0 && blend == 1.0)) {
+    return 1;
+  }
+  if (SPACETIME_PHASE_MODE == 0 || (SPACETIME_PHASE_MODE < 0 && blend == 0.0)) {
+    return 0;
+  }
+  return 2;
+}
+
+// Weighted terms at a point:
+//   g = eta + (1 - w)[A_A 2H_A l_A l_A + A_B 2H_B l_B l_B] + w 2H_R l_R l_R,
+// with w = C2 smootherstep(mergerBlend) and the optional attenuations A.
+fn spacetimeTerms(position: vec3<f32>, phase: i32) -> SpacetimeTerms {
+  var terms: SpacetimeTerms;
+  terms.a = zeroKerrSchildTerm();
+  terms.b = zeroKerrSchildTerm();
+  terms.r = zeroKerrSchildTerm();
+  terms.weightA = 0.0;
+  terms.weightB = 0.0;
+  terms.weightR = 0.0;
+  let blend = clamp(params.spacetimeControl.y, 0.0, 1.0);
+  if (phase == 1) {
+    terms.weightR = params.remnantVelocityActive.w;
+    terms.r = scaleTerm(
+      kerrSchildTerm(
+        position,
+        params.remnantPositionMass.xyz,
+        params.remnantPositionMass.w,
+        params.remnantSpinBlend.xyz,
+        params.remnantVelocityActive.w,
+        true
+      ),
+      terms.weightR
     );
-    holeB = boostedKerrSchildContribution(
-      position,
-      params.bodyBPositionMass.xyz,
-      FROZEN_METRIC_VELOCITY,
-      params.bodyBPositionMass.w,
-      params.bodyBSpin.xyz,
-      params.bodyBVelocityActive.w
-    );
-    weightA = dualScale(
-      attenuationWeight(holeB.cartesianRadius),
-      params.bodyAVelocityActive.w
-    );
-    weightB = dualScale(
-      attenuationWeight(holeA.cartesianRadius),
-      params.bodyBVelocityActive.w
-    );
-  } else if (
-    SPACETIME_PHASE_MODE == 1
-    || (SPACETIME_PHASE_MODE < 0 && blend == 1.0)
-  ) {
-    remnant = boostedKerrSchildContribution(
-      position,
-      params.remnantPositionMass.xyz,
-      FROZEN_METRIC_VELOCITY,
-      params.remnantPositionMass.w,
-      params.remnantSpinBlend.xyz,
-      params.remnantVelocityActive.w
-    );
-    weightRemnant = dualConstant(params.remnantVelocityActive.w);
-  } else {
-    let binaryWeight = 1.0 - blend;
-    let binaryActive = select(0.0, 1.0, binaryWeight > 1.0e-6);
-    let remnantActive = select(0.0, 1.0, blend > 1.0e-6);
-    holeA = boostedKerrSchildContribution(
-      position,
-      params.bodyAPositionMass.xyz,
-      FROZEN_METRIC_VELOCITY,
-      params.bodyAPositionMass.w,
-      params.bodyASpin.xyz,
-      params.bodyAVelocityActive.w * binaryActive
-    );
-    holeB = boostedKerrSchildContribution(
-      position,
-      params.bodyBPositionMass.xyz,
-      FROZEN_METRIC_VELOCITY,
-      params.bodyBPositionMass.w,
-      params.bodyBSpin.xyz,
-      params.bodyBVelocityActive.w * binaryActive
-    );
-    remnant = boostedKerrSchildContribution(
-      position,
-      params.remnantPositionMass.xyz,
-      FROZEN_METRIC_VELOCITY,
-      params.remnantPositionMass.w,
-      params.remnantSpinBlend.xyz,
-      params.remnantVelocityActive.w * remnantActive
-    );
-    weightA = dualScale(
-      attenuationWeight(holeB.cartesianRadius),
-      binaryWeight * params.bodyAVelocityActive.w
-    );
-    weightB = dualScale(
-      attenuationWeight(holeA.cartesianRadius),
-      binaryWeight * params.bodyBVelocityActive.w
-    );
-    weightRemnant = dualConstant(
-      blend * params.remnantVelocityActive.w
+    return terms;
+  }
+  var binaryWeight = 1.0;
+  if (phase == 2) {
+    binaryWeight = select(0.0, 1.0 - blend, 1.0 - blend > 1.0e-6);
+    let remnantWeight = select(0.0, blend, blend > 1.0e-6);
+    terms.weightR = remnantWeight * params.remnantVelocityActive.w;
+    terms.r = scaleTerm(
+      kerrSchildTerm(
+        position,
+        params.remnantPositionMass.xyz,
+        params.remnantPositionMass.w,
+        params.remnantSpinBlend.xyz,
+        params.remnantVelocityActive.w * select(0.0, 1.0, remnantWeight > 0.0),
+        true
+      ),
+      terms.weightR
     );
   }
+  let binaryActive = select(0.0, 1.0, binaryWeight > 0.0);
+  terms.weightA = binaryWeight * params.bodyAVelocityActive.w;
+  terms.weightB = binaryWeight * params.bodyBVelocityActive.w;
+  var termA = kerrSchildTerm(
+    position,
+    params.bodyAPositionMass.xyz,
+    params.bodyAPositionMass.w,
+    params.bodyASpin.xyz,
+    params.bodyAVelocityActive.w * binaryActive,
+    BINARY_SPIN_MODE != 0
+  );
+  var termB = kerrSchildTerm(
+    position,
+    params.bodyBPositionMass.xyz,
+    params.bodyBPositionMass.w,
+    params.bodyBSpin.xyz,
+    params.bodyBVelocityActive.w * binaryActive,
+    BINARY_SPIN_MODE != 0
+  );
+  if (params.spacetimeLimits.x >= 0.5) {
+    let attenuationA = companionAttenuation(position, params.bodyBPositionMass.xyz);
+    let attenuationB = companionAttenuation(position, params.bodyAPositionMass.xyz);
+    termA = attenuateTerm(termA, attenuationA);
+    termB = attenuateTerm(termB, attenuationB);
+    terms.weightA = terms.weightA * attenuationA.value;
+    terms.weightB = terms.weightB * attenuationB.value;
+  }
+  terms.a = scaleTerm(termA, binaryWeight * params.bodyAVelocityActive.w);
+  terms.b = scaleTerm(termB, binaryWeight * params.bodyBVelocityActive.w);
+  return terms;
+}
 
-  var g00 = dualConstant(-1.0);
-  var g0 = dualVectorConstant(vec3<f32>(0.0));
-  var spatial = identityDualMatrix();
-  g00 = dualAdd(g00, dualMul(holeA.g00, weightA));
-  g00 = dualAdd(g00, dualMul(holeB.g00, weightB));
-  g00 = dualAdd(g00, dualMul(remnant.g00, weightRemnant));
-  g0 = dualVectorAdd(
-    g0,
-    dualVectorScaleDual(holeA.g0, weightA)
+// Future-directed root of the null condition (1 + k) E^2 + 2 m E = P - q,
+// chosen in the form that avoids cancellation. sqrtDiscriminant equals
+// g^{t nu} p_nu = q / alpha > 0.
+fn nullEnergy(
+  onePlusK: f32,
+  m: f32,
+  pq: f32,
+  sqrtDiscriminant: f32
+) -> f32 {
+  return select(
+    (sqrtDiscriminant - m) / onePlusK,
+    pq / (sqrtDiscriminant + m),
+    m > 0.0
   );
-  g0 = dualVectorAdd(
-    g0,
-    dualVectorScaleDual(holeB.g0, weightB)
-  );
-  g0 = dualVectorAdd(
-    g0,
-    dualVectorScaleDual(remnant.g0, weightRemnant)
-  );
-  spatial = addDualMatrix(
-    spatial,
-    scaleDualMatrixDual(holeA.spatial, weightA)
-  );
-  spatial = addDualMatrix(
-    spatial,
-    scaleDualMatrixDual(holeB.spatial, weightB)
-  );
-  spatial = addDualMatrix(
-    spatial,
-    scaleDualMatrixDual(remnant.spatial, weightRemnant)
-  );
+}
 
-  let gammaCovariant = dualMatrixValue(spatial);
-  let determinant = dot(
-    gammaCovariant[0],
-    cross(gammaCovariant[1], gammaCovariant[2])
+fn lowRankValidity(
+  result: ptr<function, LowRankHamiltonian>,
+  capacitanceDeterminant: f32,
+  onePlusK: f32,
+  discriminant: f32
+) {
+  // det(I + N C) > 0 is the Lorentzian condition; alpha^2 = 1/(1 + k) >
+  // 1e-8 keeps the previous lapse threshold.
+  (*result).metricValid = select(
+    0.0,
+    1.0,
+    capacitanceDeterminant > 1.0e-6 && onePlusK > 1.0e-6 && onePlusK < 1.0e8
   );
-  let gammaInverse = inverse3x3(gammaCovariant);
-  let derivativeCovariantX = dualMatrixDerivative(spatial, 0u);
-  let derivativeCovariantY = dualMatrixDerivative(spatial, 1u);
-  let derivativeCovariantZ = dualMatrixDerivative(spatial, 2u);
-  let inverseProductX =
-    gammaInverse * derivativeCovariantX * gammaInverse;
-  let inverseProductY =
-    gammaInverse * derivativeCovariantY * gammaInverse;
-  let inverseProductZ =
-    gammaInverse * derivativeCovariantZ * gammaInverse;
-  let derivativeInverseX = mat3x3<f32>(
-    -inverseProductX[0],
-    -inverseProductX[1],
-    -inverseProductX[2]
+  // With these bounds every division above is bounded away from zero; the
+  // RK4 step still checks the accumulated state for non-finite values.
+  (*result).valid = select(
+    0.0,
+    1.0,
+    (*result).metricValid > 0.5 && discriminant > 1.0e-12
   );
-  let derivativeInverseY = mat3x3<f32>(
-    -inverseProductY[0],
-    -inverseProductY[1],
-    -inverseProductY[2]
-  );
-  let derivativeInverseZ = mat3x3<f32>(
-    -inverseProductZ[0],
-    -inverseProductZ[1],
-    -inverseProductZ[2]
-  );
-  let betaCovariant = dualVectorValue(g0);
-  let betaCovariantDerivativeX = dualVectorDerivative(g0, 0u);
-  let betaCovariantDerivativeY = dualVectorDerivative(g0, 1u);
-  let betaCovariantDerivativeZ = dualVectorDerivative(g0, 2u);
-  let shift = gammaInverse * betaCovariant;
-  let shiftDerivativeX = derivativeInverseX * betaCovariant
-    + gammaInverse * betaCovariantDerivativeX;
-  let shiftDerivativeY = derivativeInverseY * betaCovariant
-    + gammaInverse * betaCovariantDerivativeY;
-  let shiftDerivativeZ = derivativeInverseZ * betaCovariant
-    + gammaInverse * betaCovariantDerivativeZ;
-  let lapseSquared = dot(betaCovariant, shift) - g00.value;
-  let lapse = sqrt(max(lapseSquared, 1.0e-8));
-  let lapseSquaredGradient = vec3<f32>(
-    dot(betaCovariantDerivativeX, shift)
-      + dot(betaCovariant, shiftDerivativeX) - g00.gradient.x,
-    dot(betaCovariantDerivativeY, shift)
-      + dot(betaCovariant, shiftDerivativeY) - g00.gradient.y,
-    dot(betaCovariantDerivativeZ, shift)
-      + dot(betaCovariant, shiftDerivativeZ) - g00.gradient.z
-  );
+}
 
+// Low-rank form of the reduced null Hamiltonian. With g = eta + U C U^T
+// (columns l_a, C = diag(c_a)), Woodbury gives g^-1 = eta - L K L^T with
+// L_a = (-1, n_a), K = C (I + N C)^-1 and N_ab = n_a . n_b - 1 (N_aa = 0);
+// det(I + N C) > 0 exactly when g is Lorentzian. For p = (-E, p_vec) and
+// u_a = E + n_a . p_vec the null condition reads -E^2 + |p|^2 - u^T K u = 0,
+// a quadratic in E. The flow is
+//   dx/dt = (p - sum_a y_a n_a) / sqrt(D),   dp/dt = grad(u^T K u) / (2 sqrt(D))
+// with y = K u, z = (I + N C)^-1 u and, for fixed E and p,
+//   d(u^T K u) = 2 y^T du + z^T dC z - y^T dN y,
+// so only per-term scalar gradients are needed.
+fn lowRank1(term: KerrSchildTerm, momentum: vec3<f32>) -> LowRankHamiltonian {
+  let v = dot(term.n, momentum);
+  let c = term.c;
+  let onePlusK = 1.0 + c;
+  let m = c * v;
+  let pq = dot(momentum, momentum) - c * v * v;
+  let discriminant = m * m + onePlusK * pq;
+  let sqrtDiscriminant = sqrt(max(discriminant, 1.0e-30));
+  let energy = nullEnergy(onePlusK, m, pq, sqrtDiscriminant);
+  let u = energy + v;
+  let y = c * u;
+  let inverseTime = 1.0 / sqrtDiscriminant;
+  var result: LowRankHamiltonian;
+  result.hamiltonian = energy;
+  result.velocity = (momentum - y * term.n) * inverseTime;
+  result.momentumRate = (
+    2.0 * y * termJacobianTranspose(term, momentum, true)
+    + u * u * term.cGradient
+  ) * (0.5 * inverseTime);
+  lowRankValidity(&result, 1.0, onePlusK, discriminant);
+  return result;
+}
+
+fn lowRank2(
+  termA: KerrSchildTerm,
+  termB: KerrSchildTerm,
+  momentum: vec3<f32>
+) -> LowRankHamiltonian {
+  let va = dot(termA.n, momentum);
+  let vb = dot(termB.n, momentum);
+  let coupling = dot(termA.n, termB.n) - 1.0;
+  let ca = termA.c;
+  let cb = termB.c;
+  // A = [[1, N cb], [N ca, 1]]; A z = r gives z = [r_a - N cb r_b, r_b - N ca r_a] / det.
+  let determinant = 1.0 - coupling * coupling * ca * cb;
+  let inverseDeterminant = 1.0 / determinant;
+  let onesA = (1.0 - coupling * cb) * inverseDeterminant;
+  let onesB = (1.0 - coupling * ca) * inverseDeterminant;
+  let projectedA = (va - coupling * cb * vb) * inverseDeterminant;
+  let projectedB = (vb - coupling * ca * va) * inverseDeterminant;
+  let onePlusK = 1.0 + ca * onesA + cb * onesB;
+  let m = ca * projectedA + cb * projectedB;
+  let pq = dot(momentum, momentum)
+    - (ca * projectedA * va + cb * projectedB * vb);
+  let discriminant = m * m + onePlusK * pq;
+  let sqrtDiscriminant = sqrt(max(discriminant, 1.0e-30));
+  let energy = nullEnergy(onePlusK, m, pq, sqrtDiscriminant);
+  let za = energy * onesA + projectedA;
+  let zb = energy * onesB + projectedB;
+  let ya = ca * za;
+  let yb = cb * zb;
+  let inverseTime = 1.0 / sqrtDiscriminant;
+  var result: LowRankHamiltonian;
+  result.hamiltonian = energy;
+  result.velocity = (momentum - ya * termA.n - yb * termB.n) * inverseTime;
+  let couplingGradient = termJacobianTranspose(termA, termB.n, BINARY_SPIN_MODE != 0)
+    + termJacobianTranspose(termB, termA.n, BINARY_SPIN_MODE != 0);
+  result.momentumRate = (
+    2.0 * (
+      ya * termJacobianTranspose(termA, momentum, BINARY_SPIN_MODE != 0)
+      + yb * termJacobianTranspose(termB, momentum, BINARY_SPIN_MODE != 0)
+    )
+    + za * za * termA.cGradient
+    + zb * zb * termB.cGradient
+    - 2.0 * ya * yb * couplingGradient
+  ) * (0.5 * inverseTime);
+  lowRankValidity(&result, determinant, onePlusK, discriminant);
+  return result;
+}
+
+fn lowRank3(
+  termA: KerrSchildTerm,
+  termB: KerrSchildTerm,
+  termR: KerrSchildTerm,
+  momentum: vec3<f32>
+) -> LowRankHamiltonian {
+  let v = vec3<f32>(
+    dot(termA.n, momentum),
+    dot(termB.n, momentum),
+    dot(termR.n, momentum)
+  );
+  let c = vec3<f32>(termA.c, termB.c, termR.c);
+  let nab = dot(termA.n, termB.n) - 1.0;
+  let nar = dot(termA.n, termR.n) - 1.0;
+  let nbr = dot(termB.n, termR.n) - 1.0;
+  // A_ij = delta_ij + N_ij c_j; rows are the equations.
+  let m01 = nab * c.y;
+  let m02 = nar * c.z;
+  let m10 = nab * c.x;
+  let m12 = nbr * c.z;
+  let m20 = nar * c.x;
+  let m21 = nbr * c.y;
+  let a00 = 1.0 - m12 * m21;
+  let a01 = m02 * m21 - m01;
+  let a02 = m01 * m12 - m02;
+  let a10 = m12 * m20 - m10;
+  let a11 = 1.0 - m02 * m20;
+  let a12 = m02 * m10 - m12;
+  let a20 = m10 * m21 - m20;
+  let a21 = m01 * m20 - m21;
+  let a22 = 1.0 - m01 * m10;
+  let determinant = a00 + m01 * a10 + m02 * a20;
+  let inverseDeterminant = 1.0 / determinant;
+  let adjugateRow0 = vec3<f32>(a00, a01, a02);
+  let adjugateRow1 = vec3<f32>(a10, a11, a12);
+  let adjugateRow2 = vec3<f32>(a20, a21, a22);
+  let ones = vec3<f32>(
+    adjugateRow0.x + adjugateRow0.y + adjugateRow0.z,
+    adjugateRow1.x + adjugateRow1.y + adjugateRow1.z,
+    adjugateRow2.x + adjugateRow2.y + adjugateRow2.z
+  ) * inverseDeterminant;
+  let projected = vec3<f32>(
+    dot(adjugateRow0, v),
+    dot(adjugateRow1, v),
+    dot(adjugateRow2, v)
+  ) * inverseDeterminant;
+  let onePlusK = 1.0 + dot(c, ones);
+  let m = dot(c, projected);
+  let pq = dot(momentum, momentum) - dot(c * projected, v);
+  let discriminant = m * m + onePlusK * pq;
+  let sqrtDiscriminant = sqrt(max(discriminant, 1.0e-30));
+  let energy = nullEnergy(onePlusK, m, pq, sqrtDiscriminant);
+  let z = energy * ones + projected;
+  let y = c * z;
+  let inverseTime = 1.0 / sqrtDiscriminant;
+  var result: LowRankHamiltonian;
+  result.hamiltonian = energy;
+  result.velocity = (
+    momentum - y.x * termA.n - y.y * termB.n - y.z * termR.n
+  ) * inverseTime;
+  let couplingAB = termJacobianTranspose(termA, termB.n, BINARY_SPIN_MODE != 0)
+    + termJacobianTranspose(termB, termA.n, BINARY_SPIN_MODE != 0);
+  let couplingAR = termJacobianTranspose(termA, termR.n, BINARY_SPIN_MODE != 0)
+    + termJacobianTranspose(termR, termA.n, true);
+  let couplingBR = termJacobianTranspose(termB, termR.n, BINARY_SPIN_MODE != 0)
+    + termJacobianTranspose(termR, termB.n, true);
+  result.momentumRate = (
+    2.0 * (
+      y.x * termJacobianTranspose(termA, momentum, BINARY_SPIN_MODE != 0)
+      + y.y * termJacobianTranspose(termB, momentum, BINARY_SPIN_MODE != 0)
+      + y.z * termJacobianTranspose(termR, momentum, true)
+    )
+    + z.x * z.x * termA.cGradient
+    + z.y * z.y * termB.cGradient
+    + z.z * z.z * termR.cGradient
+    - 2.0 * (
+      y.x * y.y * couplingAB
+      + y.x * y.z * couplingAR
+      + y.y * y.z * couplingBR
+    )
+  ) * (0.5 * inverseTime);
+  lowRankValidity(&result, determinant, onePlusK, discriminant);
+  return result;
+}
+
+fn addTermGeometry(
+  sample: ptr<function, GeodesicSample>,
+  term: KerrSchildTerm,
+  weight: f32,
+  horizonRadius: f32,
+  photonRadius: f32
+) {
   // Capture geometry uses weight-scaled radii. Near its own centre a
   // Kerr-Schild term with metric weight w acts like a hole of mass w m, so its
   // horizon and innermost photon orbit grow continuously from zero during the
   // merger transition instead of switching on at an arbitrary weight.
-  var horizonDistance = 1.0e6;
-  var photonMargin = 1.0e6;
-  var photonRadialGradient = vec3<f32>(0.0);
-  var stepDistance = 1.0e6;
-  var failureCaptureMargin = 1.0e6;
-  if (weightA.value > 1.0e-4) {
-    let w = min(weightA.value, 1.0);
-    horizonDistance = min(
-      horizonDistance,
-      holeA.kerrRadius - w * holeA.horizonRadius
+  if (weight > 1.0e-4) {
+    let w = min(weight, 1.0);
+    let horizonDistance = term.kerrRadius - w * horizonRadius;
+    (*sample).horizonDistance = min((*sample).horizonDistance, horizonDistance);
+    (*sample).stepDistance = min(
+      (*sample).stepDistance,
+      max(horizonDistance, 0.5 * term.kerrRadius)
     );
-    stepDistance = min(
-      stepDistance,
-      max(holeA.kerrRadius - w * holeA.horizonRadius, 0.5 * holeA.kerrRadius)
-    );
-    let margin = holeA.kerrRadius - w * holeA.photonRadius;
-    if (margin < photonMargin) {
-      photonMargin = margin;
-      photonRadialGradient = holeA.kerrRadiusGradient;
-    }
-  }
-  if (weightB.value > 1.0e-4) {
-    let w = min(weightB.value, 1.0);
-    horizonDistance = min(
-      horizonDistance,
-      holeB.kerrRadius - w * holeB.horizonRadius
-    );
-    stepDistance = min(
-      stepDistance,
-      max(holeB.kerrRadius - w * holeB.horizonRadius, 0.5 * holeB.kerrRadius)
-    );
-    let margin = holeB.kerrRadius - w * holeB.photonRadius;
-    if (margin < photonMargin) {
-      photonMargin = margin;
-      photonRadialGradient = holeB.kerrRadiusGradient;
-    }
-  }
-  if (weightRemnant.value > 1.0e-4) {
-    let w = min(weightRemnant.value, 1.0);
-    horizonDistance = min(
-      horizonDistance,
-      remnant.kerrRadius - w * remnant.horizonRadius
-    );
-    stepDistance = min(
-      stepDistance,
-      max(remnant.kerrRadius - w * remnant.horizonRadius, 0.5 * remnant.kerrRadius)
-    );
-    let margin = remnant.kerrRadius - w * remnant.photonRadius;
-    if (margin < photonMargin) {
-      photonMargin = margin;
-      photonRadialGradient = remnant.kerrRadiusGradient;
+    let margin = term.kerrRadius - w * photonRadius;
+    if (margin < (*sample).photonMargin) {
+      (*sample).photonMargin = margin;
+      (*sample).photonRadialGradient = term.kerrRadiusGradient;
     }
   }
   // Failure capture covers every term present in the metric, however small
   // its weight: early in the merger blend the remnant's ring singularity can
   // break the superposition near the centre of mass while w < 1e-4.
-  if (weightA.value > 0.0) {
-    failureCaptureMargin = min(
-      failureCaptureMargin,
-      holeA.kerrRadius - holeA.photonRadius
+  if (weight > 0.0) {
+    (*sample).failureCaptureMargin = min(
+      (*sample).failureCaptureMargin,
+      term.kerrRadius - photonRadius
     );
   }
-  if (weightB.value > 0.0) {
-    failureCaptureMargin = min(
-      failureCaptureMargin,
-      holeB.kerrRadius - holeB.photonRadius
-    );
-  }
-  if (weightRemnant.value > 0.0) {
-    failureCaptureMargin = min(
-      failureCaptureMargin,
-      remnant.kerrRadius - remnant.photonRadius
-    );
-  }
-  let activeRegularization = max(
-    max(
-      weightA.value * holeA.regularized,
-      weightB.value * holeB.regularized
-    ),
-    weightRemnant.value * remnant.regularized
-  );
-
-  var result: ADMFields;
-  result.lapse = lapse;
-  result.lapseGradient = lapseSquaredGradient / (2.0 * lapse);
-  result.shift = shift;
-  result.shiftDerivativeX = shiftDerivativeX;
-  result.shiftDerivativeY = shiftDerivativeY;
-  result.shiftDerivativeZ = shiftDerivativeZ;
-  result.inverseSpatialMetric = gammaInverse;
-  result.inverseMetricDerivativeX = derivativeInverseX;
-  result.inverseMetricDerivativeY = derivativeInverseY;
-  result.inverseMetricDerivativeZ = derivativeInverseZ;
-  result.spatialMetric = gammaCovariant;
-  result.horizonDistance = horizonDistance;
-  result.photonMargin = photonMargin;
-  result.photonRadialGradient = photonRadialGradient;
-  result.stepDistance = stepDistance;
-  result.failureCaptureMargin = failureCaptureMargin;
-  result.curvatureScale = max(
-    max(
-      weightA.value * holeA.curvatureScale,
-      weightB.value * holeB.curvatureScale
-    ),
-    weightRemnant.value * remnant.curvatureScale
-  );
-  result.valid = select(0.0, 1.0,
-    determinant > 1.0e-7
-    && lapseSquared > 1.0e-8
-    && activeRegularization < 0.5
-    && finiteScalar(lapse)
-    && finiteVector(shift)
-  );
-  return result;
 }
 
-fn metricDerivative(
-  fields: ADMFields,
-  axis: i32
-) -> mat3x3<f32> {
-  if (axis == 0) {
-    return fields.inverseMetricDerivativeX;
-  }
-  if (axis == 1) {
-    return fields.inverseMetricDerivativeY;
-  }
-  return fields.inverseMetricDerivativeZ;
-}
-
-fn shiftDerivative(fields: ADMFields, axis: i32) -> vec3<f32> {
-  if (axis == 0) {
-    return fields.shiftDerivativeX;
-  }
-  if (axis == 1) {
-    return fields.shiftDerivativeY;
-  }
-  return fields.shiftDerivativeZ;
-}
-
-// Reduced 3+1 null Hamiltonian:
-//   H(x,p) = alpha sqrt(gamma^ij p_i p_j) - beta^i p_i = -p_t
-// The metric jet above supplies analytic spatial derivatives in one provider
-// evaluation, avoiding the seven metric samples required by finite differences.
-fn hamiltonianRhs(
-  fields: ADMFields,
+// Reduced 3+1 null Hamiltonian H(x,p) = alpha sqrt(gamma^ij p_i p_j) - beta^i p_i
+// = -p_t and its flow at one point, evaluated through the low-rank form of the
+// superposed Kerr-Schild metric (one provider evaluation per RK4 stage).
+fn evaluateGeodesic(
+  position: vec3<f32>,
   momentum: vec3<f32>,
-  conservedEnergy: f32
-) -> HamiltonianRhs {
-  let raisedMomentum = fields.inverseSpatialMetric * momentum;
-  let qSquared = dot(momentum, raisedMomentum);
-  let q = sqrt(max(qSquared, 1.0e-12));
-  let reducedHamiltonian = fields.lapse * q
-    - dot(fields.shift, momentum);
-  var momentumRate = vec3<f32>(0.0);
-  for (var axis: i32 = 0; axis < 3; axis = axis + 1) {
-    let inverseDerivative = metricDerivative(fields, axis);
-    let shiftGradient = shiftDerivative(fields, axis);
-    let hamiltonianGradient =
-      fields.lapseGradient[axis] * q
-      + 0.5 * fields.lapse
-        * dot(momentum, inverseDerivative * momentum) / q
-      - dot(shiftGradient, momentum);
-    momentumRate[axis] = -hamiltonianGradient;
+  radii: SpacetimeRadii
+) -> GeodesicSample {
+  let phase = spacetimePhase();
+  let terms = spacetimeTerms(position, phase);
+  var flow: LowRankHamiltonian;
+  if (phase == 1) {
+    flow = lowRank1(terms.r, momentum);
+  } else if (phase == 0) {
+    flow = lowRank2(terms.a, terms.b, momentum);
+  } else {
+    flow = lowRank3(terms.a, terms.b, terms.r, momentum);
   }
-  let velocity = fields.lapse * raisedMomentum / q - fields.shift;
-  let nullNumerator =
-    -(conservedEnergy + dot(fields.shift, momentum))
-      * (conservedEnergy + dot(fields.shift, momentum))
-      / max(fields.lapse * fields.lapse, 1.0e-12)
-    + qSquared;
-  let residual = abs(nullNumerator) / max(qSquared, 1.0e-8);
-
-  var result: HamiltonianRhs;
-  result.velocity = velocity;
-  result.momentumRate = momentumRate;
-  result.eulerianFrequency = q;
-  result.reducedHamiltonian = reducedHamiltonian;
-  result.nullResidual = residual;
-  result.valid = select(0.0, 1.0,
-    fields.valid > 0.5
-    && qSquared > 1.0e-12
-    && finiteVector(velocity)
-    && finiteVector(momentumRate)
-    && finiteScalar(residual)
+  var sample: GeodesicSample;
+  sample.velocity = flow.velocity;
+  sample.momentumRate = flow.momentumRate;
+  sample.hamiltonian = flow.hamiltonian;
+  sample.horizonDistance = 1.0e6;
+  sample.photonMargin = 1.0e6;
+  sample.photonRadialGradient = vec3<f32>(0.0);
+  sample.stepDistance = 1.0e6;
+  sample.failureCaptureMargin = 1.0e6;
+  addTermGeometry(&sample, terms.a, terms.weightA, radii.horizonA, radii.photonA);
+  addTermGeometry(&sample, terms.b, terms.weightB, radii.horizonB, radii.photonB);
+  addTermGeometry(&sample, terms.r, terms.weightR, radii.horizonR, radii.photonR);
+  sample.alignedField = length(
+    terms.a.c * terms.a.n + terms.b.c * terms.b.n + terms.r.c * terms.r.n
   );
-  return result;
+  let activeRegularization = max(
+    max(terms.weightA * terms.a.regularized, terms.weightB * terms.b.regularized),
+    terms.weightR * terms.r.regularized
+  );
+  sample.metricValid = select(
+    0.0,
+    1.0,
+    flow.metricValid > 0.5 && activeRegularization < 0.5
+  );
+  sample.valid = select(
+    0.0,
+    1.0,
+    flow.valid > 0.5 && activeRegularization < 0.5
+  );
+  return sample;
 }
 
-fn hamiltonianKinematics(
-  fields: ADMFields,
-  momentum: vec3<f32>
-) -> HamiltonianKinematics {
-  let raisedMomentum = fields.inverseSpatialMetric * momentum;
-  let qSquared = dot(momentum, raisedMomentum);
-  let q = sqrt(max(qSquared, 1.0e-12));
-  let velocity = fields.lapse * raisedMomentum / q - fields.shift;
-  let reducedHamiltonian = fields.lapse * q
-    - dot(fields.shift, momentum);
-  var result: HamiltonianKinematics;
-  result.velocity = velocity;
-  result.eulerianFrequency = q;
-  result.reducedHamiltonian = reducedHamiltonian;
-  result.valid = select(0.0, 1.0,
-    fields.valid > 0.5
-    && qSquared > 1.0e-12
-    && finiteVector(velocity)
-    && finiteScalar(reducedHamiltonian)
+fn termOuter(term: KerrSchildTerm) -> mat3x3<f32> {
+  return mat3x3<f32>(
+    term.n * (term.c * term.n.x),
+    term.n * (term.c * term.n.y),
+    term.n * (term.c * term.n.z)
   );
-  return result;
+}
+
+// Lapse, shift and spatial metric at a point (no derivatives). The covariant
+// metric is g_tt = -1 + sum c_a, g_ti = sum c_a n_a, g_ij = delta_ij + sum
+// c_a n_a n_a; the inverse follows from the same capacitance system, with
+// alpha = 1/sqrt(1 + k) and beta^i = sum_a (K 1)_a n_a / (1 + k).
+fn metricValuesAt(position: vec3<f32>) -> MetricValues {
+  let phase = spacetimePhase();
+  let terms = spacetimeTerms(position, phase);
+  let radii = spacetimeRadii();
+  var values: MetricValues;
+  values.gtt = -1.0 + terms.a.c + terms.b.c + terms.r.c;
+  values.shiftCovariant = terms.a.c * terms.a.n
+    + terms.b.c * terms.b.n
+    + terms.r.c * terms.r.n;
+  values.spatialMetric = mat3x3<f32>(
+    vec3<f32>(1.0, 0.0, 0.0),
+    vec3<f32>(0.0, 1.0, 0.0),
+    vec3<f32>(0.0, 0.0, 1.0)
+  ) + termOuter(terms.a) + termOuter(terms.b) + termOuter(terms.r);
+  var ones = vec3<f32>(1.0, 0.0, 0.0);
+  var determinant = 1.0;
+  let c = vec3<f32>(terms.a.c, terms.b.c, terms.r.c);
+  if (phase == 0) {
+    let coupling = dot(terms.a.n, terms.b.n) - 1.0;
+    determinant = 1.0 - coupling * coupling * c.x * c.y;
+    ones = vec3<f32>(1.0 - coupling * c.y, 1.0 - coupling * c.x, 0.0)
+      / determinant;
+  } else if (phase == 2) {
+    let nab = dot(terms.a.n, terms.b.n) - 1.0;
+    let nar = dot(terms.a.n, terms.r.n) - 1.0;
+    let nbr = dot(terms.b.n, terms.r.n) - 1.0;
+    let m01 = nab * c.y;
+    let m02 = nar * c.z;
+    let m10 = nab * c.x;
+    let m12 = nbr * c.z;
+    let m20 = nar * c.x;
+    let m21 = nbr * c.y;
+    let a00 = 1.0 - m12 * m21;
+    let a10 = m12 * m20 - m10;
+    let a20 = m10 * m21 - m20;
+    determinant = a00 + m01 * a10 + m02 * a20;
+    ones = vec3<f32>(
+      a00 + (m02 * m21 - m01) + (m01 * m12 - m02),
+      a10 + (1.0 - m02 * m20) + (m02 * m10 - m12),
+      a20 + (m01 * m20 - m21) + (1.0 - m01 * m10)
+    ) / determinant;
+  } else {
+    ones = vec3<f32>(0.0, 0.0, 1.0);
+  }
+  let weightedOnes = c * ones;
+  let onePlusK = 1.0 + weightedOnes.x + weightedOnes.y + weightedOnes.z;
+  values.lapse = inverseSqrt(max(onePlusK, 1.0e-8));
+  values.shift = (
+    weightedOnes.x * terms.a.n
+    + weightedOnes.y * terms.b.n
+    + weightedOnes.z * terms.r.n
+  ) / max(onePlusK, 1.0e-8);
+  var horizonDistance = 1.0e6;
+  if (terms.weightA > 1.0e-4) {
+    horizonDistance = min(horizonDistance, terms.a.kerrRadius - min(terms.weightA, 1.0) * radii.horizonA);
+  }
+  if (terms.weightB > 1.0e-4) {
+    horizonDistance = min(horizonDistance, terms.b.kerrRadius - min(terms.weightB, 1.0) * radii.horizonB);
+  }
+  if (terms.weightR > 1.0e-4) {
+    horizonDistance = min(horizonDistance, terms.r.kerrRadius - min(terms.weightR, 1.0) * radii.horizonR);
+  }
+  values.horizonDistance = horizonDistance;
+  let activeRegularization = max(
+    max(terms.weightA * terms.a.regularized, terms.weightB * terms.b.regularized),
+    terms.weightR * terms.r.regularized
+  );
+  values.valid = select(
+    0.0,
+    1.0,
+    determinant > 1.0e-6
+      && onePlusK > 1.0e-6
+      && onePlusK < 1.0e8
+      && activeRegularization < 0.5
+      && finiteScalar(values.lapse)
+      && finiteVector(values.shift)
+  );
+  return values;
 }
 
 fn unresolvedResult() -> RayResult {
@@ -2051,16 +2029,15 @@ struct StaticObserverFrame {
   valid: f32,
 };
 
-fn staticObserverFrame(fields: ADMFields) -> StaticObserverFrame {
-  let shiftCovariant = fields.spatialMetric * fields.shift;
-  let lapseSquared = fields.lapse * fields.lapse
-    - dot(shiftCovariant, fields.shift);
+fn staticObserverFrame(values: MetricValues) -> StaticObserverFrame {
+  let shiftCovariant = values.shiftCovariant;
+  let lapseSquared = -values.gtt;
   var frame: StaticObserverFrame;
-  frame.valid = select(0.0, 1.0, lapseSquared > 1.0e-6);
+  frame.valid = select(0.0, 1.0, lapseSquared > 1.0e-6 && values.valid > 0.5);
   frame.lapse = sqrt(max(lapseSquared, 1.0e-6));
   frame.shiftCovariant = shiftCovariant;
   let inverseLapseSquared = 1.0 / (frame.lapse * frame.lapse);
-  frame.metric = fields.spatialMetric + mat3x3<f32>(
+  frame.metric = values.spatialMetric + mat3x3<f32>(
     shiftCovariant * (shiftCovariant.x * inverseLapseSquared),
     shiftCovariant * (shiftCovariant.y * inverseLapseSquared),
     shiftCovariant * (shiftCovariant.z * inverseLapseSquared)
@@ -2104,20 +2081,51 @@ fn observerCameraDirection(
 // reversal maps Kerr to Kerr with the opposite spin, which has the same
 // innermost orbit, so the test also holds for these past-directed rays. In the
 // superposed binary metric it is applied to the nearest term.
+//
+// Hover capture. Around an isolated hole, wherever its Kerr-Schild field 2H is
+// at least 2/3 (r <= 3m for Schwarzschild), every photon whose past-directed
+// ray still reaches the sky moves at an ingoing Kerr-Schild coordinate speed of
+// at least 1/sqrt(3), or 0.55 for Kerr up to chi = 0.95. A slower one is an
+// outgoing photon peeling off a trapped surface: traced backward it only
+// approaches the horizon, never the sky. During the merger blend such rays
+// hover at the blended metric's horizon, outside the weight-scaled capture
+// radii, until the step budget runs out; this ends them early with the same
+// outcome. In the superposition the field is summed along the terms' null
+// directions: aligned terms add like one hole, while between two holes they
+// cancel, and there light is slow along the axis (~0.19 at the start of the
+// blend) yet escapes. The ray must also be inside the unscaled photon orbit of
+// a term present in the metric.
+const HOVER_CAPTURE_SPEED: f32 = 0.2;
+const HOVER_CAPTURE_FIELD: f32 = 2.0 / 3.0;
+
 fn insidePhotonCapture(
-  fields: ADMFields,
+  sample: GeodesicSample,
   backwardVelocity: vec3<f32>
 ) -> bool {
-  return fields.photonMargin < 0.0
-    && dot(fields.photonRadialGradient, backwardVelocity) < 0.0;
+  let photonOrbitCapture = sample.photonMargin < 0.0
+    && dot(sample.photonRadialGradient, backwardVelocity) < 0.0;
+  let hoverCapture = sample.failureCaptureMargin < 0.0
+    && sample.alignedField >= HOVER_CAPTURE_FIELD
+    && length(backwardVelocity) < HOVER_CAPTURE_SPEED;
+  return photonOrbitCapture || hoverCapture;
 }
 
 fn traceStrongField(screen: vec2<f32>, tanHalfFov: f32) -> RayResult {
+  return traceStrongFieldRay(screen, tanHalfFov, 0.0);
+}
+
+// footprintAngle > 0 only for sparse coarse nodes: the angular half-width of
+// the beam the node stands for (see SPARSE_FOOTPRINT_SPACINGS).
+fn traceStrongFieldRay(
+  screen: vec2<f32>,
+  tanHalfFov: f32,
+  footprintAngle: f32
+) -> RayResult {
   var result = unresolvedResult();
   var position = params.cameraPosRadius.xyz;
-  let frameTime = params.spacetimeControl.x;
-  let observerFields = sampleSpacetime(frameTime, position);
-  if (observerFields.valid < 0.5) {
+  let radii = spacetimeRadii();
+  let observerMetric = metricValuesAt(position);
+  if (observerMetric.valid < 0.5) {
     result.terminationReason = 2.0;
     return result;
   }
@@ -2128,7 +2136,7 @@ fn traceStrongField(screen: vec2<f32>, tanHalfFov: f32) -> RayResult {
   // n^j and integrate Hamilton's equations backward in coordinate time. This
   // arriving-photon convention fixes the sign of frame dragging and of the
   // Doppler/gravitational shifts. The asymptotic energy is -p_t = alpha_s.
-  let observerFrame = staticObserverFrame(observerFields);
+  let observerFrame = staticObserverFrame(observerMetric);
   if (observerFrame.valid < 0.5) {
     result.terminationReason = 2.0;
     return result;
@@ -2143,16 +2151,11 @@ fn traceStrongField(screen: vec2<f32>, tanHalfFov: f32) -> RayResult {
     1.0 - dot(observerFrame.shiftCovariant, initialDirection) / staticLapse
   ) / staticLapse;
   var momentum = observerFrame.shiftCovariant * photonTime
-    - observerFields.spatialMetric * initialDirection;
+    - observerMetric.spatialMetric * initialDirection;
   let observerQ = 1.0;
-  let conservedEnergy = hamiltonianKinematics(
-    observerFields,
-    momentum
-  ).reducedHamiltonian;
-  if (!finiteScalar(conservedEnergy) || conservedEnergy <= 1.0e-6) {
-    result.terminationReason = 2.0;
-    return result;
-  }
+  // The conserved energy E = -p_t (= alpha_s analytically) is taken from the
+  // loop's first evaluation, which samples this same point.
+  var conservedEnergy = 0.0;
 
   let minimumStep = clamp(params.sceneStrongIntegrator.x, 0.002, 0.5);
   let maximumStep = clamp(
@@ -2160,7 +2163,7 @@ fn traceStrongField(screen: vec2<f32>, tanHalfFov: f32) -> RayResult {
     minimumStep,
     ${STRONG_FIELD_MAXIMUM_STEP_M.toFixed(1)}
   );
-  // Each RK4 step is this fraction of fields.stepDistance, so steps shrink
+  // Each RK4 step is this fraction of sample.stepDistance, so steps shrink
   // near the holes and grow geometrically in the far field.
   let stepFraction = clamp(params.sceneStrongIntegrator.z, 0.02, 1.0);
   let residualFail = clamp(params.sceneStrongIntegrator.w, 1.0e-4, 0.5);
@@ -2196,36 +2199,42 @@ fn traceStrongField(screen: vec2<f32>, tanHalfFov: f32) -> RayResult {
   var sumP = vec3<f32>(0.0);
   var evalPosition = position;
   var evalMomentum = momentum;${diskMidpointDeclaration}
-  var jets = 1.0;
+  var jets = 0.0;
 
   for (
     var iteration: i32 = 0;
     iteration < MAX_RK4_STEPS * 4 + 16;
     iteration = iteration + 1
   ) {
-    let fields = sampleSpacetime(frameTime, evalPosition);
+    let sample = evaluateGeodesic(evalPosition, evalMomentum, radii);
     jets = jets + 1.0;
     result.iterations = jets;
+    var momentumScale = 1.0;
+    if (iteration == 0) {
+      conservedEnergy = sample.hamiltonian;
+      if (!finiteScalar(conservedEnergy) || conservedEnergy <= 1.0e-6) {
+        result.terminationReason = 2.0;
+        return result;
+      }
+    }
 
     if (stage == 0) {
       minimumHorizonDistance = min(
         minimumHorizonDistance,
-        fields.horizonDistance
+        sample.horizonDistance
       );
-      if (fields.horizonDistance <= capturePadding) {
+      if (sample.horizonDistance <= capturePadding) {
         result.outcome = RAY_CAPTURED;
         result.lookback = lookback;
         result.hamiltonianResidual = maximumResidual;
         result.minimumHorizonDistance = minimumHorizonDistance;
         return result;
       }
-      let kinematics = hamiltonianKinematics(fields, evalMomentum);
       var deviation = 1.0;
-      let kinematicsValid = fields.valid > 0.5
-        && kinematics.valid > 0.5
-        && kinematics.reducedHamiltonian > 1.0e-8;
+      let kinematicsValid = sample.valid > 0.5
+        && sample.hamiltonian > 1.0e-8;
       if (kinematicsValid) {
-        deviation = abs(kinematics.reducedHamiltonian / conservedEnergy - 1.0);
+        deviation = abs(sample.hamiltonian / conservedEnergy - 1.0);
       }
       maximumResidual = max(maximumResidual, deviation);
       if (
@@ -2236,32 +2245,33 @@ fn traceStrongField(screen: vec2<f32>, tanHalfFov: f32) -> RayResult {
         // Inside an innermost photon orbit a ray that came from outside cannot
         // escape (and during the merger blend that region is inside the
         // common horizon), so an unrecoverable sample there is a capture.
-        if (fields.failureCaptureMargin < 0.0) {
+        if (sample.failureCaptureMargin < 0.0) {
           result.outcome = RAY_CAPTURED;
           result.lookback = lookback;
           result.hamiltonianResidual = maximumResidual;
           result.minimumHorizonDistance = minimumHorizonDistance;
           return result;
         }
-        result.terminationReason = select(3.0, 2.0, fields.valid < 0.5);
+        result.terminationReason = select(3.0, 2.0, sample.metricValid < 0.5);
         result.hamiltonianResidual = max(maximumResidual, 1.0);
         result.minimumHorizonDistance = minimumHorizonDistance;
         return result;
       }
       // H is homogeneous of degree one in p, so this rescaling restores the
-      // conserved energy exactly without changing the spatial path.
-      evalMomentum = evalMomentum
-        * (conservedEnergy / kinematics.reducedHamiltonian);
+      // conserved energy exactly without changing the spatial path. The flow
+      // was evaluated before rescaling: dx/dt is of degree zero and dp/dt of
+      // degree one in p, so only the momentum rate scales.
+      momentumScale = conservedEnergy / sample.hamiltonian;
+      evalMomentum = evalMomentum * momentumScale;
       stepMomentum = evalMomentum;
     }
 
-    let rhs = hamiltonianRhs(fields, evalMomentum, conservedEnergy);
-    let derivativeX = -rhs.velocity;
-    let derivativeP = -rhs.momentumRate;
-    let derivativeValid = fields.valid > 0.5 && rhs.valid > 0.5;
+    let derivativeX = -sample.velocity;
+    let derivativeP = -sample.momentumRate * momentumScale;
+    let derivativeValid = sample.valid > 0.5;
 
     if (stage == 0) {
-      if (insidePhotonCapture(fields, derivativeX)) {
+      if (insidePhotonCapture(sample, derivativeX)) {
         result.outcome = RAY_CAPTURED;
         result.lookback = lookback;
         result.hamiltonianResidual = maximumResidual;
@@ -2295,7 +2305,7 @@ fn traceStrongField(screen: vec2<f32>, tanHalfFov: f32) -> RayResult {
         // A ray still circling inside an innermost photon orbit when the
         // budget runs out is falling in slowly (typical of the blended merger
         // metric); elsewhere exhaustion stays unresolved.
-        if (fields.failureCaptureMargin < 0.0) {
+        if (sample.failureCaptureMargin < 0.0) {
           result.outcome = RAY_CAPTURED;
           result.lookback = lookback;
           result.hamiltonianResidual = maximumResidual;
@@ -2309,7 +2319,7 @@ fn traceStrongField(screen: vec2<f32>, tanHalfFov: f32) -> RayResult {
         break;
       }
       if (!derivativeValid) {
-        if (fields.failureCaptureMargin < 0.0) {
+        if (sample.failureCaptureMargin < 0.0) {
           result.outcome = RAY_CAPTURED;
           result.lookback = lookback;
           result.hamiltonianResidual = maximumResidual;
@@ -2321,8 +2331,15 @@ fn traceStrongField(screen: vec2<f32>, tanHalfFov: f32) -> RayResult {
         result.minimumHorizonDistance = minimumHorizonDistance;
         return result;
       }
+      let outbound = radius > FAR_FIELD_RADIUS_M
+        && dot(stepPosition, derivativeX) > 0.0;
+      let effectiveFraction = select(
+        stepFraction,
+        min(FAR_FIELD_GROWTH * stepFraction, FAR_FIELD_MAXIMUM_FRACTION),
+        outbound
+      );
       stepSize = clamp(
-        stepFraction * max(fields.stepDistance, 0.0) * retryScale,
+        effectiveFraction * max(sample.stepDistance, 0.0) * retryScale,
         minimumStep,
         maximumStep
       );
@@ -2339,7 +2356,7 @@ fn traceStrongField(screen: vec2<f32>, tanHalfFov: f32) -> RayResult {
       // A stage left the valid metric domain. Inside an unscaled innermost
       // photon orbit this is a capture; elsewhere retry the step from its
       // start with a quarter of the size, or give up at the minimum step.
-      if (fields.failureCaptureMargin < 0.0) {
+      if (sample.failureCaptureMargin < 0.0) {
         result.outcome = RAY_CAPTURED;
         result.lookback = lookback;
         result.hamiltonianResidual = maximumResidual;
@@ -2657,10 +2674,140 @@ fn accumulationJitter() -> vec2<f32> {
   );
 }
 
+fn screenForPixelCentre(pixelCentre: vec2<f32>) -> vec2<f32> {
+  let resolution = max(params.resolutionTimeMass.xy, vec2<f32>(1.0));
+  let uv = pixelCentre / resolution;
+  return vec2<f32>(
+    (uv.x * 2.0 - 1.0) * resolution.x / resolution.y,
+    1.0 - uv.y * 2.0
+  );
+}
+
+fn tracerTanHalfFov() -> f32 {
+  return tan(0.5 * clamp(params.cameraForwardFov.w, 0.02, 2.8));
+}
+
+// Sparse tracing (moving frames). Coarse node (i, j), stored at texel
+// (i + 1, j + 1), traces the ray through full-resolution pixel (i S, j S) and
+// stores its escape direction scaled by the frequency shift, with the outcome
+// code in w (2 = escaped to the sky; +4 when its beam met a disk).
+@fragment
+fn fsCoarse(input: FragmentInput) -> @location(0) vec4<f32> {
+  let node = floor(input.position.xy) - vec2<f32>(1.0);
+  let tanHalfFov = tracerTanHalfFov();
+  let resolution = max(params.resolutionTimeMass.xy, vec2<f32>(1.0));
+  // Angle of one pixel at the image centre, the largest anywhere.
+  let pixelAngle = 2.0 * tanHalfFov / resolution.y;
+  let result = traceStrongFieldRay(
+    screenForPixelCentre(node * SPARSE_STRIDE + vec2<f32>(0.5)),
+    tanHalfFov,
+    SPARSE_FOOTPRINT_SPACINGS * SPARSE_STRIDE * pixelAngle
+  );
+  var code = f32(result.outcome);${sparseDiskFlag}
+  return vec4<f32>(result.escapeDirection * result.frequencyShift, code);
+}
+
+struct SparseSample {
+  direction: vec3<f32>,
+  frequencyShift: f32,
+  accepted: bool,
+};
+
+fn coarseNode(texel: vec2<i32>) -> vec4<f32> {
+  return textureLoad(coarseField, texel, 0);
+}
+
+// Fail closed: a pixel is interpolated only when the four corners of its cell
+// and their axis neighbours all escaped and no beam of theirs met a disk, and
+// the bilinear error bound (second difference / 8) is below
+// SPARSE_CURVATURE_PIXELS pixels. Everything else is traced.
+fn sparseInterpolation(pixel: vec2<f32>, tanHalfFov: f32) -> SparseSample {
+  let stride = SPARSE_STRIDE;
+  var sample: SparseSample;
+  sample.accepted = false;
+  sample.direction = vec3<f32>(0.0);
+  sample.frequencyShift = 1.0;
+  let size = vec2<i32>(textureDimensions(coarseField));
+  let cell = floor(pixel / stride);
+  let fraction = (pixel - cell * stride) / stride;
+  let base = vec2<i32>(cell) + vec2<i32>(1);
+  if (any(base < vec2<i32>(1)) || any(base + vec2<i32>(2) >= size)) {
+    return sample;
+  }
+  let c00 = coarseNode(base);
+  let c10 = coarseNode(base + vec2<i32>(1, 0));
+  let c01 = coarseNode(base + vec2<i32>(0, 1));
+  let c11 = coarseNode(base + vec2<i32>(1, 1));
+  let corners = vec4<f32>(c00.w, c10.w, c01.w, c11.w);
+  if (any(abs(corners - vec4<f32>(2.0)) > vec4<f32>(0.25))) {
+    return sample;
+  }
+  let xm0 = coarseNode(base + vec2<i32>(-1, 0));
+  let xp0 = coarseNode(base + vec2<i32>(2, 0));
+  let xm1 = coarseNode(base + vec2<i32>(-1, 1));
+  let xp1 = coarseNode(base + vec2<i32>(2, 1));
+  let ym0 = coarseNode(base + vec2<i32>(0, -1));
+  let ym1 = coarseNode(base + vec2<i32>(1, -1));
+  let yp0 = coarseNode(base + vec2<i32>(0, 2));
+  let yp1 = coarseNode(base + vec2<i32>(1, 2));
+  let neighbours = array<f32, 8>(xm0.w, xp0.w, xm1.w, xp1.w, ym0.w, ym1.w, yp0.w, yp1.w);
+  for (var index = 0; index < 8; index = index + 1) {
+    if (abs(neighbours[index] - 2.0) > 0.25) {
+      return sample;
+    }
+  }
+  let curvature = max(
+    max(
+      max(length(xm0.xyz - 2.0 * c00.xyz + c10.xyz), length(ym0.xyz - 2.0 * c00.xyz + c01.xyz)),
+      max(length(c00.xyz - 2.0 * c10.xyz + xp0.xyz), length(ym1.xyz - 2.0 * c10.xyz + c11.xyz))
+    ),
+    max(
+      max(length(xm1.xyz - 2.0 * c01.xyz + c11.xyz), length(c00.xyz - 2.0 * c01.xyz + yp0.xyz)),
+      max(length(c01.xyz - 2.0 * c11.xyz + xp1.xyz), length(c10.xyz - 2.0 * c11.xyz + yp1.xyz))
+    )
+  );
+  let resolution = max(params.resolutionTimeMass.xy, vec2<f32>(1.0));
+  let pixelAngle = 2.0 * tanHalfFov / resolution.y;
+  if (0.125 * curvature > SPARSE_CURVATURE_PIXELS * pixelAngle * length(c00.xyz)) {
+    return sample;
+  }
+  let blended = mix(
+    mix(c00.xyz, c10.xyz, fraction.x),
+    mix(c01.xyz, c11.xyz, fraction.x),
+    fraction.y
+  );
+  let magnitude = length(blended);
+  sample.frequencyShift = magnitude;
+  sample.direction = blended / max(magnitude, 1.0e-12);
+  sample.accepted = magnitude > 1.0e-6;
+  return sample;
+}
+
 @fragment
 fn fsMain(input: FragmentInput) -> @location(0) vec4<f32> {
   let resolution = max(params.resolutionTimeMass.xy, vec2<f32>(1.0));
   let aspect = resolution.x / resolution.y;
+  // Only unjittered photographic frames that requested sparse tracing (the
+  // renderer then traced the coarse field first) use the coarse field.
+  if (
+    params.sceneStrongDiagnostics.w == SPARSE_STRIDE
+    && i32(round(params.renderControls.z)) == 0
+    && params.sceneStrongQuality.w > 0.5
+  ) {
+    let sparse = sparseInterpolation(
+      floor(input.position.xy),
+      tracerTanHalfFov()
+    );
+    if (sparse.accepted) {
+      var interpolated = unresolvedResult();
+      interpolated.outcome = RAY_ESCAPED;
+      interpolated.escapeDirection = sparse.direction;
+      interpolated.frequencyShift = sparse.frequencyShift;
+      interpolated.hamiltonianResidual = 0.0;
+      let colour = shadeResult(interpolated, input.position.xy);
+      return vec4<f32>(max(colour, vec3<f32>(0.0)), 1.0);
+    }
+  }
   let jitteredUv = input.uv + accumulationJitter() / resolution;
   let screen = vec2<f32>(
     (jitteredUv.x * 2.0 - 1.0) * aspect,
@@ -2674,6 +2821,54 @@ fn fsMain(input: FragmentInput) -> @location(0) vec4<f32> {
   return vec4<f32>(max(colour, vec3<f32>(0.0)), 1.0);
 }
 `;
+}
+
+// Metal pipelines specialize the frame-uniform spacetime phase (binary,
+// transition, remnant) and whether the binary bodies spin, so the compiler
+// drops the inactive Kerr-Schild providers and, for non-spinning bodies, the
+// Kerr branch of their terms.
+function traceSpecialization(id, phase, binarySpin) {
+  return Object.freeze({
+    id,
+    constants: Object.freeze({
+      SPACETIME_PHASE_MODE: phase,
+      BINARY_SPIN_MODE: binarySpin,
+    }),
+  });
+}
+
+const STRONG_FIELD_TRACE_SPECIALIZATIONS = Object.freeze([
+  traceSpecialization("binary", 0, 0),
+  traceSpecialization("binary-spinning", 0, 1),
+  traceSpecialization("transition", 2, 0),
+  traceSpecialization("transition-spinning", 2, 1),
+  traceSpecialization("remnant", 1, 0),
+]);
+
+const STRONG_FIELD_SPARSE_COARSE_PASS = Object.freeze({
+  entryPoint: "fsCoarse",
+  format: "rgba32float",
+  stride: STRONG_FIELD_SPARSE_STRIDE,
+  binding: 3,
+});
+
+// Offsets of the body A and B dimensionless spins in the 44-float packet.
+const BODY_SPIN_OFFSETS = Object.freeze([12, 24]);
+
+function selectStrongFieldTraceSpecialization(frame) {
+  const uniforms = frame?.sceneStrongFieldUniforms;
+  const blend = Number(uniforms?.[1]);
+  if (blend === 1) {
+    return "remnant";
+  }
+  // Same threshold as the WGSL Schwarzschild branch (|chi| < 1e-5).
+  const spinning = BODY_SPIN_OFFSETS.some((offset) => Math.hypot(
+    Number(uniforms?.[offset] ?? 0),
+    Number(uniforms?.[offset + 1] ?? 0),
+    Number(uniforms?.[offset + 2] ?? 0),
+  ) >= 1.0e-5);
+  const phase = blend === 0 ? "binary" : "transition";
+  return spinning ? `${phase}-spinning` : phase;
 }
 
 export const strongFieldBinaryTraceFragmentWGSL =
@@ -2703,30 +2898,9 @@ export const strongFieldBinaryShaderBundle = Object.freeze({
   }),
   wgsl: Object.freeze({
     trace: strongFieldBinaryTraceFragmentWGSL,
-    traceSpecializations: Object.freeze([
-      Object.freeze({
-        id: "binary",
-        constants: Object.freeze({ SPACETIME_PHASE_MODE: 0 }),
-      }),
-      Object.freeze({
-        id: "transition",
-        constants: Object.freeze({ SPACETIME_PHASE_MODE: 2 }),
-      }),
-      Object.freeze({
-        id: "remnant",
-        constants: Object.freeze({ SPACETIME_PHASE_MODE: 1 }),
-      }),
-    ]),
-    selectTraceSpecialization(frame) {
-      const blend = Number(frame?.sceneStrongFieldUniforms?.[1]);
-      if (blend === 0) {
-        return "binary";
-      }
-      if (blend === 1) {
-        return "remnant";
-      }
-      return "transition";
-    },
+    traceSpecializations: STRONG_FIELD_TRACE_SPECIALIZATIONS,
+    selectTraceSpecialization: selectStrongFieldTraceSpecialization,
+    coarse: STRONG_FIELD_SPARSE_COARSE_PASS,
   }),
   glsl: Object.freeze({
     // Deliberate fallback, not a port of the strong-field provider. It has
@@ -2783,30 +2957,9 @@ export const strongFieldBinaryDualDiskShaderBundle = Object.freeze({
   }),
   wgsl: Object.freeze({
     trace: strongFieldBinaryDualDiskTraceFragmentWGSL,
-    traceSpecializations: Object.freeze([
-      Object.freeze({
-        id: "binary",
-        constants: Object.freeze({ SPACETIME_PHASE_MODE: 0 }),
-      }),
-      Object.freeze({
-        id: "transition",
-        constants: Object.freeze({ SPACETIME_PHASE_MODE: 2 }),
-      }),
-      Object.freeze({
-        id: "remnant",
-        constants: Object.freeze({ SPACETIME_PHASE_MODE: 1 }),
-      }),
-    ]),
-    selectTraceSpecialization(frame) {
-      const blend = Number(frame?.sceneStrongFieldUniforms?.[1]);
-      if (blend === 0) {
-        return "binary";
-      }
-      if (blend === 1) {
-        return "remnant";
-      }
-      return "transition";
-    },
+    traceSpecializations: STRONG_FIELD_TRACE_SPECIALIZATIONS,
+    selectTraceSpecialization: selectStrongFieldTraceSpecialization,
+    coarse: STRONG_FIELD_SPARSE_COARSE_PASS,
   }),
   glsl: Object.freeze({
     // Deliberate vacuum fallback. It is surfaced as a different physical model

@@ -46,9 +46,10 @@ Their physics are different:
 
 - the Schwarzschild scene integrates a reduced null-geodesic equation;
 - the WebGPU binary scene freezes a declared superposed Kerr-Schild
-  spacetime for each ray, evaluates its lapse, shift, spatial metric, and
-  analytic spatial derivatives, and integrates a reduced 3+1 null Hamiltonian
-  with RK4, capturing rays at the innermost photon orbit;
+  spacetime for each ray, evaluates its reduced 3+1 null Hamiltonian and
+  closed-form spatial derivatives through the exact low-rank inverse of the
+  superposition, and integrates it with RK4, capturing rays at the innermost
+  photon orbit;
 - the dual-disk route adds two idealized thin emission surfaces to that declared
   lensing model, closes their emission with a C² transition when Roche/ISCO
   truncation leaves no stable mini-disk annulus, keeps it strictly zero after
@@ -56,6 +57,13 @@ Their physics are different:
   matter dynamics or upgrade the spacetime to full NR;
 - the WebGL2 binary fallback remains the old two-centre weak-field deflection
   and is labelled as a distinct model.
+
+Moving photographic frames of the WebGPU binary scenes trace one ray per 4×4
+pixels first and interpolate the escape direction of the remaining pixels only
+where the lens map is provably smooth (bilinear error below 0.25 px, with no
+capture, disk or critical curve in the stencil); every other pixel is traced.
+Paused refinement and diagnostic modes trace every pixel. See
+[`strong-field-performance.md`](./strong-field-performance.md).
 
 The WebGPU path uses a static-observer camera tetrad, explicit
 captured/escaped/unresolved outcomes with capture at each term's innermost

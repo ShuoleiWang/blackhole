@@ -18,7 +18,7 @@ Eulerian (ADM-normal) camera and derives its screen boundaries in that frame;
 the production WebGPU camera is the static observer, whose energy
 `E = alpha_s` and shadow edge `b = r sin(psi) / sqrt(1 - 2M/r)` are checked
 separately in `tests/strong-field-shaders.test.mjs`. The oracle does not reuse
-the WGSL dual-number derivatives or judge correctness from a rendered image.
+the WGSL closed-form derivatives or judge correctness from a rendered image.
 
 In ingoing Kerr-Schild coordinate time, a past-directed shadow ray can approach
 the past horizon asymptotically. The CPU trace therefore declares a `0.02 M`

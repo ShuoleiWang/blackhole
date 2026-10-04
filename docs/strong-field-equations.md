@@ -126,6 +126,27 @@ hole of mass `w m` near its centre, so its horizon and photon radii are scaled
 by `w`; during the merger blend the capture regions therefore grow and shrink
 continuously rather than switching on.
 
+A ray inside the unscaled photon orbit of any term present in the metric is
+also captured once its coordinate speed `|dx/dt|` falls below 0.2, provided
+the weighted fields summed along the terms' null directions,
+`|sum_a 2 w_a H_a n_a|`, reach 2/3 there. Around an isolated hole this field is
+`2H` (`2m/r` for Schwarzschild, 2/3 at `r = 3m`), and wherever `2H >= 2/3`
+every photon whose past-directed ray still reaches the sky moves at an ingoing
+Kerr-Schild coordinate speed of at least `1/sqrt(3)` (Schwarzschild, reached
+tangentially at `r = 3m`), 0.57 for `chi = 0.69` or 0.55 for `chi = 0.95`
+(numerical bound from the Carter-constant radial potential). A slower photon
+is outgoing and peeling off a trapped surface: traced backward it only
+approaches the horizon. Aligned terms add like one hole. Between two holes
+their fields cancel, and there light moving along the axis is slow (about 0.19
+at the start of the blend) yet escapes; the field condition excludes that
+saddle. During the merger blend the hovering rays sit at the blended metric's
+horizon, which the other terms push outside the weight-scaled capture radii
+(to 0.9–1.0 M from an individual hole at `t = -10 ... -8 M`), and without the
+rule they run until the step budget is spent. On 258 SXS:BBH:0001 probe frames
+(every 0.5 M through the blend plus controls, three cameras, `interactive` and
+`fine`) the rule changes no outcome and adds no disagreement with the
+converged reference.
+
 If a sample fails (non-Lorentzian metric, non-positive Hamiltonian branch or
 energy drift beyond the tier gate) or the step budget runs out while the ray is
 inside the unscaled photon orbit of any term present in the metric, the ray is
@@ -202,8 +223,12 @@ covector. Ray tracing integrates them backward in coordinate time, i.e. the
 past-directed flow `d(x, p)/d tau = -(dx/dt, dp/dt)` with lookback `tau = -t`,
 using classical fourth-order Runge-Kutta. Each step is a tier-dependent
 fraction of `max(r - w r+, r/2)` for the nearest term, so steps shrink near the
-holes and grow geometrically in the far field; the WGSL writes RK4 as a stage
-machine so the metric provider is evaluated at one call site per iteration.
+holes and grow geometrically in the far field. Beyond 30 M, rays moving
+outward use twice the fraction (at most 2): they only move into weaker field,
+and the measured sky directions are unchanged. Inbound rays keep the tier
+fraction, since a large step set from the start-of-step distance would
+overshoot into the strong field. The WGSL writes RK4 as a stage machine so the
+metric provider is evaluated at one call site per iteration.
 Because `H` is homogeneous of degree one in `p`, rescaling `p` by
 `E / H(x, p)` at each step restores the conserved energy exactly without
 changing the spatial path; the pre-projection drift is the reported residual.
@@ -219,6 +244,51 @@ This past-directed convention is essential for the sign of Kerr frame
 dragging and for frequency shifts in boosted or rotating spacetimes; merely
 launching the view vector as a future-directed ray gives the wrong boundary
 problem.
+
+### Production GPU evaluation (low-rank form)
+
+The WGSL does not assemble lapse, shift and a 3x3 inverse metric with their
+derivatives. The superposition is a low-rank update of Minkowski,
+`g = eta + U C U^T` with columns `l_a = (1, n_a)` (`|n_a| = 1`) and
+`C = diag(c_a)`, `c_a = 2 w_a H_a`, so the Woodbury identity gives the exact
+inverse
+
+```text
+g^-1 = eta - L K L^T,   L_a = (-1, n_a),   K = C (I + N C)^-1,
+N_ab = n_a . n_b - 1   (N_aa = 0),
+```
+
+a 2x2 system for the binary, 3x3 during the merger blend and a scalar for the
+remnant. `det(I + N C) > 0` exactly when `g` is Lorentzian, and
+`alpha = 1/sqrt(1 + k)`, `beta^i = sum_a (K 1)_a n_a^i / (1 + k)` with
+`k = 1^T K 1`. For `p = (-E, p)` and `u_a = E + n_a . p` the null condition is
+`-E^2 + |p|^2 - u^T K u = 0`, a quadratic whose future-directed root is
+`H(x, p)`; its discriminant equals `(q / alpha)^2`. The flow follows as
+
+```text
+dx/dt = (p - sum_a y_a n_a) / sqrt(D),
+dp/dt = grad_x (u^T K u) / (2 sqrt(D)),     y = K u,
+d(u^T K u) = 2 y^T du + z^T dC z - y^T dN y,   z = (I + N C)^-1 u,
+```
+
+so only per-term scalar gradients are needed: `grad c_a`, and the Jacobian
+products `J_a^T v` of `n_a`. For a Kerr term with spin vector `a`, implicit
+differentiation of the Kerr radius gives
+
+```text
+grad r = r (r^2 x + (a.x) a) / W,              W = r^4 + (a.x)^2,
+grad H = m r^2 [(3 (a.x)^2 - r^4) grad r - 2 r (a.x) a] / W^2,
+J^T v  = [(w.v) grad r + r v + a x v + (a.v / r) a] / (r^2 + a^2),
+w = x - (a.x) a / r^2 - 2 r n,
+```
+
+which reduces to `J^T v = (v - n (n.v)) / r` for a Schwarzschild term. A float64
+mirror of these formulas matches the CPU oracle to machine precision
+(`tests/strong-field-shaders.test.mjs`), and on the GPU the new evaluation
+reproduces the previous 3+1 implementation with no changed outcome and
+float32-level direction differences. Render pipelines are specialized by the
+frame phase (binary, blend, remnant) and by whether the binary bodies spin,
+so inactive terms and the unused Kerr branch are compiled out.
 
 The residual diagnostic is the relative energy drift `|H/E - 1|` measured
 before each projection. Outside the unscaled photon orbits (see Capture), a
