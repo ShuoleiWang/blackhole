@@ -266,6 +266,27 @@ function traceSpecializationsFrom(bundle) {
   }));
 }
 
+// Optional sparse-tracing coarse pass declared by a shader bundle: a
+// fragment entry point of the trace module that writes every stride-th
+// pixel's result into a small rgba32float target read by the trace pass.
+function coarsePassFrom(bundle) {
+  const declaration = bundle.wgsl?.coarse;
+  if (declaration == null) {
+    return null;
+  }
+  if (
+    typeof declaration.entryPoint !== "string"
+    || declaration.format !== "rgba32float"
+    || !Number.isInteger(declaration.stride)
+    || declaration.stride < 2
+    || !Number.isInteger(declaration.binding)
+    || declaration.binding < 3
+  ) {
+    throw new Error("Invalid sparse-tracing coarse-pass declaration");
+  }
+  return Object.freeze({ ...declaration });
+}
+
 function progressiveAccumulationFrom(options, bundle) {
   const declaration = options?.progressiveAccumulation ?? bundle.accumulation;
   if (declaration == null && bundle.id !== "binary-strong-field-v1") {
@@ -754,6 +775,11 @@ export class WebGPURenderer {
     this.traceView = null;
     this.tracePipelines = null;
     this.traceBindGroups = null;
+    this.coarsePass = null;
+    this.coarsePipelines = null;
+    this.coarseBindGroups = null;
+    this.coarseTexture = null;
+    this.coarseView = null;
     this.traceDefaultSpecialization = "default";
     this.postBindGroup = null;
     this.accumulationBuffer = null;
@@ -1034,6 +1060,24 @@ export class WebGPURenderer {
     }
 
     const traceSpecializations = traceSpecializationsFrom(this.shaderBundle);
+    this.coarsePass = coarsePassFrom(this.shaderBundle);
+    const coarsePipelineEntries = this.coarsePass
+      ? Promise.all(traceSpecializations.map(async ({ id, constants }) => [
+        id,
+        await device.createRenderPipelineAsync({
+          label: `Sparse coarse-node pipeline · ${id}`,
+          layout: "auto",
+          vertex: { module: vertexModule, entryPoint: "vsMain" },
+          fragment: {
+            module: traceModule,
+            entryPoint: this.coarsePass.entryPoint,
+            ...(constants ? { constants } : {}),
+            targets: [{ format: this.coarsePass.format }],
+          },
+          primitive: { topology: "triangle-list" },
+        }),
+      ]))
+      : Promise.resolve(null);
     const tracePipelineEntries = await Promise.all(
       traceSpecializations.map(async ({ id, constants }) => [
         id,
@@ -1056,6 +1100,11 @@ export class WebGPURenderer {
     this.tracePipelines = Object.fromEntries(tracePipelineEntries);
     this.traceDefaultSpecialization = traceSpecializations[0].id;
     this.tracePipeline = this.tracePipelines[this.traceDefaultSpecialization];
+    const coarseEntries = await coarsePipelineEntries;
+    this.coarsePipelines = coarseEntries ? Object.fromEntries(coarseEntries) : null;
+    if (this.coarsePass) {
+      this.createCoarseTarget(1, 1);
+    }
 
     this.postPipeline = await device.createRenderPipelineAsync({
       label: "Telescope display pipeline",
@@ -1088,6 +1137,14 @@ export class WebGPURenderer {
     }
 
     this.sceneResourceState = createSceneResources(this.shaderBundle, device);
+    if (
+      this.coarsePass
+      && this.sceneResourceState?.entries.some(
+        (entry) => entry.binding === this.coarsePass.binding,
+      )
+    ) {
+      throw new Error("Sparse-tracing coarse field collides with a scene resource binding");
+    }
     this.traceBindGroups = this.createTraceBindGroups(this.skyTexture);
     this.traceBindGroup = this.traceBindGroups[this.traceDefaultSpecialization];
 
@@ -1129,9 +1186,39 @@ export class WebGPURenderer {
         { binding: 0, resource: { buffer: this.uniformBuffer } },
         { binding: 1, resource: texture.createView() },
         { binding: 2, resource: this.skySampler },
+        ...(this.coarseView
+          ? [{ binding: this.coarsePass.binding, resource: this.coarseView }]
+          : []),
         ...(this.sceneResourceState?.entries || []),
       ],
     });
+  }
+
+  // Nodes (i, j) of the coarse field live at texel (i + 1, j + 1) and cover
+  // full-resolution pixels up to width - 1, plus one ring on each side for the
+  // second-difference stencil.
+  createCoarseTarget(width, height) {
+    const stride = this.coarsePass.stride;
+    const nodesX = Math.floor((width - 1) / stride) + 4;
+    const nodesY = Math.floor((height - 1) / stride) + 4;
+    this.coarseTexture?.destroy();
+    this.coarseTexture = this.device.createTexture({
+      label: "Sparse-tracing coarse escape directions",
+      size: [nodesX, nodesY, 1],
+      format: this.coarsePass.format,
+      usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING,
+    });
+    this.coarseView = this.coarseTexture.createView();
+    this.coarseBindGroups = Object.fromEntries(
+      Object.entries(this.coarsePipelines).map(([id, pipeline]) => [
+        id,
+        this.device.createBindGroup({
+          label: `Sparse coarse-node resources · ${id}`,
+          layout: pipeline.getBindGroupLayout(0),
+          entries: [{ binding: 0, resource: { buffer: this.uniformBuffer } }],
+        }),
+      ]),
+    );
   }
 
   createTraceBindGroups(texture) {
@@ -1152,9 +1239,13 @@ export class WebGPURenderer {
     const pipeline = this.tracePipelines?.[selected];
     const bindGroup = this.traceBindGroups?.[selected];
     if (pipeline && bindGroup) {
-      return { pipeline, bindGroup };
+      return { id: selected, pipeline, bindGroup };
     }
-    return { pipeline: this.tracePipeline, bindGroup: this.traceBindGroup };
+    return {
+      id: this.traceDefaultSpecialization,
+      pipeline: this.tracePipeline,
+      bindGroup: this.traceBindGroup,
+    };
   }
 
   resize(width, height) {
@@ -1191,6 +1282,11 @@ export class WebGPURenderer {
       usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING,
     });
     this.traceView = this.traceTexture.createView();
+    if (this.coarsePass) {
+      this.createCoarseTarget(nextWidth, nextHeight);
+      this.traceBindGroups = this.createTraceBindGroups(this.skyTexture);
+      this.traceBindGroup = this.traceBindGroups[this.traceDefaultSpecialization];
+    }
     this.postBindGroup = this.createPostBindGroup(
       this.traceView,
       "Post-process resources",
@@ -1370,6 +1466,26 @@ export class WebGPURenderer {
     this.writeUniforms(progressive.frame);
     const traceResources = this.traceResourcesForFrame(progressive.frame);
     const encoder = this.device.createCommandEncoder({ label: "Black-hole frame" });
+    // Sparse tracing: a frame opts in with sceneStrongDiagnostics[3] equal to
+    // the declared stride; the coarse field must be traced first.
+    if (
+      this.coarsePass
+      && Number(progressive.frame?.sceneStrongDiagnostics?.[3]) === this.coarsePass.stride
+    ) {
+      const selected = traceResources.id;
+      const coarsePass = encoder.beginRenderPass({
+        colorAttachments: [{
+          view: this.coarseView,
+          clearValue: { r: 0, g: 0, b: 0, a: 0 },
+          loadOp: "clear",
+          storeOp: "store",
+        }],
+      });
+      coarsePass.setPipeline(this.coarsePipelines[selected]);
+      coarsePass.setBindGroup(0, this.coarseBindGroups[selected]);
+      coarsePass.draw(3);
+      coarsePass.end();
+    }
     const tracePass = encoder.beginRenderPass({
       colorAttachments: [{
         view: this.traceView,
@@ -1470,6 +1586,7 @@ export class WebGPURenderer {
     this.sceneResourceState = null;
     this.destroyProgressiveTargets();
     this.traceTexture?.destroy();
+    this.coarseTexture?.destroy();
     this.skyTexture?.destroy();
     this.accumulationBuffer?.destroy();
     this.uniformBuffer?.destroy();

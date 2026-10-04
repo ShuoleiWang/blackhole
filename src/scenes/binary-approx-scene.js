@@ -1,5 +1,6 @@
 import { createStrongFieldOrbitRuntime } from "../strong-field-orbit.js";
 import {
+  STRONG_FIELD_SPARSE_STRIDE,
   strongFieldBinaryDualDiskShaderBundle,
   strongFieldBinaryShaderBundle,
 } from "../strong-field-shaders.js";
@@ -50,13 +51,18 @@ const SCENE_VARIANTS = Object.freeze({
 //
 // The step fraction sets the truncation error, which scales roughly as f^5.
 // Against a converged reference on SXS:BBH:0001 frames, rays passing within
-// 8 M of a horizon have median/p90 sky errors of about 3-5'/7-13' at 0.6,
-// 0.1-0.2'/0.2-0.3' at 0.3, and less at 0.22. The motion tiers therefore
-// trade a few native-Retina pixels near the holes for frame time; a paused
-// view refines to balanced/fine. Larger fractions start flipping capture
-// outcomes, so no tier exceeds 0.6.
+// 8 M of a horizon have median/p90 sky errors of about 2.6-8'/7-22' at 0.6,
+// 0.09-0.26'/0.2-0.6' at 0.3 and 0.02-0.06'/0.05-0.14' at 0.22 (all rays:
+// 0.3-0.4', 0.02', 0.01' median). The motion tiers therefore trade a few
+// native-Retina pixels near the holes for frame time; a paused view refines
+// to balanced/fine. Larger fractions start flipping capture outcomes, so no
+// tier exceeds 0.6 (outbound far-field steps grow separately in the shader).
+// The motion tiers also trace sparsely: every fourth pixel is traced first and
+// pixels whose lens map is provably smooth are interpolated (bilinear error
+// below 0.25 px, fail-closed at captures, disks and critical curves).
 const STRONG_FIELD_TIER_POLICY = Object.freeze({
   emergency: Object.freeze({
+    sparse: true,
     integrator: Object.freeze([0.02, 64, 0.60, 0.05]),
     escapeRadiusM: 96,
     maximumLookbackM: 260,
@@ -64,6 +70,7 @@ const STRONG_FIELD_TIER_POLICY = Object.freeze({
     capturePaddingM: 0.02,
   }),
   survival: Object.freeze({
+    sparse: true,
     integrator: Object.freeze([0.02, 64, 0.60, 0.05]),
     escapeRadiusM: 96,
     maximumLookbackM: 260,
@@ -71,6 +78,7 @@ const STRONG_FIELD_TIER_POLICY = Object.freeze({
     capturePaddingM: 0.02,
   }),
   interactive: Object.freeze({
+    sparse: true,
     integrator: Object.freeze([0.01, 64, 0.60, 0.02]),
     escapeRadiusM: 96,
     maximumLookbackM: 260,
@@ -1155,7 +1163,11 @@ export async function createBinaryScene({
           // the default image. Raw outcomes remain available to regression
           // probes and the scientific reference workbench.
           0.055,
-          0, // reserved
+          // Sparse-tracing stride (0 = trace every pixel): photographic
+          // motion frames only; diagnostics and paused refinement trace all.
+          tier.sparse && Number(frame?.mode ?? 0) === 0
+            ? STRONG_FIELD_SPARSE_STRIDE
+            : 0,
         ]),
       };
     },

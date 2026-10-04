@@ -8,6 +8,7 @@ import {
   createPnEobOrbitAdapter,
   createStrongFieldSpacetimeProvider,
   evaluateKerrSchild3p1,
+  nullHamiltonian,
 } from "../src/strong-field-spacetime.js";
 import {
   STRONG_FIELD_DIAGNOSTIC_MODES,
@@ -16,6 +17,7 @@ import {
   STRONG_FIELD_ACCRETION_UNIFORM_TAIL_FLOATS,
   STRONG_FIELD_MAXIMUM_STEP_M,
   STRONG_FIELD_OUTCOMES,
+  STRONG_FIELD_SPARSE_STRIDE,
   STRONG_FIELD_UNIFORM_FLOATS,
   STRONG_FIELD_UNIFORM_LAYOUT,
   STRONG_FIELD_UNIFORM_TAIL_FLOATS,
@@ -131,18 +133,37 @@ test("strong-field bundle declares asymmetric WebGPU production policy", () => {
   );
   assert.deepEqual(
     strongFieldBinaryShaderBundle.wgsl.traceSpecializations.map(
-      ({ id, constants }) => [id, constants.SPACETIME_PHASE_MODE],
+      ({ id, constants }) => [
+        id,
+        constants.SPACETIME_PHASE_MODE,
+        constants.BINARY_SPIN_MODE,
+      ],
     ),
-    [["binary", 0], ["transition", 2], ["remnant", 1]],
+    [
+      ["binary", 0, 0],
+      ["binary-spinning", 0, 1],
+      ["transition", 2, 0],
+      ["transition-spinning", 2, 1],
+      ["remnant", 1, 0],
+    ],
   );
   const selectPhase = strongFieldBinaryShaderBundle.wgsl
     .selectTraceSpecialization;
-  assert.equal(selectPhase({ sceneStrongFieldUniforms: [0, 0] }), "binary");
-  assert.equal(
-    selectPhase({ sceneStrongFieldUniforms: [0, 0.5] }),
-    "transition",
-  );
-  assert.equal(selectPhase({ sceneStrongFieldUniforms: [0, 1] }), "remnant");
+  const packet = (blend, spinA = [0, 0, 0], spinB = [0, 0, 0]) => {
+    const uniforms = new Float32Array(44);
+    uniforms[1] = blend;
+    uniforms.set(spinA, 12);
+    uniforms.set(spinB, 24);
+    return { sceneStrongFieldUniforms: uniforms };
+  };
+  assert.equal(selectPhase(packet(0)), "binary");
+  assert.equal(selectPhase(packet(0.5)), "transition");
+  assert.equal(selectPhase(packet(1)), "remnant");
+  // SXS:BBH:0001 spins (~1e-9) keep the non-spinning specialization.
+  assert.equal(selectPhase(packet(0, [7e-10, 7e-10, 0])), "binary");
+  assert.equal(selectPhase(packet(0, [0, 0, 0.3])), "binary-spinning");
+  assert.equal(selectPhase(packet(0.5, [0, 0, 0], [0.1, 0, 0])), "transition-spinning");
+  assert.equal(selectPhase(packet(1, [0, 0, 0.3])), "remnant");
   assert.equal(
     strongFieldBinaryShaderBundle.accumulation.mode,
     "linear-hdr-running-average-v1",
@@ -180,11 +201,13 @@ test("dual-disk bundle keeps phase specializations and weak-field fallback expli
     strongFieldBinaryDualDiskShaderBundle.wgsl.trace,
     strongFieldBinaryDualDiskTraceFragmentWGSL,
   );
-  assert.deepEqual(
-    strongFieldBinaryDualDiskShaderBundle.wgsl.traceSpecializations.map(
-      ({ id, constants }) => [id, constants.SPACETIME_PHASE_MODE],
-    ),
-    [["binary", 0], ["transition", 2], ["remnant", 1]],
+  assert.equal(
+    strongFieldBinaryDualDiskShaderBundle.wgsl.traceSpecializations,
+    strongFieldBinaryShaderBundle.wgsl.traceSpecializations,
+  );
+  assert.equal(
+    strongFieldBinaryDualDiskShaderBundle.wgsl.selectTraceSpecialization,
+    strongFieldBinaryShaderBundle.wgsl.selectTraceSpecialization,
   );
   assert.equal(
     strongFieldBinaryDualDiskShaderBundle.glsl.trace,
@@ -418,9 +441,9 @@ test("dual-disk uniform writer rejects malformed or non-physical transfer state"
 test("vacuum generated WGSL remains byte-for-byte unchanged", () => {
   assert.equal(
     createHash("sha256").update(strongFieldBinaryTraceFragmentWGSL).digest("hex"),
-    "ec466402cb1e6303483db5d85a27cd5b3a1fa8e2dcbcc06169cfcddef1835f46",
+    "9eb37a98dbf9234682513d1cb562a1d1a85ecfd658d7f8f80735cd877e7df93e",
   );
-  assert.equal(strongFieldBinaryTraceFragmentWGSL.length, 54361);
+  assert.equal(strongFieldBinaryTraceFragmentWGSL.length, 61859);
   assert.doesNotMatch(
     strongFieldBinaryTraceFragmentWGSL,
     /sceneDiskControl|DiskIntersection|diskRadiance|accumulateDualDiskEmission/,
@@ -567,14 +590,21 @@ test("dual-disk photographic mode preserves foreground emission for every ray ou
 test("WGSL exposes the strong-field provider and complete ray-result contract", () => {
   for (const token of [
     "struct SpacetimeProviderInput",
-    "fn sampleSpacetime(",
-    "boostedKerrSchildContribution",
+    "struct KerrSchildTerm",
+    "fn kerrSchildTerm(",
+    "fn termJacobianTranspose(",
+    "fn spacetimeTerms(",
+    "fn lowRank1(",
+    "fn lowRank2(",
+    "fn lowRank3(",
+    "fn evaluateGeodesic(",
+    "fn metricValuesAt(",
+    "struct GeodesicSample",
+    "override BINARY_SPIN_MODE: i32 = 1;",
     "bodyAPositionMass",
     "bodyAVelocityActive",
     "bodyASpin",
-    "attenuationWeight",
-    "contractionCoefficient",
-    "transformedFactor",
+    "fn companionAttenuation(",
     "observerCameraDirection",
     "fn staticObserverFrame(",
     "fn insidePhotonCapture(",
@@ -582,9 +612,6 @@ test("WGSL exposes the strong-field provider and complete ray-result contract", 
     "failureCaptureMargin",
     "stepDistance",
     "binaryActive",
-    "remnantActive",
-    "struct ADMFields",
-    "fn hamiltonianRhs(",
     "Reduced 3+1 null Hamiltonian",
     "RAY_CAPTURED",
     "RAY_ESCAPED",
@@ -592,7 +619,7 @@ test("WGSL exposes the strong-field provider and complete ray-result contract", 
     "escapeDirection",
     "frequencyShift",
     "lookback",
-    "nullResidual",
+    "hamiltonianResidual",
     "minimumHorizonDistance",
     "terminationReason",
     "MAX_RK4_STEPS: i32 = 192",
@@ -623,17 +650,14 @@ test("WGSL exposes the strong-field provider and complete ray-result contract", 
   );
   // Failure capture must cover every term present in the metric: a remnant
   // with w < 1e-4 already breaks the superposition near its ring singularity.
-  for (const [weight, term] of [
-    ["weightA", "holeA"],
-    ["weightB", "holeB"],
-    ["weightRemnant", "remnant"],
-  ]) {
+  assert.match(
+    strongFieldBinaryTraceFragmentWGSL,
+    /if \(weight > 0\.0\) \{\s*\(\*sample\)\.failureCaptureMargin = min\(\s*\(\*sample\)\.failureCaptureMargin,\s*term\.kerrRadius - photonRadius/,
+  );
+  for (const [term, weight, radius] of [["a", "weightA", "A"], ["b", "weightB", "B"], ["r", "weightR", "R"]]) {
     assert.match(
       strongFieldBinaryTraceFragmentWGSL,
-      new RegExp(
-        String.raw`if \(${weight}\.value > 0\.0\) \{\s*failureCaptureMargin = min\(\s*`
-          + String.raw`failureCaptureMargin,\s*${term}\.kerrRadius - ${term}\.photonRadius`,
-      ),
+      new RegExp(String.raw`addTermGeometry\(&sample, terms\.${term}, terms\.${weight}, radii\.horizon${radius}, radii\.photon${radius}\);`),
     );
   }
   assert.match(
@@ -661,11 +685,11 @@ test("WGSL exposes the strong-field provider and complete ray-result contract", 
   // the path unchanged because H is homogeneous of degree one in p.
   assert.match(
     strongFieldBinaryTraceFragmentWGSL,
-    /let derivativeX = -rhs\.velocity;\s*let derivativeP = -rhs\.momentumRate;/,
+    /let derivativeX = -sample\.velocity;\s*let derivativeP = -sample\.momentumRate \* momentumScale;/,
   );
   assert.match(
     strongFieldBinaryTraceFragmentWGSL,
-    /evalMomentum = evalMomentum\s*\* \(conservedEnergy \/ kinematics\.reducedHamiltonian\)/,
+    /momentumScale = conservedEnergy \/ sample\.hamiltonian;\s*evalMomentum = evalMomentum \* momentumScale;/,
   );
   assert.match(
     strongFieldBinaryTraceFragmentWGSL,
@@ -678,61 +702,45 @@ test("WGSL exposes the strong-field provider and complete ray-result contract", 
   // Capture at the innermost photon orbit, with weight-scaled radii.
   assert.match(
     strongFieldBinaryTraceFragmentWGSL,
-    /2\.0 \* mass \* \(\s*1\.0 \+ cos\(\(2\.0 \/ 3\.0\) \* acos\(-clamp\(length\(safeChi\), 0\.0, 1\.0\)\)\)/,
+    /2\.0 \* mass \* \(1\.0 \+ cos\(\(2\.0 \/ 3\.0\) \* acos\(-chi\)\)\)/,
   );
   assert.match(
     strongFieldBinaryTraceFragmentWGSL,
-    /let margin = holeA\.kerrRadius - w \* holeA\.photonRadius;/,
+    /let margin = term\.kerrRadius - w \* photonRadius;/,
   );
 });
 
 test("WGSL specializes exact inspiral and remnant endpoints", () => {
-  assert.match(
-    strongFieldBinaryTraceFragmentWGSL,
-    /override SPACETIME_PHASE_MODE: i32 = -1/,
-  );
-  const providerStart = strongFieldBinaryTraceFragmentWGSL.indexOf(
-    "fn sampleSpacetime(",
-  );
-  const providerEnd = strongFieldBinaryTraceFragmentWGSL.indexOf(
-    "\n  var g00 = dualConstant(-1.0);",
-    providerStart,
-  );
-  assert.ok(providerStart >= 0 && providerEnd > providerStart);
-  const provider = strongFieldBinaryTraceFragmentWGSL.slice(
-    providerStart,
-    providerEnd,
-  );
-  const inspiralStart = provider.indexOf("SPACETIME_PHASE_MODE == 0");
-  const remnantStart = provider.indexOf(
-    "SPACETIME_PHASE_MODE == 1",
-    inspiralStart,
-  );
-  const transitionStart = provider.indexOf("} else {", remnantStart);
-  assert.ok(
-    inspiralStart >= 0
-      && remnantStart > inspiralStart
-      && transitionStart > remnantStart,
-  );
+  const wgsl = strongFieldBinaryTraceFragmentWGSL;
+  assert.match(wgsl, /override SPACETIME_PHASE_MODE: i32 = -1/);
+  const slice = (name, next) => {
+    const start = wgsl.indexOf(`fn ${name}(`);
+    const end = wgsl.indexOf(`fn ${next}(`, start);
+    assert.ok(start >= 0 && end > start, name);
+    return wgsl.slice(start, end);
+  };
+  const phase = slice("spacetimePhase", "spacetimeTerms");
+  assert.match(phase, /SPACETIME_PHASE_MODE == 1 \|\| \(SPACETIME_PHASE_MODE < 0 && blend == 1\.0\)/);
+  assert.match(phase, /SPACETIME_PHASE_MODE == 0 \|\| \(SPACETIME_PHASE_MODE < 0 && blend == 0\.0\)/);
 
-  const inspiral = provider.slice(inspiralStart, remnantStart);
-  assert.match(inspiral, /params\.bodyAPositionMass/);
-  assert.match(inspiral, /params\.bodyBPositionMass/);
-  assert.doesNotMatch(inspiral, /params\.remnantPositionMass/);
-  assert.equal((inspiral.match(/attenuationWeight\(/g) || []).length, 2);
+  const terms = slice("spacetimeTerms", "nullEnergy");
+  const remnantOnly = terms.slice(terms.indexOf("if (phase == 1) {"), terms.indexOf("return terms;"));
+  assert.match(remnantOnly, /params\.remnantPositionMass/);
+  assert.doesNotMatch(remnantOnly, /params\.body[AB]PositionMass/);
+  const binary = terms.slice(terms.indexOf("return terms;") + 1);
+  assert.match(binary, /params\.bodyAPositionMass/);
+  assert.match(binary, /params\.bodyBPositionMass/);
+  assert.match(binary, /if \(phase == 2\) \{[\s\S]*params\.remnantPositionMass/);
+  assert.match(binary, /binaryActive/);
+  // Non-spinning bodies compile out the Kerr branch; the remnant keeps it.
+  assert.equal((binary.match(/BINARY_SPIN_MODE != 0/g) || []).length, 2);
+  assert.equal((terms.match(/params\.remnantVelocityActive\.w[^\n]*,\n\s*true/g) || []).length, 2);
+  assert.equal((binary.match(/companionAttenuation\(/g) || []).length, 2);
 
-  const remnant = provider.slice(remnantStart, transitionStart);
-  assert.match(remnant, /params\.remnantPositionMass/);
-  assert.doesNotMatch(remnant, /params\.body[AB]PositionMass/);
-  assert.doesNotMatch(remnant, /attenuationWeight\(/);
-
-  const transition = provider.slice(transitionStart);
-  assert.match(transition, /params\.bodyAPositionMass/);
-  assert.match(transition, /params\.bodyBPositionMass/);
-  assert.match(transition, /params\.remnantPositionMass/);
-  assert.match(transition, /binaryActive/);
-  assert.match(transition, /remnantActive/);
-  assert.equal((transition.match(/attenuationWeight\(/g) || []).length, 2);
+  const evaluate = slice("evaluateGeodesic", "termOuter");
+  assert.match(evaluate, /if \(phase == 1\) \{\s*flow = lowRank1\(terms\.r, momentum\);/);
+  assert.match(evaluate, /else if \(phase == 0\) \{\s*flow = lowRank2\(terms\.a, terms\.b, momentum\);/);
+  assert.match(evaluate, /flow = lowRank3\(terms\.a, terms\.b, terms\.r, momentum\);/);
 });
 
 test("photographic sky sampling uses a path-independent stable four-tap footprint", () => {
@@ -827,18 +835,154 @@ test("RK4 steps scale with the orbit and are bounded by a single ceiling", () =>
   );
   assert.match(
     strongFieldBinaryTraceFragmentWGSL,
-    /stepFraction \* max\(fields\.stepDistance, 0\.0\) \* retryScale/,
+    /effectiveFraction \* max\(sample\.stepDistance, 0\.0\) \* retryScale/,
   );
+  // Larger steps only for outbound rays beyond 30 M.
+  assert.match(
+    strongFieldBinaryTraceFragmentWGSL,
+    /let outbound = radius > FAR_FIELD_RADIUS_M\s*&& dot\(stepPosition, derivativeX\) > 0\.0;/,
+  );
+  assert.match(strongFieldBinaryTraceFragmentWGSL, /const FAR_FIELD_RADIUS_M: f32 = 30\.0;/);
+  assert.match(strongFieldBinaryTraceFragmentWGSL, /const FAR_FIELD_GROWTH: f32 = 2\.0;/);
   // Classical RK4 weights and a single metric evaluation per iteration.
   assert.match(
     strongFieldBinaryTraceFragmentWGSL,
     /\(stepSize \/ 6\.0\) \* \(sumX \+ derivativeX\)/,
   );
   assert.equal(
-    strongFieldBinaryTraceFragmentWGSL.match(/sampleSpacetime\(frameTime, /g).length,
+    strongFieldBinaryTraceFragmentWGSL.match(/evaluateGeodesic\(/g).length,
     2,
+    "one definition and one call site in the RK4 loop",
   );
   assert.doesNotMatch(strongFieldBinaryTraceFragmentWGSL, /symplectic|acceptedStepSize/);
+});
+
+test("sparse tracing interpolates only provably smooth sky and fails closed", () => {
+  const coarse = strongFieldBinaryShaderBundle.wgsl.coarse;
+  assert.deepEqual({ ...coarse }, {
+    entryPoint: "fsCoarse",
+    format: "rgba32float",
+    stride: STRONG_FIELD_SPARSE_STRIDE,
+    binding: 3,
+  });
+  assert.equal(strongFieldBinaryDualDiskShaderBundle.wgsl.coarse, coarse);
+  assert.equal(STRONG_FIELD_SPARSE_STRIDE, 4);
+  for (const wgsl of [
+    strongFieldBinaryTraceFragmentWGSL,
+    strongFieldBinaryDualDiskTraceFragmentWGSL,
+  ]) {
+    assert.match(
+      wgsl,
+      /@group\(0\) @binding\(3\) var coarseField: texture_2d<f32>;/,
+    );
+    assert.match(wgsl, /const SPARSE_STRIDE: f32 = 4\.0;/);
+    assert.match(wgsl, /const SPARSE_CURVATURE_PIXELS: f32 = 0\.25;/);
+    // Coarse node (i, j), stored at texel (i + 1, j + 1), traces pixel
+    // (i S, j S) and stores direction * frequency shift plus outcome code.
+    const coarseEntry = wgsl.slice(
+      wgsl.indexOf("fn fsCoarse("),
+      wgsl.indexOf("struct SparseSample"),
+    );
+    assert.match(coarseEntry, /floor\(input\.position\.xy\) - vec2<f32>\(1\.0\)/);
+    assert.match(coarseEntry, /node \* SPARSE_STRIDE \+ vec2<f32>\(0\.5\)/);
+    assert.match(
+      coarseEntry,
+      /traceStrongFieldRay\([\s\S]*SPARSE_FOOTPRINT_SPACINGS \* SPARSE_STRIDE \* pixelAngle/,
+    );
+    assert.match(
+      coarseEntry,
+      /vec4<f32>\(result\.escapeDirection \* result\.frequencyShift, code\)/,
+    );
+    // All twelve stencil nodes must have escaped (code 2), and the bilinear
+    // error bound must stay below SPARSE_CURVATURE_PIXELS.
+    const interpolation = wgsl.slice(
+      wgsl.indexOf("fn sparseInterpolation("),
+      wgsl.indexOf("@fragment\nfn fsMain"),
+    );
+    assert.match(
+      interpolation,
+      /abs\(corners - vec4<f32>\(2\.0\)\) > vec4<f32>\(0\.25\)/,
+    );
+    assert.match(interpolation, /abs\(neighbours\[index\] - 2\.0\) > 0\.25/);
+    assert.equal((interpolation.match(/coarseNode\(base/g) || []).length, 12);
+    assert.match(
+      interpolation,
+      /0\.125 \* curvature > SPARSE_CURVATURE_PIXELS \* pixelAngle \* length\(c00\.xyz\)/,
+    );
+    // Only unjittered photographic frames that requested the declared
+    // stride use the field; every other pixel is traced as before.
+    const main = wgsl.slice(wgsl.indexOf("@fragment\nfn fsMain"));
+    assert.match(
+      main,
+      /params\.sceneStrongDiagnostics\.w == SPARSE_STRIDE\s*&& i32\(round\(params\.renderControls\.z\)\) == 0\s*&& params\.sceneStrongQuality\.w > 0\.5/,
+    );
+    assert.match(main, /let result = traceStrongField\(screen, tanHalfFov\);/);
+    assert.match(
+      wgsl,
+      /fn traceStrongField\(screen: vec2<f32>, tanHalfFov: f32\) -> RayResult \{\s*return traceStrongFieldRay\(screen, tanHalfFov, 0\.0\);/,
+    );
+  }
+  // A dual-disk coarse node is also flagged when its beam (the footprint
+  // around its ray) passes a disk annulus, so a disk image thinner than the
+  // node spacing, e.g. edge-on, is traced rather than interpolated away.
+  const dual = strongFieldBinaryDualDiskTraceFragmentWGSL;
+  assert.match(dual, /const SPARSE_FOOTPRINT_SPACINGS: f32 = 2\.0;/);
+  assert.match(
+    dual,
+    /\|\| result\.diskProximity > 0\.5\s*\)\s*\{\s*code = code \+ 4\.0;/,
+  );
+  assert.match(dual, /let footprint = footprintAngle \* \(lookback \+ stepSize\);/);
+  assert.match(
+    dual,
+    /chordNearDisks\(stepPosition, midPosition, footprint\)\s*\|\| chordNearDisks\(midPosition, nextPosition, footprint\)/,
+  );
+  const nearDisk = dual.slice(
+    dual.indexOf("fn chordNearDisk("),
+    dual.indexOf("fn chordNearDisks("),
+  );
+  assert.match(nearDisk, /return true;/);
+  assert.match(
+    nearDisk,
+    /nearest <= outerRadius \+ footprint\s*&& farthest >= innerRadius - footprint/,
+  );
+  assert.doesNotMatch(
+    strongFieldBinaryTraceFragmentWGSL,
+    /diskProximity|chordNearDisk/,
+  );
+});
+
+test("rays hovering at a trapped surface inside a photon orbit are captured", () => {
+  for (const wgsl of [
+    strongFieldBinaryTraceFragmentWGSL,
+    strongFieldBinaryDualDiskTraceFragmentWGSL,
+  ]) {
+    // Where a hole's Kerr-Schild field 2H is >= 2/3, escaping past-directed
+    // rays move at coordinate speed >= 1/sqrt(3) (Schwarzschild) or 0.55
+    // (Kerr to chi = 0.95); the threshold keeps a factor ~2.7 below that.
+    assert.match(wgsl, /const HOVER_CAPTURE_SPEED: f32 = 0\.2;/);
+    assert.match(wgsl, /const HOVER_CAPTURE_FIELD: f32 = 2\.0 \/ 3\.0;/);
+    // Fields add along the terms' null directions, so they cancel at the
+    // saddle between two holes.
+    assert.match(
+      wgsl,
+      /sample\.alignedField = length\(\s*terms\.a\.c \* terms\.a\.n \+ terms\.b\.c \* terms\.b\.n \+ terms\.r\.c \* terms\.r\.n\s*\);/,
+    );
+    const capture = wgsl.slice(
+      wgsl.indexOf("fn insidePhotonCapture("),
+      wgsl.indexOf("fn traceStrongField("),
+    );
+    assert.match(
+      capture,
+      /let photonOrbitCapture = sample\.photonMargin < 0\.0\s*&& dot\(sample\.photonRadialGradient, backwardVelocity\) < 0\.0;/,
+    );
+    assert.match(
+      capture,
+      /let hoverCapture = sample\.failureCaptureMargin < 0\.0\s*&& sample\.alignedField >= HOVER_CAPTURE_FIELD\s*&& length\(backwardVelocity\) < HOVER_CAPTURE_SPEED;/,
+    );
+    assert.match(capture, /return photonOrbitCapture \|\| hoverCapture;/);
+    // The test runs on the start-of-step sample with the backward velocity.
+    assert.match(wgsl, /if \(insidePhotonCapture\(sample, derivativeX\)\) \{/);
+  }
 });
 
 test("diagnostic and outcome enums are stable and non-overlapping", () => {
@@ -956,11 +1100,12 @@ test("static camera sees the Schwarzschild static-observer sky", () => {
   }
   assert.match(
     strongFieldBinaryTraceFragmentWGSL,
-    /fn staticObserverFrame\(fields: ADMFields\)/,
+    /fn staticObserverFrame\(values: MetricValues\)/,
   );
+  assert.match(strongFieldBinaryTraceFragmentWGSL, /let lapseSquared = -values\.gtt;/);
   assert.match(
     strongFieldBinaryTraceFragmentWGSL,
-    /var momentum = observerFrame\.shiftCovariant \* photonTime\s*- observerFields\.spatialMetric \* initialDirection;/,
+    /var momentum = observerFrame\.shiftCovariant \* photonTime\s*- observerMetric\.spatialMetric \* initialDirection;/,
   );
 });
 
@@ -1080,12 +1225,134 @@ test("moving Schwarzschild oracle fixes the Lorentz-covector sign", () => {
     Math.abs(fields.covariantMetric[0][0] - (-0.8634488043238141))
       < 2e-14,
   );
-  assert.match(
-    strongFieldBinaryTraceFragmentWGSL,
-    /dualSub\(dualConstant\(1\.0\), velocityDotDirection\)/,
+  // The frozen WGSL terms are unboosted: no velocity enters the metric.
+  const termStart = strongFieldBinaryTraceFragmentWGSL.indexOf("fn kerrSchildTerm(");
+  const termSignature = strongFieldBinaryTraceFragmentWGSL.slice(
+    termStart,
+    strongFieldBinaryTraceFragmentWGSL.indexOf("{", termStart),
   );
-  assert.match(
-    strongFieldBinaryTraceFragmentWGSL,
-    /dualSub\(\s*dualScale\(\s*velocityDotDirection/,
-  );
+  assert.doesNotMatch(termSignature, /velocity/i);
+  assert.doesNotMatch(strongFieldBinaryTraceFragmentWGSL, /boostGamma|velocityDotDirection/);
 });
+
+test("low-rank Kerr-Schild Hamiltonian reproduces the 3+1 oracle", () => {
+  // Float64 mirror of the WGSL provider: per-term c = 2 w H, unit n and the
+  // closed-form Jacobian products, the capacitance system (I + N C) z = r, the
+  // quadratic for E(x,p), and the flow dx/dt = dH/dp, dp/dt = -dH/dx. It is
+  // checked against the CPU oracle (H directly, its derivatives by central
+  // differences) for one, two and three terms, including spinning holes.
+  const add = (a, b) => a.map((x, i) => x + b[i]);
+  const sub = (a, b) => a.map((x, i) => x - b[i]);
+  const scale = (a, k) => a.map((x) => x * k);
+  const cross = (a, b) => [
+    a[1] * b[2] - a[2] * b[1],
+    a[2] * b[0] - a[0] * b[2],
+    a[0] * b[1] - a[1] * b[0],
+  ];
+  const term = (body, weight, position) => {
+    const x = sub(position, body.positionM);
+    const a = scale(body.dimensionlessSpin, body.massM);
+    const s = dot(a, x);
+    const reduced = dot(x, x) - dot(a, a);
+    const r2 = 0.5 * (reduced + Math.sqrt(reduced * reduced + 4 * s * s));
+    const r = Math.sqrt(r2);
+    const W = r2 * r2 + s * s;
+    const radiusGradient = scale(add(scale(x, r2), scale(a, s)), r / W);
+    const H = body.massM * r * r2 / W;
+    const hGradient = scale(
+      sub(scale(radiusGradient, 3 * s * s - r2 * r2), scale(a, 2 * r * s)),
+      body.massM * r2 / (W * W),
+    );
+    const inverseNormalization = 1 / (r2 + dot(a, a));
+    const n = scale(add(add(scale(x, r), cross(x, a)), scale(a, s / r)), inverseNormalization);
+    const w = sub(sub(x, scale(a, s / r2)), scale(n, 2 * r));
+    const jacobianTranspose = (v) => scale(
+      add(add(add(scale(radiusGradient, dot(w, v)), scale(v, r)), cross(a, v)), scale(a, dot(a, v) / r)),
+      inverseNormalization,
+    );
+    return { c: 2 * weight * H, cGradient: scale(hGradient, 2 * weight), n, jacobianTranspose };
+  };
+  const solve = (A, b) => {
+    if (b.length === 1) return [b[0] / A[0][0]];
+    const det3 = (M) => (M.length === 2
+      ? M[0][0] * M[1][1] - M[0][1] * M[1][0]
+      : M[0][0] * (M[1][1] * M[2][2] - M[1][2] * M[2][1])
+        - M[0][1] * (M[1][0] * M[2][2] - M[1][2] * M[2][0])
+        + M[0][2] * (M[1][0] * M[2][1] - M[1][1] * M[2][0]));
+    const det = det3(A);
+    return b.map((_, k) => det3(A.map((row, i) => row.map((v, j) => (j === k ? b[i] : v)))) / det);
+  };
+  const lowRank = (terms, p) => {
+    const c = terms.map((t) => t.c);
+    const A = terms.map((ta, i) => terms.map((tb, j) => (i === j ? 1 : (dot(ta.n, tb.n) - 1) * c[j])));
+    const v = terms.map((t) => dot(t.n, p));
+    const ones = solve(A, terms.map(() => 1));
+    const projected = solve(A, v);
+    const onePlusK = 1 + ones.reduce((sum, z, i) => sum + c[i] * z, 0);
+    const m = projected.reduce((sum, z, i) => sum + c[i] * z, 0);
+    const pq = dot(p, p) - projected.reduce((sum, z, i) => sum + c[i] * z * v[i], 0);
+    const root = Math.sqrt(m * m + onePlusK * pq);
+    const energy = m > 0 ? pq / (root + m) : (root - m) / onePlusK;
+    const z = ones.map((o, i) => energy * o + projected[i]);
+    const y = z.map((zi, i) => c[i] * zi);
+    let velocity = p.slice();
+    let gradient = [0, 0, 0];
+    terms.forEach((t, i) => {
+      velocity = sub(velocity, scale(t.n, y[i]));
+      gradient = add(gradient, add(scale(t.jacobianTranspose(p), 2 * y[i]), scale(t.cGradient, z[i] * z[i])));
+      for (let j = i + 1; j < terms.length; j += 1) {
+        const coupling = add(t.jacobianTranspose(terms[j].n), terms[j].jacobianTranspose(t.n));
+        gradient = sub(gradient, scale(coupling, 2 * y[i] * y[j]));
+      }
+    });
+    return { energy, velocity: scale(velocity, 1 / root), momentumRate: scale(gradient, 0.5 / root) };
+  };
+  const hole = (id, massM, positionM, dimensionlessSpin = [0, 0, 0]) => ({
+    id, massM, positionM, velocityC: [0, 0, 0], dimensionlessSpin,
+  });
+  const cases = [
+    { blend: 0, x: [3.1, -2.4, 5.7], spinA: [0, 0, 0] },
+    { blend: 0, x: [-1.2, 0.8, 2.2], spinA: [0.2, -0.3, 0.4] },
+    { blend: 0.37, x: [0.9, 1.3, -2.1], spinA: [0, 0, 0] },
+    { blend: 1, x: [2.4, 0.3, -1.8], spinA: [0, 0, 0] },
+  ];
+  for (const { blend, x, spinA } of cases) {
+    const bodies = [hole("A", 0.5, [2.6, 0, -0.9], spinA), hole("B", 0.5, [-2.6, 0, 0.9])];
+    const remnant = hole("R", 0.9516, [0, 0, 0], [0, 0.686, 0]);
+    const frame = createStrongFieldSpacetimeProvider({
+      orbitAdapter: createPnEobOrbitAdapter({
+        dynamicsModel: "4PN/EOB-compatible low-rank oracle check",
+        coordinateFrame: "asymptotically-inertial-kerr-schild-com",
+        source: "deterministic shader contract fixture",
+        usesSxsGaugeCentroids: false,
+        sample: () => ({ bodies, remnant, mergerBlend: blend }),
+      }),
+    }).frameAt(0);
+    const fieldsAt = (point) => {
+      const sample = frame.evaluateOrUnresolved(point);
+      assert.equal(sample.outcome, "valid");
+      return sample.fields;
+    };
+    const p = [0.31, -0.72, 0.45];
+    const fields = fieldsAt(x);
+    const w = fields.transitionWeight;
+    const terms = [];
+    if (w < 1) terms.push(term(bodies[0], 1 - w, x), term(bodies[1], 1 - w, x));
+    if (w > 0) terms.push(term(remnant, w, x));
+    const flow = lowRank(terms, p);
+    const H = nullHamiltonian(fields, p);
+    assert.ok(Math.abs(flow.energy / H - 1) < 1e-12, `H at blend ${blend}`);
+    const h = 1e-6;
+    for (let j = 0; j < 3; j += 1) {
+      const xp = x.slice(); xp[j] += h;
+      const xm = x.slice(); xm[j] -= h;
+      const pp = p.slice(); pp[j] += h;
+      const pm = p.slice(); pm[j] -= h;
+      const dHdx = (nullHamiltonian(fieldsAt(xp), p) - nullHamiltonian(fieldsAt(xm), p)) / (2 * h);
+      const dHdp = (nullHamiltonian(fields, pp) - nullHamiltonian(fields, pm)) / (2 * h);
+      assert.ok(Math.abs(flow.velocity[j] - dHdp) < 1e-7, `dx/dt at blend ${blend}`);
+      assert.ok(Math.abs(flow.momentumRate[j] + dHdx) < 1e-6, `dp/dt at blend ${blend}`);
+    }
+  }
+});
+

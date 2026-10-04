@@ -8,6 +8,7 @@ import {
   eggletonRocheLobeFraction,
 } from "../src/scenes/binary-accretion-model.js";
 import { createBinaryApproxScene } from "../src/scenes/binary-approx-scene.js";
+import { STRONG_FIELD_SPARSE_STRIDE } from "../src/strong-field-shaders.js";
 import { createBinaryDualDiskScene } from "../src/scenes/binary-dual-disk-scene.js";
 
 globalThis.crypto ??= webcrypto;
@@ -333,26 +334,33 @@ test("binary scene wires the strong-field runtime without losing legacy fallback
     // relative energy-drift gate]; domain = [escape radius, maximum lookback,
     // horizon backstop, maximum RK4 steps]. The test camera sits at r = 50 M,
     // so the escape sphere is at least 2 r + 16 = 116 M.
+    // The motion tiers trace sparsely (diagnostics slot 3 = stride);
+    // paused refinement traces every pixel.
     const expectedTiers = {
       emergency: {
         integrator: [0.02, 64, 0.60, 0.05],
         domain: [116, 296, 0.02, 48],
+        sparseStride: STRONG_FIELD_SPARSE_STRIDE,
       },
       survival: {
         integrator: [0.02, 64, 0.60, 0.05],
         domain: [116, 296, 0.02, 56],
+        sparseStride: STRONG_FIELD_SPARSE_STRIDE,
       },
       interactive: {
         integrator: [0.01, 64, 0.60, 0.02],
         domain: [116, 296, 0.02, 80],
+        sparseStride: STRONG_FIELD_SPARSE_STRIDE,
       },
       balanced: {
         integrator: [0.01, 64, 0.30, 0.01],
         domain: [160, 400, 0.01, 144],
+        sparseStride: 0,
       },
       fine: {
         integrator: [0.005, 64, 0.22, 0.005],
         domain: [200, 480, 0.005, 192],
+        sparseStride: 0,
       },
     };
     for (const [tierId, expected] of Object.entries(expectedTiers)) {
@@ -370,9 +378,17 @@ test("binary scene wires the strong-field runtime without losing legacy fallback
       assert.deepEqual(qualityFrame.sceneStrongDomain, expected.domain);
       assert.deepEqual(
         qualityFrame.sceneStrongDiagnostics,
-        [4, 180, 0.055, 0],
+        [4, 180, 0.055, expected.sparseStride],
       );
       assert.ok(qualityFrame.sceneStrongDomain[3] <= 192);
+      // False-colour diagnostics always trace every pixel.
+      for (const mode of [1, 2, 3, 4, 5]) {
+        const diagnosticFrame = scene.applyStrongFieldQuality(
+          { ...frame, mode, strongFieldQuality: { tierId } },
+          { qualityTierId: tierId },
+        );
+        assert.equal(diagnosticFrame.sceneStrongDiagnostics[3], 0);
+      }
     }
     const farCameraFrame = scene.applyStrongFieldQuality(
       {

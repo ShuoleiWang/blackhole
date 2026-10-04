@@ -84,8 +84,9 @@ escape-transfer ABI，而不是完整辐射渲染格式。
   单 Kerr。
 - **光子轨道捕获与失败即拒绝**：对孤立 Kerr 黑洞，位于最内侧（顺行）光子
   轨道以内且向内运动的光线不可能逃逸，因此在那里判为捕获；合并过渡期间半径
-  按各项度规权重缩放。在未缩放光子轨道内出现的度规失效或预算耗尽判为捕获；
-  其他位置仍保留为醒目的 `unresolved`，绝不会被当成天空采样。
+  按各项度规权重缩放。在未缩放光子轨道内出现的度规失效、预算耗尽，或在视界附近
+  坐标速度降到 0.2 以下（正从陷俘面剥离的光子）判为捕获；其他位置的失效仍保留为醒目的
+  `unresolved`，绝不会被当成天空采样。
 - **可交互时间控制**：可拖动波形时间轴、从两个播放按钮暂停/继续，并可
   开关合并阶段 `0.12×` 慢放。慢放只改变墙钟播放速度，不修改 source time
   或任何物理数据。
@@ -226,14 +227,15 @@ http://localhost:4173/?scene=transfer-map-reference&reference=kerr-remnant&diagn
 
 WebGPU 每个像素先在静止观测者（`u = ∂ₜ/α_s`，与 Schwarzschild 场景同类的
 相机）的静止系中构造相机方向，然后计算光子到达相机时的未来指向动量，再以
-负坐标时间步推进 Hamiltonian 流，从而回溯过去指向光路。随后计算冻结的叠加 Kerr-Schild 度规，将其分解为
-lapse、shift 与空间度规，并积分
+负坐标时间步推进 Hamiltonian 流，从而回溯过去指向光路。冻结的叠加 Kerr-Schild
+度规通过其精确的低秩（Woodbury）逆矩阵求值，lapse、shift 与零 Hamiltonian 都有
+闭式表达，并积分
 
 ```text
 H(x,p) = α sqrt(γⁱʲ pᵢ pⱼ) - βⁱpᵢ = -pₜ
 ```
 
-积分使用经典四阶 Runge-Kutta、解析空间导数，以及精确的能量面投影（H 对 p
+积分使用经典四阶 Runge-Kutta、闭式空间导数，以及精确的能量面投影（H 对 p
 一次齐次，投影不改变路径），并把光线终态保留为 captured（最内侧光子轨道）、
 escaped 或 unresolved。逃逸球远在相机之外，那里入射 Kerr-Schild 坐标方向与
 渐近天空方向只差约 M b³/r⁴，因此不再附加弱场尾段；频移使用守恒的无穷远能量
@@ -245,7 +247,7 @@ t = −18.09 M），早于叠加度规在两洞之间失去洛伦兹号差；只
 度规，光子轨道捕获面取自孤立 Kerr 项，不是求出的视在/事件视界；直接叠加
 还会让每个黑洞的阴影偏大约 `2 m_伴星 / d`。运动档使用更大的 RK4 步长系数
 （黑洞附近天空误差为数角分，即原生 Retina 下数个像素）；暂停后的 `fine` 是
-最严格的 settled 档（约 0.1′）。
+最严格的 settled 档（黑洞附近约 0.02–0.06′）。
 这些策略用数值分辨率换延迟，不会提高底层模型的科学声明等级。WebGL2 则有意
 接收旧 separation/phase 兼容 payload，并运行明确标注的 weak-field shader。
 
@@ -283,9 +285,9 @@ bundles 与独立版本的辐射产品，而不会扩张 v1 32-byte vacuum ABI �
   频率—半径轨道适配、C² 合并运动学与 provider frame
 - [`src/strong-field-spacetime.js`](./src/strong-field-spacetime.js)：CPU
   Kerr-Schild / 3+1 物理 oracle、provider ABI、Hamiltonian 与失败即拒绝域检查
-- [`src/strong-field-shaders.js`](./src/strong-field-shaders.js)：WebGPU 度规
-  jet、静止观测者相机、RK4 Hamiltonian 光追、光子轨道捕获、outcome、诊断
-  和显式 WebGL2 fallback 声明
+- [`src/strong-field-shaders.js`](./src/strong-field-shaders.js)：WebGPU 低秩
+  Kerr-Schild Hamiltonian、静止观测者相机、RK4 光追、光子轨道捕获、outcome、
+  诊断和显式 WebGL2 fallback 声明
 - [`src/strong-field-quality.js`](./src/strong-field-quality.js)：M3 Pro
   交互/细化调度、分辨率/步数滞回、revision 失效与累积策略
 - [`src/binary-shaders.js`](./src/binary-shaders.js)：仅为明确 WebGL2 fallback
@@ -368,8 +370,11 @@ M4 兼容承诺。ESO 6000×3000 与 Gaia 16000×8000 路径均纳入人工验�
 `interactive` RK4 档；暂停时在相同 raster 上依次使用 `balanced`、`fine` 档。例如
 1280×720 CSS viewport 在 2× Retina 上渲染为 2560×1440，1836×1376 则为
 3672×2752。该模式允许明显卡顿；completed-frame 计时只作遥测，不再拥有
-降采样权限。在 M3 Pro 上，全屏 3456×2234 Retina 画布的 `interactive` 帧约
-240 ms（运动时约 4 FPS），`fine` 每个样本约 670 ms，详见
+降采样权限。运动帧先按每 4×4 像素一条光线追踪节点，只在透镜映射可证明
+平滑处（双线性误差低于 0.25 像素，且不跨越捕获区、吸积盘或临界曲线）插值
+逃逸方向，其余像素逐一追踪。在 M3 Pro 上，全屏 3456×2234 Retina 画布的
+`interactive` 帧因此约 11 ms（逐像素追踪约 36 ms；合并过渡期间约 20 ms），
+`fine` 每个样本约 96 ms，详见
 [`docs/strong-field-performance.md`](./docs/strong-field-performance.md)。
 
 ## 验证

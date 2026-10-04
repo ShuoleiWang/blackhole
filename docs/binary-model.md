@@ -225,9 +225,10 @@ between the holes) and ending at the waveform peak, a quintic smootherstep
 removes those terms and adds the SXS-anchored remnant. At unit transition weight
 the metric is exactly one analytic Kerr-Schild remnant.
 
-The shader decomposes the covariant metric into lapse `α`, shift `βⁱ`, and
-spatial metric `γᵢⱼ`. Dual-number metric jets provide analytic spatial
-derivatives in one provider evaluation. The camera is the static observer
+The shader evaluates the reduced 3+1 null Hamiltonian through the exact
+low-rank (Woodbury) inverse of the superposition, with closed-form spatial
+derivatives, in one provider evaluation per RK4 stage (see
+[`strong-field-equations.md`](./strong-field-equations.md)). The camera is the static observer
 (`u = ∂ₜ/α_s`); the view vector points from the camera into the scene, and the
 shader stores the future-directed covector of the photon arriving at the
 camera, then integrates the reduced null Hamiltonian backward in coordinate
@@ -253,8 +254,9 @@ static camera gives the same `g = 1/α_s` for every sky pixel.
 Every ray ends as:
 
 - `captured`, after moving inward inside the innermost (prograde) photon
-  orbit of the nearest term, or after a metric failure or exhausted budget
-  inside the unscaled photon orbit of any term present in the metric;
+  orbit of the nearest term, or after a metric failure, an exhausted budget
+  or slowing below coordinate speed 0.2 near a horizon inside the unscaled
+  photon orbit of any term present in the metric;
 - `escaped`, with an asymptotic sky direction and frequency factor; or
 - `unresolved`, after a metric-domain failure, excessive energy drift, or
   exhausted integration budget anywhere else.

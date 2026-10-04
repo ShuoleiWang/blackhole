@@ -67,7 +67,11 @@ Rays are captured at the innermost photon orbit of the nearest term (radii
 scaled by metric weight during the merger blend), which a ray from outside
 cannot leave; the horizon padding is only a backstop. A metric failure or an
 exhausted budget inside the unscaled photon orbit of any term present in the
-metric is also a capture; elsewhere the ray remains `unresolved`. The larger
+metric is also a capture, as is a ray there whose coordinate speed has fallen
+below 0.2 where the aligned Kerr-Schild field is at least 2/3 (a photon peeling
+off a trapped surface; see
+[`strong-field-equations.md`](./strong-field-equations.md)); elsewhere the ray
+remains `unresolved`. The larger
 step fraction of the motion tiers is a latency tradeoff; fractions above 0.6
 start flipping capture outcomes, so no tier uses one. Settled `fine` is
 deliberately stricter, but no tier upgrades the approximate metric to NR.
@@ -77,33 +81,45 @@ deliberately stricter, but no tier upgrades the approximate metric to NR.
 Sky-direction errors are measured with the production WGSL through the
 compute probe of `src/strong-field-gpu-probe.js`, driven by a local harness
 that is not part of the repository. The reference is the same tracer at step
-fraction 0.04 with a 1,900-step budget; frames are SXS:BBH:0001 at
-`t = -9210, -1000, -60, -8, +10 M` on a 192×108 full-frame grid (camera 42 M,
-57° inclination, 52° vertical field of view). "Near" rays are those whose
-reference path passes within 8 M of a horizon. Frame times are for the
-production renderer tracing a full native-Retina 3456×2234 frame at
-`t = -1000 M` (offscreen canvas, 6K sky, SDR post).
+fraction 0.04 with a 1,900-step budget and a 200 M escape sphere; frames are
+SXS:BBH:0001 at `t = -9210, -1000, -60, -8, +10 M` on a 192×108 full-frame
+grid (camera 42 M, 57° inclination, 52° vertical field of view). "Near" rays
+are those whose reference path passes within 8 M of a horizon.
 
-| Tier | All rays: median / p99 error | Near rays: median / p90 error | Outcome flips per 20,736 rays | Native 3456×2234 frame |
+| Tier | Metric evaluations per ray | All rays: median / p99 error | Near rays: median / p90 error | Outcome flips per 20,736 rays |
 | --- | ---: | ---: | ---: | ---: |
-| `interactive` | 0.3–0.4′ / 9–21′ | 2.7–8.0′ / 6.6–22′ | 0–3 | 238 ms |
-| `balanced` | 0.2–0.3′ / 0.6–0.7′ | 0.14–0.28′ / 0.22–0.61′ | 0–2 | 485 ms |
-| `fine` | 0.2–0.25′ / 0.6–0.7′ | 0.06–0.10′ / 0.09–0.19′ | 0–2 | 673 ms |
+| `interactive` | 34–37 | 0.32–0.42′ / 8.6–21′ | 2.6–8.0′ / 6.6–22′ | 0–3 |
+| `balanced` | 66–74 | 0.019–0.026′ / 0.26–0.58′ | 0.085–0.26′ / 0.2–0.6′ | 0–2 |
+| `fine` | 91–102 | 0.011–0.015′ / 0.07–0.14′ | 0.023–0.063′ / 0.05–0.14′ | 0–2 |
+
+Frame times are for the production renderer tracing every pixel of a
+native-Retina 3456×2234 frame (offscreen canvas, 6K sky, SDR post); moving
+frames are traced sparsely, as described below:
+
+| Phase | `interactive` | `balanced` | `fine` |
+| --- | ---: | ---: | ---: |
+| Binary (`t = -1000 M`) | 36 ms | 70 ms | 96 ms |
+| Merger blend (`t = -12 M`) | 67 ms | 139 ms | 195 ms |
+| Remnant (`t = +10 M`) | 32 ms | 62 ms | 83 ms |
 
 A native-Retina pixel at this field of view is about 1.4′, so moving frames
-displace lensed features near the holes by several pixels (most near merger,
+displace lensed features near the holes by a few pixels (most near merger,
 when the holes are closest), and a paused view visibly settles when it refines
 to `balanced`/`fine`. The error falls roughly as the fifth power of the step
-fraction (0.5 would cut it by 60% for 20% more frame time, 0.4 by 87% for
-47%). Scaling the fraction with local curvature or capping the far-field step
-was measured to be less efficient than a uniform fraction.
+fraction. Scaling the fraction with local curvature, or capping the far-field
+step, was measured to be less efficient than a uniform fraction; growing it
+only for outbound rays beyond 30 M (×2, at most 2) saves 11–16% of the
+evaluations without changing the errors. Ending rays that hover at the
+blended horizon (the hover capture in
+[`strong-field-equations.md`](./strong-field-equations.md)) removed a further
+10–20% from dense merger-blend frames, where such rays otherwise spent the
+whole step budget and held their SIMD groups with them.
 
-With the native-resolution lock, the `interactive` tier therefore runs at about
-4 FPS on a full-screen Retina panel; the frame time scales linearly with pixel
-count (about 31 ns per pixel), so a 1728×1117 raster takes 65 ms. The previous
-symplectic-Euler `interactive` tier took 59 ms at that raster while
-misplacing directions by 0.55–0.61° (median) and 13–45° (p99), with a
-Schwarzschild shadow radius 17% too large.
+Before the low-rank rewrite (commit `c20a022`) the same frames took 236, 491
+and 673 ms in the binary phase and 1,094 ms (`interactive`) during the blend;
+the first-order symplectic-Euler tracer before that misplaced directions by
+0.55–0.61° (median) and 13–45° (p99) at `interactive`, with a Schwarzschild
+shadow radius 17% too large.
 
 Against exact Schwarzschild orbit integrals (same harness), the photon-orbit
 capture reproduces the shadow edge `b_c = 3 sqrt(3) M` within the 0.1% sampling
@@ -113,6 +129,71 @@ shadow edge ends `unresolved`.
 These are M3 Pro policy values, not general physics-accuracy claims;
 shader-specific acceptance must still prove each declared convergence
 boundary.
+
+#### Sparse tracing of moving frames (2026-09-29)
+
+The motion tiers (`interactive`, and the fallback-only `survival` and
+`emergency`) trace photographic frames sparsely. A coarse pass first traces
+the ray through every fourth pixel in each direction (one node per 4×4 pixels)
+into an `rgba32float` field holding the escape direction scaled by the
+frequency shift, and the ray outcome. The full-resolution pass then
+interpolates a pixel bilinearly only if
+
+- the four nodes of its cell and their eight axis neighbours all escaped to
+  the sky;
+- the bilinear error bound, one eighth of the largest second difference of the
+  escape direction across that stencil, is below 0.25 px; and
+- in the dual-disk scene, none of those twelve node rays met a disk. A node
+  also counts as meeting a disk when its beam, two node spacings in angular
+  half-width around the ray, passes a disk annulus.
+
+Every other pixel is traced exactly as in a dense frame. Captures and shadow
+edges, critical curves (where the curvature of the lens map diverges) and
+disks therefore keep one ray per pixel, and the sky panorama is still sampled
+per pixel from the interpolated direction. Diagnostic modes, jittered
+accumulation samples and paused refinement (`balanced`, `fine`) never read the
+coarse field.
+
+Against dense production-probe truth in the central 1024×768 pixels of the
+3456×2234 frames above (the strongly lensed region, where 59–65% of the pixels
+are traced), interpolated directions differ from the traced ones by
+0.033–0.041 px (median), 0.19–0.20 px (p99) and at most 0.34 px. No
+interpolated pixel's own ray was captured or unresolved (binary, blend and
+remnant frames at `t = -1000, -12, +10 M`). This is an order of magnitude
+below the step-size error of the `interactive` tier itself.
+
+The production renderer was also compared frame by frame. Each frame was
+rendered sparse and dense, both linear-HDR trace targets were read back and
+mapped to 8-bit display codes (Reinhard, sRGB); the camera is at 42 M and 57°
+unless noted:
+
+| Frame | PSNR | Pixels off by ≥ 2 / ≥ 8 codes | Largest difference |
+| --- | ---: | ---: | ---: |
+| Binary, `t = -1000 M` | 63.0 dB | 0.22% / 0.004% | 30 |
+| Binary, `t = -150 M`, 86° | 61.9 dB | 0.21% / 0.004% | 31 |
+| Merger blend, `t = -10 M` | 63.0 dB | 0.20% / 0.004% | 34 |
+| Remnant, `t = +20 M`, 80° | 62.4 dB | 0.20% / 0.004% | 40 |
+| Binary, camera at 18 M, `t = -400 M` | 57.7 dB | 0.76% / 0.017% | 48 |
+| Dual disk, `t = -2000 M` | 62.4 dB | 0.24% / 0.005% | 32 |
+| Dual disk, camera at 16 M, 89.7°, `t = -4000 M` | 61.8 dB | 0.17% / 0.001% | 19 |
+
+The largest differences are single star pixels displaced by a fraction of a
+pixel. Without the beam test, the edge-on dual-disk frame lost the 5-pixel tip
+of a disk image thinner than the node spacing (largest difference 207 codes).
+
+`interactive` frame times, 3456×2234, median of 7 frames:
+
+| Phase | Dense | Sparse |
+| --- | ---: | ---: |
+| Binary (`t = -1000 M`) | 36 ms | 10.5 ms |
+| Merger blend (`t = -12 M`) | 67 ms | 21 ms |
+| Remnant (`t = +10 M`) | 32 ms | 10.4 ms |
+
+Across the blend (`t = -12, -10, -8, -4 M`) sparse frames take 19–21 ms. Before
+the hover capture they took 29–55 ms: every pixel of the traced shadow ran the
+full step budget. The coarse pass traces 1/16 of the rays; the rest of a
+sparse frame is dominated by the traced band around the holes, which widens as
+the camera approaches them.
 
 Completed ray-trace submission time still uses an exponential moving average,
 but it is telemetry rather than authority to downsample. Resource uploads enter
@@ -146,15 +227,30 @@ GPU queue. WebGL2 has no asynchronous completion signal and retains RAF timing.
 
 ### M3 Pro production trace-path optimization
 
-The WebGPU path applies two optimizations without lowering any numerical or
-spatial quality budget:
+The WebGPU path applies these optimizations without lowering any numerical or
+spatial quality budget; the only approximation, sparse tracing of moving
+frames, stays within the bound described above:
 
+- each RK4 stage evaluates the reduced Hamiltonian through the low-rank
+  (Woodbury) form of the superposed Kerr-Schild metric with closed-form
+  gradients (see [`strong-field-equations.md`](./strong-field-equations.md)),
+  instead of assembling a dual-number 3+1 decomposition and inverting the
+  spatial metric; this made every tier about 6× faster in the binary phase and
+  14× faster during the merger blend, with unchanged outcomes;
+- five Metal pipelines specialize the frame-uniform spacetime phase (binary,
+  transition, remnant) and whether the binary bodies spin, so the compiler
+  removes inactive Kerr-Schild providers and, for non-spinning bodies, the
+  never-taken Kerr branch (which otherwise costs ~40% through register
+  pressure);
+- the conserved energy is taken from the first loop evaluation at the camera,
+  and outbound far-field steps grow as described above;
+- moving photographic frames trace one ray per 4×4 pixels first and
+  interpolate the escape direction wherever the lens map is provably smooth
+  (see "Sparse tracing of moving frames"), which makes the `interactive` tier
+  about 3× faster at native resolution;
 - moving or continuously playing frames go directly from the linear-HDR trace
   target to the existing post pass; they do not copy a sample that is forbidden
-  from becoming temporal history into an otherwise unused accumulation target;
-- three Metal pipelines specialize the frame-uniform spacetime phase as binary,
-  transition, or remnant, allowing the compiler to remove inactive
-  Kerr-Schild providers instead of retaining the worst-case provider graph.
+  from becoming temporal history into an otherwise unused accumulation target.
 
 Two more aggressive algebraic candidates -- replacing production `pow` and
 fusing inverse-metric derivative contractions -- were rejected after the GPU
