@@ -59,6 +59,15 @@ offline ray generation, authenticated playback, GPU consumption, diagnostics,
 and sky composition. They are calibration and regression oracles, not merger
 renderers.
 
+The `?scene=supernova-ia` route renders a **Type Ia supernova** from start to
+finish: a Roche-lobe-filling double white dwarf, the helium-shell and core
+detonations, the fireball, the radioactively powered photosphere and the
+nebular phase. A grey flux-limited radiation-diffusion solution with
+⁵⁶Ni→⁵⁶Co→⁵⁶Fe heating sets every temperature and luminosity (bolometric peak
+1.1×10⁴³ erg/s at 17 d, as for SN 2011fe), and the WebGPU tracer integrates
+emission and absorption through it with relativistic Doppler shifts and
+light-travel delay. See [`docs/transient-physics.md`](./docs/transient-physics.md).
+
 ![A Schwarzschild black hole, accretion disk, and gravitationally lensed Milky Way](./docs/images/blackhole-galaxy-hero.webp)
 
 <sub>A 5120×2576 in-app screenshot of the WebGPU/Metal renderer running on Apple Silicon, with the controls and live backend, output, and performance readouts visible. Milky Way source: ESO/S. Brunier; geodesically transformed, composited, and transcoded by this project from an original used under [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/). See [`assets/SOURCES.md`](./assets/SOURCES.md) for full provenance.</sub>
@@ -70,6 +79,7 @@ renderers.
 | Root real-time vacuum binary scene | Implemented | WebGPU 3+1 Hamiltonian RK4 rays through a frame-frozen superposed Kerr-Schild fast-light approximation; SXS anchors waveform/events/remnant, not body coordinates |
 | `?scene=binary-dual-disk` | Implemented | Same strong-field lensing plus two idealized Roche/ISCO-truncated thin mini-disks; no GRMHD, self-consistent spectral radiative transfer, or post-merger emission model |
 | `?scene=schwarzschild` | Implemented | Interactive single-hole Schwarzschild geodesics and an idealized disk |
+| `?scene=supernova-ia` | Implemented | Double-detonation Type Ia supernova: Roche-geometry binary, kinematic detonations, grey radiation diffusion and emission–absorption transport; no hydrodynamics, non-LTE spectra or polarization |
 | Stationary Schwarzschild/Kerr workbench | Implemented | Fixed-camera analytic vacuum calibration, authenticated delivery, and regression oracles; not a merger renderer |
 | WebGL2 binary fallback | Implemented | Explicit legacy weak-field preview with no claim of physical parity with the WebGPU strong-field path |
 | Offline single-Kerr spectral renderer | Rewrite planned | The earlier pure-Python prototype was removed from `main` pending a lean rewrite; it is preserved on the `archive/offline-v1` branch |
@@ -132,6 +142,31 @@ rendering format.
 - **Inspectable scientific diagnostics** — Stable URL modes show sky,
   outcomes, lookback time, frequency shift, null residual, or projection
   error. Clicking a texel exposes its decoded canonical 32-byte record.
+- **Type Ia supernova** — A 1.0 M☉ C/O white dwarf with a 0.016 M☉ helium
+  shell accretes from a 0.6 M☉ white dwarf through a ballistic stream. The
+  impact spot radiates at the local Eddington flux (1.0×10⁶ K,
+  3.7×10³⁶ erg/s), and its light heats the donor's facing side to
+  ~3×10⁵ K and the stream to 2–9×10⁵ K (reflection effect). The helium
+  detonation, the core breakout and the fireball, faster towards the
+  ignition side like the ejecta, follow energy-budgeted photosphere laws and
+  hand off continuously to the ejecta;
+  the surviving donor is struck and released at 1775 km/s. The homologous
+  ejecta (0.515 M☉ ⁵⁶Ni, shadow cone, impact-axis stretch, orbital kick) are
+  rendered from a grey flux-limited diffusion solution with
+  Eddington–Barbier limb darkening, nebular radioactive emission, retarded
+  time and relativistic Doppler.
+- **Camera exposure and glare for self-luminous scenes** — The Type Ia scene
+  exposes self-luminous surfaces near display white, not middle grey, and
+  adapts like a camera, so flashes overexpose before the exposure follows. Veiling glare uses the CIE 146:2002 disability-glare shape at the
+  strength of a good camera lens (~2% veiling-glare index), computed as a
+  quarter-resolution Gaussian pyramid added in the post pass (~1.1 ms per
+  native frame). Diagnostic false colour and the black-hole scenes never
+  receive it.
+- **Sparse radiance tracing** — Moving Type Ia frames trace one node per 4×4
+  pixels and interpolate only where 12 neighbouring nodes see the same object
+  and the bilinear error bound stays under 0.4% of the display value; the
+  photospheric phases drop from 23–35 ms to 4–5.4 ms per native 3456×2234
+  frame on an M3 Pro at 57–64 dB PSNR.
 - **Isolated scene architecture** — Scene descriptors and shader bundles keep the root binary scene, explicit Schwarzschild scene, and fixed-camera scientific references from silently sharing physical assumptions.
 - **WebGPU production, explicit WebGL2 fallback** — WebGPU/Metal runs the
   strong-field binary model. WebGL2 remains a labelled weak-field
@@ -165,7 +200,9 @@ Open <http://localhost:4173/?scene=schwarzschild> for the interactive
 single-hole renderer, or open
 <http://localhost:4173/?scene=transfer-map-reference> for the fixed-camera
 Schwarzschild transfer-map reference, or append `&reference=kerr-remnant` for
-the stationary Kerr remnant-spin reference. All paths remain isolated.
+the stationary Kerr remnant-spin reference. Open
+<http://localhost:4173/?scene=supernova-ia> for the Type Ia supernova. All
+paths remain isolated.
 
 The bundled 6K Milky Way background works immediately. To install the optional, approximately 236 MiB Gaia 16K map:
 
@@ -222,6 +259,15 @@ only on WebGPU. Each disk follows the provider-owned body state, shrinks with
 Roche-truncated outer edge reaches the `6m_i` ISCO. WebGL2 remains a labelled
 vacuum weak-field preview and disables the emission control.
 
+The Type Ia scene reuses the timeline controls. The scrubber runs on a
+presentation timeline that is linear through the orbit and the detonations and
+logarithmic from seconds to 150 days; the rate readout states how much
+physical time one wall second covers. **Camera follows expansion** keeps the
+whole event in view (off freezes the physical camera distance), and the three
+modes select auto-exposed true colour, sky-referenced exposure, or false colour
+by ejecta composition. Exposure compensation spans ±4 EV and playback speed
+0–4×.
+
 The transfer-map workbench has a fixed camera and projection, so drag, zoom,
 reset, motion, mass, accretion, and time controls are disabled. It can switch
 between the Schwarzschild and Kerr references and display sky composition,
@@ -242,6 +288,8 @@ inspector. Exposure and display quality remain presentation controls.
 | `?scene=transfer-map-reference` | Open the fixed-camera stationary analytic Schwarzschild transfer-map reference; not NR and no accretion disk |
 | `?scene=transfer-map-reference&reference=kerr-remnant` | Open the stationary analytic Kerr remnant-spin reference; not NR and no accretion disk |
 | `&binaryTime=-16.8&paused=1` | Open the real-time binary scene at a reproducible protocol time in `M` and keep its timeline paused |
+| `?scene=supernova-ia` | Open the Type Ia supernova (double-degenerate double detonation) |
+| `&snTime=1468800&paused=1` | Open the Type Ia scene at a physical time in seconds after helium ignition (here ≈17 d, near peak) and keep it paused |
 | `&diagnostic=sky\|outcome\|lookback\|frequency-shift\|null-residual\|projection-error` | Select a stable transfer-map workbench view |
 | `?renderer=webgl` | Force the WebGL2 fallback path |
 | `?hdr=0` | Disable extended HDR and use stable SDR output |
@@ -404,6 +452,19 @@ Primary implementation files:
 - [`scripts/generate_nr_contract_fixture.py`](./scripts/generate_nr_contract_fixture.py) — Deterministically regenerate the conformance fixture
 - [`scripts/verify_nr_contract.py`](./scripts/verify_nr_contract.py) — Fail-closed manifest, sidecar, coordinate-frame, and per-ray record validator
 - [`tests/test_nr_contract.py`](./tests/test_nr_contract.py) — Positive and adversarial protocol regression tests
+- [`src/scenes/supernova-ia-scene.js`](./src/scenes/supernova-ia-scene.js) —
+  Type Ia scene lifecycle, camera auto exposure, quality tiers and the sparse
+  opt-in
+- [`src/scenes/transient-scene-host.js`](./src/scenes/transient-scene-host.js) —
+  Shared transient panel, presentation-timeline transport and light-curve plot
+- [`src/supernova-ia-shaders.js`](./src/supernova-ia-shaders.js) — WebGPU
+  double-detonation tracer (binary, detonations, ejecta), sparse radiance
+  pass, and the reduced WebGL2 fallback
+- [`src/transients/`](./src/transients/) — Physical constants, CIE blackbody
+  colour, homologous radiation diffusion, Roche binary, white-dwarf structure,
+  presentation timeline, shared transient WGSL, and the Type Ia model
+- [`docs/transient-physics.md`](./docs/transient-physics.md) — Transient
+  physics, calibration against SN 2011fe, omissions and performance
 - [`src/webgpu-renderer.js`](./src/webgpu-renderer.js) — WebGPU renderer,
   one-frame submission gate, FP16 ping-pong progressive accumulation, and
   HDR/P3 configuration negotiation
@@ -424,6 +485,7 @@ Primary implementation files:
 | Stationary Schwarzschild reference | Fixed 1024×576 analytic vacuum map, authenticated chunks, nearest-texel WebGPU/WebGL2 playback | Fixed camera; no disk, NR source, time interpolation, or binary slow-light rays |
 | Stationary Kerr remnant reference | Numerically integrated vacuum geodesics of the exact analytic Kerr metric at `a/M = 0.686461676493`, finite BL-ZAMO camera, oblate Kerr-r capture surface, authenticated playback and diagnostics | Uses only the SXS remnant spin parameter; no SXS near-zone metric, binary time dependence, emission, or NR-derived pixels |
 | NR transfer-map protocol | Versioned schema, deterministic synthetic fixture, fail-closed validators, reference consumer, and regression tests | The runtime is proven with analytic data only; no NR-derived transfer map is bundled |
+| Type Ia supernova | D6 binary with an exact Roche donor and ballistic stream; kinematic helium and core detonations with energy-budgeted breakout photospheres; grey flux-limited diffusion with Ni/Co heating and γ-ray transport; retarded-time, Doppler-shifted emission–absorption rendering | Grey transport, one-dimensional in velocity with analytic asymmetries; colour temperature from the observed B−V track; no hydrodynamics, non-LTE spectra, early-excess physics or polarization |
 | Shared renderer | WebGPU strong-field production path with one in-flight frame and stationary FP16 accumulation; WebGL2 weak-field fallback | HDR, P3, FP16, and 16K textures depend on runtime capabilities; HDR and accumulation do not improve the underlying metric model |
 
 See [`docs/rendering-modes.md`](./docs/rendering-modes.md) for the product
@@ -436,7 +498,8 @@ boundary, and the
 [`strong-field equations`](./docs/strong-field-equations.md),
 [`M3 Pro scheduler`](./docs/strong-field-performance.md), and
 [`independent ray oracles`](./docs/strong-field-ray-oracles.md) notes for the
-implemented real-time path.
+implemented real-time path. [`docs/transient-physics.md`](./docs/transient-physics.md)
+covers the Type Ia supernova.
 
 ## M3 Pro compatibility and HDR
 
@@ -496,6 +559,16 @@ for combined, A-only, B-only, repeated, and dark-disk cases; a passing page is
 a native-backend numerical check, not a screenshot comparison. No automated
 test executes the WGSL tracers; the Node suite checks their source contract and
 the CPU oracles.
+
+The transient tests check blackbody photometry (luminous efficacy, Planckian
+locus, 6500 K neutral point), energy conservation of the radiation-diffusion
+solver (Katz integral) and its Arnett, convergence and adiabatic limits, and
+the presentation timeline. For the Type Ia scene they pin the Roche/Kepler
+binary, the ⁵⁶Ni mass, peak time and luminosity, Arnett ratio, bolometric
+decline, photospheric velocity and γ-ray trapping time against normal SNe Ia,
+the breakout energy budget, the donor strike time, the slot-for-slot agreement
+of the packed uniforms with the WGSL struct, and the scene's tier-to-sparse
+mapping and panel restoration.
 
 Regenerate the bundled reference deterministically with:
 

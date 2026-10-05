@@ -350,11 +350,15 @@ console.error = (...values) => {
 };
 
 await import(new URL("../../src/main.js?dual-disk-entry-harness", import.meta.url));
-for (let attempt = 0; attempt < 200; attempt += 1) {
+// Startup awaits file reads, so bound the wait in wall time (well inside the
+// 20 s spawn timeout) rather than in event-loop turns, which a loaded test
+// runner can exhaust before the I/O completes.
+const startupDeadline = performance.now() + 10_000;
+while (performance.now() < startupDeadline) {
   if (element("backendStatus").textContent === "Stub WebGPU · Metal") {
     break;
   }
-  await new Promise((resolve) => setImmediate(resolve));
+  await new Promise((resolve) => setTimeout(resolve, 2));
 }
 
 if (element("backendStatus").textContent !== "Stub WebGPU · Metal") {

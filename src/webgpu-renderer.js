@@ -3,6 +3,7 @@ import {
   traceFragmentWGSL,
   postFragmentWGSL,
 } from "./shaders.js";
+import { GlarePass } from "./glare.js";
 import { createI18n } from "./i18n.js";
 
 const HDR_FORMAT = "rgba16float";
@@ -281,10 +282,17 @@ function coarsePassFrom(bundle) {
     || declaration.stride < 2
     || !Number.isInteger(declaration.binding)
     || declaration.binding < 3
+    || (
+      declaration.sharesTraceResources !== undefined
+      && typeof declaration.sharesTraceResources !== "boolean"
+    )
   ) {
     throw new Error("Invalid sparse-tracing coarse-pass declaration");
   }
-  return Object.freeze({ ...declaration });
+  // sharesTraceResources: the coarse entry point also reads the sky, its
+  // sampler and the scene resources (e.g. nodes that store radiance rather
+  // than escape directions).
+  return Object.freeze({ ...declaration, sharesTraceResources: declaration.sharesTraceResources === true });
 }
 
 function progressiveAccumulationFrom(options, bundle) {
@@ -386,6 +394,11 @@ export function progressiveHistorySignature(frame) {
     values,
     frame.sceneStrongAccretionUniforms,
   );
+  // Transient scenes carry their complete physical state (positions, the
+  // radiation-diffusion profile, exposure) in one packet.
+  if (frame.sceneTransientUniforms != null) {
+    appendHistoryValues(values, "sceneTransientUniforms", frame.sceneTransientUniforms);
+  }
   return values.join("|");
 }
 
@@ -782,6 +795,11 @@ export class WebGPURenderer {
     this.coarseView = null;
     this.traceDefaultSpecialization = "default";
     this.postBindGroup = null;
+    // Observer glare for scenes whose bundle opts in (self-luminous
+    // transients); the post pass then adds its quarter-resolution field.
+    this.glarePass = null;
+    this.glarePostBindGroups = [];
+    this.blackGlareTexture = null;
     this.accumulationBuffer = null;
     this.accumulationData = new Float32Array(4);
     this.accumulationTextures = [];
@@ -1060,6 +1078,7 @@ export class WebGPURenderer {
     }
 
     const traceSpecializations = traceSpecializationsFrom(this.shaderBundle);
+    this.sceneResourceState = createSceneResources(this.shaderBundle, device);
     this.coarsePass = coarsePassFrom(this.shaderBundle);
     const coarsePipelineEntries = this.coarsePass
       ? Promise.all(traceSpecializations.map(async ({ id, constants }) => [
@@ -1117,6 +1136,18 @@ export class WebGPURenderer {
       },
       primitive: { topology: "triangle-list" },
     });
+    // The post pass always binds a glare field; scenes without glare (and
+    // frames that opt out) read this 1x1 black texture.
+    this.blackGlareTexture = device.createTexture({
+      label: "No-glare 1x1 black field",
+      size: [1, 1, 1],
+      format: HDR_FORMAT,
+      usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST,
+    });
+    this.blackGlareView = this.blackGlareTexture.createView();
+    if (this.shaderBundle.glare) {
+      this.glarePass = new GlarePass(device, HDR_FORMAT);
+    }
     if (accumulationModule) {
       this.accumulationPipeline = await device.createRenderPipelineAsync({
         label: "Strong-field progressive accumulation pipeline",
@@ -1136,7 +1167,6 @@ export class WebGPURenderer {
       });
     }
 
-    this.sceneResourceState = createSceneResources(this.shaderBundle, device);
     if (
       this.coarsePass
       && this.sceneResourceState?.entries.some(
@@ -1209,13 +1239,25 @@ export class WebGPURenderer {
       usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING,
     });
     this.coarseView = this.coarseTexture.createView();
+    this.createCoarseBindGroups();
+  }
+
+  createCoarseBindGroups() {
+    const entries = [{ binding: 0, resource: { buffer: this.uniformBuffer } }];
+    if (this.coarsePass.sharesTraceResources) {
+      entries.push(
+        { binding: 1, resource: this.skyTexture.createView() },
+        { binding: 2, resource: this.skySampler },
+        ...(this.sceneResourceState?.entries || []),
+      );
+    }
     this.coarseBindGroups = Object.fromEntries(
       Object.entries(this.coarsePipelines).map(([id, pipeline]) => [
         id,
         this.device.createBindGroup({
           label: `Sparse coarse-node resources · ${id}`,
           layout: pipeline.getBindGroupLayout(0),
-          entries: [{ binding: 0, resource: { buffer: this.uniformBuffer } }],
+          entries,
         }),
       ]),
     );
@@ -1291,10 +1333,27 @@ export class WebGPURenderer {
       this.traceView,
       "Post-process resources",
     );
+    this.glarePass?.resize(nextWidth, nextHeight);
     this.recreateProgressiveTargets(nextWidth, nextHeight);
   }
 
-  createPostBindGroup(textureView, label) {
+  // The glare pass reads whichever target the post pass would have read:
+  // source 0 is the trace target, 1 + i the accumulation history i; each has
+  // a post bind group that adds the glare field.
+  refreshGlareSources() {
+    if (!this.glarePass || !this.traceView) {
+      return;
+    }
+    const views = [this.traceView, ...this.accumulationViews];
+    this.glarePass.setSources(views);
+    this.glarePostBindGroups = views.map((view, index) => this.createPostBindGroup(
+      view,
+      `Post-process with glare ${index}`,
+      this.glarePass.glareView,
+    ));
+  }
+
+  createPostBindGroup(textureView, label, glareView = this.blackGlareView) {
     return this.device.createBindGroup({
       label,
       layout: this.postPipeline.getBindGroupLayout(0),
@@ -1302,6 +1361,7 @@ export class WebGPURenderer {
         { binding: 0, resource: { buffer: this.uniformBuffer } },
         { binding: 1, resource: textureView },
         { binding: 2, resource: this.postSampler },
+        { binding: 3, resource: glareView },
       ],
     });
   }
@@ -1320,6 +1380,7 @@ export class WebGPURenderer {
     this.destroyProgressiveTargets();
     this.invalidateProgressiveHistory();
     if (!this.progressiveAccumulation) {
+      this.refreshGlareSources();
       return;
     }
     for (let index = 0; index < 2; index += 1) {
@@ -1350,6 +1411,7 @@ export class WebGPURenderer {
       ),
     );
     this.accumulationReadIndex = 0;
+    this.refreshGlareSources();
   }
 
   invalidateProgressiveHistory() {
@@ -1500,8 +1562,10 @@ export class WebGPURenderer {
     tracePass.end();
 
     let postBindGroup = this.postBindGroup;
+    let postSourceIndex = 0;
     if (progressive.state && !progressive.bypassAccumulation) {
       const writeIndex = 1 - this.accumulationReadIndex;
+      postSourceIndex = 1 + writeIndex;
       this.accumulationData[0] = progressive.state.accumulationWeight;
       this.accumulationData[1] = progressive.state.historyReset ? 1 : 0;
       this.accumulationData[2] = progressive.state.accumulationIndex;
@@ -1527,6 +1591,21 @@ export class WebGPURenderer {
       accumulationPass.draw(3);
       accumulationPass.end();
       postBindGroup = this.progressivePostBindGroups[writeIndex];
+    }
+    // Diagnostic false colour and frames that opt out never receive glare.
+    if (
+      this.glarePass
+      && this.glarePostBindGroups[postSourceIndex]
+      && !progressive.frame.diagnosticDisplay
+      && progressive.frame.sceneGlare !== false
+    ) {
+      const glareStrength = typeof progressive.frame.sceneGlare === "number"
+        ? Math.max(progressive.frame.sceneGlare, 0)
+        : Number(this.shaderBundle.glare.strength ?? 1);
+      this.glarePass.updateWeights(Number(progressive.frame.fov) || 0.77, glareStrength);
+      if (this.glarePass.encode(encoder, postSourceIndex)) {
+        postBindGroup = this.glarePostBindGroups[postSourceIndex];
+      }
     }
 
     const postPass = encoder.beginRenderPass({
@@ -1585,6 +1664,9 @@ export class WebGPURenderer {
     this.sceneResourceState?.dispose();
     this.sceneResourceState = null;
     this.destroyProgressiveTargets();
+    this.glarePass?.dispose();
+    this.glarePass = null;
+    this.blackGlareTexture?.destroy();
     this.traceTexture?.destroy();
     this.coarseTexture?.destroy();
     this.skyTexture?.destroy();

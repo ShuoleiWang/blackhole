@@ -451,6 +451,60 @@ test("dynamic frames encode trace and post only, then invalidate history", () =>
   }
 });
 
+test("glare scenes composite observer glare before post, never on diagnostics", () => {
+  const calls = [];
+  const glarePass = {
+    updateWeights(fov, strength) {
+      calls.push(["weights", fov, strength]);
+    },
+    encode(encoder, sourceIndex) {
+      calls.push(["encode", sourceIndex]);
+      return true;
+    },
+  };
+  const { renderer, passes } = renderHarness({
+    shaderBundle: { glare: { strength: 0.3 } },
+    glarePass,
+    glarePostBindGroups: [
+      { id: "trace-glare-post-bind-group" },
+      { id: "history-glare-post-bind-group-0" },
+      { id: "history-glare-post-bind-group-1" },
+    ],
+  });
+  const moving = frame({
+    motion: 1,
+    strongFieldQuality: {
+      convergencePhase: "realtime",
+      accumulationIndex: 0,
+      accumulationWeight: 1,
+      historyEpoch: 1,
+      historyReset: true,
+    },
+  });
+  // A dynamic frame reads the trace target (source 0).
+  assert.equal(renderer.render(moving), true);
+  assert.deepEqual(calls, [["weights", 0.7, 0.3], ["encode", 0]]);
+  assert.equal(passes.at(-1).bindGroup.id, "trace-glare-post-bind-group");
+
+  // A static sample reads the accumulation history it just wrote (1 + i).
+  calls.length = 0;
+  assert.equal(renderer.render(frame()), true);
+  assert.deepEqual(calls.at(-1), ["encode", 2]);
+  assert.equal(passes.at(-1).bindGroup.id, "history-glare-post-bind-group-1");
+
+  // False-colour diagnostics and opted-out frames bypass the glare pass.
+  calls.length = 0;
+  passes.length = 0;
+  assert.equal(renderer.render({ ...moving, diagnosticDisplay: true }), true);
+  assert.deepEqual(calls, []);
+  assert.equal(passes.at(-1).bindGroup, renderer.postBindGroup);
+  assert.equal(renderer.render({ ...moving, sceneGlare: false }), true);
+  assert.deepEqual(calls, []);
+  // A numeric sceneGlare overrides the bundle strength.
+  assert.equal(renderer.render({ ...moving, sceneGlare: 1 }), true);
+  assert.deepEqual(calls[0], ["weights", 0.7, 1]);
+});
+
 function sparseHarness() {
   return renderHarness({
     coarsePass: Object.freeze({
@@ -547,6 +601,35 @@ test("the coarse target holds every stride-th pixel plus a stencil ring", () => 
   } finally {
     globalThis.GPUTextureUsage = originalUsage;
   }
+});
+
+test("a coarse pass that shares trace resources binds the sky and scene tables", () => {
+  const bindGroups = [];
+  const renderer = Object.assign(Object.create(WebGPURenderer.prototype), {
+    coarsePass: { entryPoint: "fsCoarse", format: "rgba32float", stride: 4, binding: 3, sharesTraceResources: true },
+    coarsePipelines: { default: { getBindGroupLayout: (index) => `default-layout-${index}` } },
+    uniformBuffer: { id: "uniforms" },
+    skyTexture: { createView: () => ({ id: "sky-view" }) },
+    skySampler: { id: "sky-sampler" },
+    sceneResourceState: { entries: [{ binding: 4, resource: { id: "blackbody-table" } }] },
+    device: {
+      createBindGroup(descriptor) {
+        bindGroups.push(descriptor);
+        return { id: descriptor.layout };
+      },
+    },
+  });
+  renderer.createCoarseBindGroups();
+  assert.equal(bindGroups.length, 1);
+  assert.equal(bindGroups[0].layout, "default-layout-0");
+  // The coarse target itself (binding 3) is never bound to the pass that
+  // writes it.
+  assert.deepEqual(bindGroups[0].entries, [
+    { binding: 0, resource: { buffer: { id: "uniforms" } } },
+    { binding: 1, resource: { id: "sky-view" } },
+    { binding: 2, resource: { id: "sky-sampler" } },
+    { binding: 4, resource: { id: "blackbody-table" } },
+  ]);
 });
 
 test("the first static sample still seeds FP16 history before post", () => {

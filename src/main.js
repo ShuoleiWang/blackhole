@@ -346,6 +346,7 @@ function requestedNavigationSceneId() {
   return [
     "binary-dual-disk",
     "schwarzschild",
+    "supernova-ia",
     "transfer-map-reference",
   ].includes(requestedScene)
     ? requestedScene
@@ -357,6 +358,7 @@ function configureSceneLinks(sceneId) {
     ["binary-approx", document.querySelector("#sceneBinary")],
     ["binary-dual-disk", document.querySelector("#sceneBinaryDualDisk")],
     ["schwarzschild", document.querySelector("#sceneSchwarzschild")],
+    ["supernova-ia", document.querySelector("#sceneSupernovaIa")],
     ["transfer-map-reference", document.querySelector("#sceneTransferMap")],
   ];
   for (const [id, link] of links) {
@@ -396,6 +398,23 @@ async function loadRequestedScene() {
   }
   if (requestedScene === "schwarzschild") {
     return null;
+  }
+  if (requestedScene === "supernova-ia") {
+    const { createSupernovaIaScene } = await import("./scenes/supernova-ia-scene.js");
+    const scene = await createSupernovaIaScene({
+      document,
+      ui,
+      state,
+      i18n,
+      controls: {
+        setRunning: setMotion,
+        requestRender() {
+          state.needsRender = true;
+        },
+      },
+    });
+    validateCustomScene(scene);
+    return scene;
   }
   if (requestedScene === "binary-dual-disk") {
     const {
