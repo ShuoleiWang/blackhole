@@ -43,6 +43,13 @@ stationary analytic **Schwarzschild 与 Kerr** 参考图验证 transfer-map
 相机、不含吸积盘，也**不是数值相对论**。它们是校准与回归 oracle，不是
 双黑洞合并渲染器。
 
+`?scene=supernova-ia` 路由完整呈现一次 **Ia 型超新星**：充满洛希瓣的双白矮星、
+氦壳与内核两次爆轰、火球、放射性加热的光球，直到星云相。所有温度与光度都来自
+含 ⁵⁶Ni→⁵⁶Co→⁵⁶Fe 加热的灰体通量限制辐射扩散解（热光度第 17 天达到峰值
+1.1×10⁴³ erg/s，与 SN 2011fe 一致）；WebGPU 光追器沿每条光线积分该解的发射与
+吸收，并计入相对论多普勒频移与光行时延迟。详见
+[`docs/transient-physics.md`](./docs/transient-physics.md)（英文）。
+
 ![Schwarzschild 黑洞、薄吸积盘与引力透镜化银河背景](./docs/images/blackhole-galaxy-hero.webp)
 
 <sub>项目在 Apple Silicon 上运行 WebGPU/Metal 的 5120×2576 实际截图，保留控制面板与后端、输出模式、帧率等运行状态。银河素材：ESO/S. Brunier；经本项目测地线追踪变形、合成并转码，原素材按 [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/) 使用；完整来源见 [`assets/SOURCES.md`](./assets/SOURCES.md)。</sub>
@@ -54,6 +61,7 @@ stationary analytic **Schwarzschild 与 Kerr** 参考图验证 transfer-map
 | 根 URL 实时真空双黑洞 | 已实现 | WebGPU 在逐帧冻结的叠加 Kerr-Schild fast-light 近似中用 RK4 积分 3+1 Hamiltonian 光线；SXS 只锚定波形/事件/余留体 |
 | `?scene=binary-dual-disk` | 已实现 | 同一强场透镜加两个理想化 Roche/ISCO 截断薄微型盘；无 GRMHD、自洽光谱辐射转移或合并后发射模型 |
 | `?scene=schwarzschild` | 已实现 | 交互式单黑洞 Schwarzschild 测地线与理想薄盘 |
+| `?scene=supernova-ia` | 已实现 | 双爆轰 Ia 型超新星：洛希几何双星、运动学爆轰、灰体辐射扩散与发射–吸收辐射转移；不含流体力学、非 LTE 光谱或偏振 |
 | Stationary Schwarzschild/Kerr 工作台 | 已实现 | 固定相机解析真空校准、认证交付和回归 oracle；不是 merger renderer |
 | WebGL2 双黑洞回退 | 已实现 | 明确标注的旧 weak-field 兼容预览，不声称与 WebGPU 强场路径物理等价 |
 | 离线单 Kerr 光谱渲染器 | 计划重写 | 早期纯 Python 原型已从 `main` 移除、等待精简重写；完整代码保留在 `archive/offline-v1` 分支 |
@@ -102,6 +110,22 @@ escape-transfer ABI，而不是完整辐射渲染格式。
   合并帧。
 - **可检查的科学诊断**：稳定 URL 可显示天空、outcome、回溯时间、频移、
   null residual 或投影误差；点击 texel 可查看解码值与原始 32-byte 记录。
+- **Ia 型超新星**：带 0.016 M☉ 氦壳的 1.0 M☉ 碳氧白矮星经弹道物流从 0.6 M☉
+  白矮星吸积。撞击热斑以局部爱丁顿通量辐射（1.0×10⁶ K、3.7×10³⁶ erg/s），
+  其光把伴星朝向一侧加热到约 3×10⁵ K、把吸积流加热到 2–9×10⁵ K（反射效应）。
+  氦爆轰、内核爆破与火球（与抛射物一样朝点火一侧更快）遵循受能量约束的光球规律，
+  并与抛射物阶段连续衔接；
+  幸存伴星被抛射物击中后以 1775 km/s 飞离。均匀膨胀抛射物（0.515 M☉ ⁵⁶Ni、
+  伴星阴影锥、撞击轴拉伸、轨道反冲）由灰体通量限制扩散解渲染，包含
+  Eddington–Barbier 临边昏暗、星云相放射性发射、推迟时间与相对论多普勒效应。
+- **自发光场景的相机曝光与眩光**：Ia 型超新星场景把自发光表面曝光到接近显示白而
+  不是中灰，并像相机一样适应，闪光先过曝、随后曝光才跟上。杂散眩光采用
+  CIE 146:2002 失能眩光函数的形状，强度取优质相机镜头的水平（杂散眩光指数约 2%），
+  以四分之一分辨率的高斯金字塔计算并在后处理中叠加（原生分辨率每帧约 1.1 ms）。
+  诊断伪彩色与黑洞场景不使用眩光。
+- **稀疏辐射追踪**：运动中的 Ia 帧每 4×4 像素只追踪一个节点；只有当 12 个
+  相邻节点看到同一物体、且双线性误差上界低于显示值的 0.4% 时才插值。光球阶段
+  在 M3 Pro 原生 3456×2234 下每帧从 23–35 ms 降到 4–5.4 ms，PSNR 为 57–64 dB。
 - **隔离的场景架构**：scene descriptor 与 shader bundle 隔离根双黑洞、显式 Schwarzschild 和固定相机科学参考，避免不同物理假设被静默混用。
 - **WebGPU 生产路径、WebGL2 明确回退**：WebGPU/Metal 运行强场双黑洞；
   WebGL2 保留带标签的 weak-field 兼容预览，两者不冒充物理等价。
@@ -130,7 +154,8 @@ python3 -m http.server 4173
 打开 <http://localhost:4173/?scene=schwarzschild> 可进入交互式单黑洞场景；
 打开 <http://localhost:4173/?scene=transfer-map-reference> 可进入固定相机
 Schwarzschild transfer-map 参考；追加 `&reference=kerr-remnant` 可进入
-stationary Kerr 余留体参考。所有路径彼此隔离。
+stationary Kerr 余留体参考；打开 <http://localhost:4173/?scene=supernova-ia>
+可进入 Ia 型超新星场景。所有路径彼此隔离。
 
 仓库内的 6K 银河背景可以直接运行。若希望使用约 236 MiB 的 Gaia 16K 全天图，可额外执行：
 
@@ -178,6 +203,12 @@ WebGPU 启用；每个盘跟随 provider 自有的解析 body state，外缘按
 通过 C² 过渡关闭。WebGL2 仍是明确标注的真空 weak-field 预览，并禁用发射
 控制。
 
+Ia 型超新星场景复用时间线控件。拖动条对应展示时间线：轨道与爆轰阶段为线性，
+从秒到 150 天为对数；速率读数给出每一秒真实播放对应多少物理时间。
+**相机跟随膨胀**使整个事件始终在视野内（关闭后冻结物理相机距离）；三种模式
+分别是自动曝光真实色彩、按天空背景曝光，以及按抛射物化学成分的伪彩色。曝光
+补偿范围 ±4 EV，播放速度 0–4×。
+
 Transfer-map 工作台的相机与投影固定，因此拖动、缩放、重置、运动、质量、
 吸积率和时间控件均禁用。它可以切换 Schwarzschild / Kerr 参考，并显示天空、
 outcome、回溯时间、频移、null residual 或投影误差。点击画面可检查一条
@@ -196,6 +227,8 @@ outcome、回溯时间、频移、null residual 或投影误差。点击画面�
 | `?scene=transfer-map-reference` | 打开固定相机 stationary analytic Schwarzschild transfer-map 参考；非 NR、无吸积盘 |
 | `?scene=transfer-map-reference&reference=kerr-remnant` | 打开 stationary analytic Kerr 余留体自旋参考；非 NR、无吸积盘 |
 | `&binaryTime=-16.8&paused=1` | 在可复现的协议时间（单位 `M`）打开实时双黑洞场景，并保持时间线暂停 |
+| `?scene=supernova-ia` | 打开 Ia 型超新星（双简并双爆轰） |
+| `&snTime=1468800&paused=1` | 在氦点火后指定物理时间（秒；此处约 17 天，接近峰值）打开 Ia 场景并保持暂停 |
 | `&diagnostic=sky\|outcome\|lookback\|frequency-shift\|null-residual\|projection-error` | 选择稳定的 transfer-map 诊断视图 |
 | `?renderer=webgl` | 强制使用 WebGL2 回退路径 |
 | `?hdr=0` | 关闭扩展 HDR，使用稳定的 SDR 输出 |
@@ -327,6 +360,16 @@ bundles 与独立版本的辐射产品，而不会扩张 v1 32-byte vacuum ABI �
 - [`scripts/generate_nr_contract_fixture.py`](./scripts/generate_nr_contract_fixture.py)：确定性重建一致性 fixture
 - [`scripts/verify_nr_contract.py`](./scripts/verify_nr_contract.py)：失败即拒绝的 manifest、sidecar、坐标标架和逐光线记录验证器
 - [`tests/test_nr_contract.py`](./tests/test_nr_contract.py)：协议正向与对抗性回归测试
+- [`src/scenes/supernova-ia-scene.js`](./src/scenes/supernova-ia-scene.js)：
+  Ia 场景生命周期、相机自动曝光、画质档位与稀疏追踪开关
+- [`src/scenes/transient-scene-host.js`](./src/scenes/transient-scene-host.js)：
+  暂现源共享面板、展示时间线控制与光变曲线
+- [`src/supernova-ia-shaders.js`](./src/supernova-ia-shaders.js)：WebGPU
+  双爆轰光追器（双星、爆轰、抛射物）、稀疏辐射通道与简化 WebGL2 回退
+- [`src/transients/`](./src/transients/)：物理常数、CIE 黑体颜色、均匀膨胀
+  辐射扩散、洛希双星、白矮星结构、展示时间线、共享暂现源 WGSL 与 Ia 模型
+- [`docs/transient-physics.md`](./docs/transient-physics.md)：暂现源物理、
+  对 SN 2011fe 的校准、刻意省略的部分与性能（英文）
 - [`src/webgpu-renderer.js`](./src/webgpu-renderer.js)：WebGPU 单帧提交 gate、
   FP16 ping-pong 渐进累积与 HDR/P3 配置协商
 - [`src/webgl-renderer.js`](./src/webgl-renderer.js)：WebGL2 硬件回退与半浮点 framebuffer 探测
@@ -346,6 +389,7 @@ bundles 与独立版本的辐射产品，而不会扩张 v1 32-byte vacuum ABI �
 | Stationary Schwarzschild 参考 | 固定 1024×576 解析真空 map、认证 chunk、WebGPU/WebGL2 最近 texel playback | 固定相机；无吸积盘、NR 来源、时间插值或双黑洞 slow-light 光线 |
 | Stationary Kerr 余留体参考 | 在 `a/M = 0.686461676493` 的精确解析 Kerr 度规中数值积分真空零测地线，并使用有限 BL-ZAMO、扁球 Kerr-r 捕获面、认证 playback 与诊断 | 只使用 SXS 余留体自旋参数；无 SXS 近区度规、双黑洞时间依赖、发射模型或 NR 派生像素 |
 | NR transfer-map 协议 | 版本化 schema、合成 fixture、失败即拒绝验证器、参考 consumer 与回归测试 | consumer 只由解析数据验证；仓库仍无 NR 派生 transfer map |
+| Ia 型超新星 | D6 双星，含精确洛希伴星与弹道物流；受能量约束的运动学氦爆轰与内核爆破光球；含 Ni/Co 加热与 γ 射线输运的灰体通量限制扩散；推迟时间与多普勒频移的发射–吸收渲染 | 灰体输运，速度空间一维，非球对称只来自解析处方；色温取自观测 B−V 演化；无流体力学、非 LTE 光谱、早期超亮机制或偏振 |
 | 共享渲染器 | WebGPU 强场生产路径、单 in-flight frame 与静止 FP16 累积；WebGL2 weak-field fallback | HDR、P3、FP16 与 16K 纹理由运行时能力决定；HDR/累积不提高底层度规精度 |
 
 产品层级与两条开发路线见
@@ -356,7 +400,8 @@ bundles 与独立版本的辐射产品，而不会扩张 v1 32-byte vacuum ABI �
 [`docs/binary-model.md`](./docs/binary-model.md)，实时强场实现的
 [`度规与方程`](./docs/strong-field-equations.md)、
 [`M3 Pro 调度`](./docs/strong-field-performance.md)和
-[`独立光线 oracle`](./docs/strong-field-ray-oracles.md)另有专文。
+[`独立光线 oracle`](./docs/strong-field-ray-oracles.md)另有专文；Ia 型超新星见
+[`docs/transient-physics.md`](./docs/transient-physics.md)。
 
 ## M3 Pro 兼容性与 HDR
 
@@ -445,6 +490,13 @@ Doppler 符号、失败即拒绝的辐射合成、64-byte 生产 GPU readback、
 fail-closed 状态，并分别验证双盘、仅 A、仅 B、重复运行和全暗盘；页面通过
 表示原生后端数值检查通过，而不是截图相似性检查。目前没有自动化测试真正执行
 WGSL 光追器；Node 套件检查的是源码契约与 CPU oracle。
+
+暂现源测试检查黑体光度学（光视效能、普朗克轨迹、6500 K 中性点）、辐射扩散
+求解器的能量守恒（Katz 积分）及其 Arnett、收敛与绝热极限，以及展示时间线。
+Ia 场景测试锁定洛希/开普勒双星关系、⁵⁶Ni 质量、峰值时间与光度、Arnett 比值、
+热光度下降率、光球速度和 γ 射线捕获时间（对照正常 Ia 型超新星），以及爆破
+能量预算、伴星受击时刻、打包 uniform 与 WGSL 结构逐槽一致、场景档位到稀疏
+追踪的映射和面板恢复。
 
 Legacy 双黑洞回归只服务 WebGL2 兼容 shader，不能验证 WebGPU 强场模型；
 反之，新 oracle 与浏览器检查通过也只验证声明的解析/数值性质，不代表 NR

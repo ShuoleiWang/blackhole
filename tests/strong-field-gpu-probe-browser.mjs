@@ -20,6 +20,8 @@ import {
   strongFieldBinaryDualDiskTraceFragmentWGSL,
   strongFieldBinaryTraceFragmentWGSL,
 } from "../src/strong-field-shaders.js";
+import { GLARE_SHADER_SOURCES } from "../src/glare.js";
+import { supernovaIaTraceFragmentWGSL } from "../src/supernova-ia-shaders.js";
 import { transferMapTraceFragmentWGSL } from "../src/transfer-map-shaders.js";
 import { progressiveAccumulationFragmentWGSL } from "../src/webgpu-renderer.js";
 
@@ -204,6 +206,9 @@ async function main() {
       strongFieldVacuumTrace: strongFieldBinaryTraceFragmentWGSL,
       strongFieldDualDiskTrace: strongFieldBinaryDualDiskTraceFragmentWGSL,
       transferMapTrace: transferMapTraceFragmentWGSL,
+      supernovaIaTrace: supernovaIaTraceFragmentWGSL,
+      glareDownsample: GLARE_SHADER_SOURCES.downsample,
+      glareUpsample: GLARE_SHADER_SOURCES.upsample,
     };
     const compileErrors = [];
     for (const [name, code] of Object.entries(shaderModules)) {

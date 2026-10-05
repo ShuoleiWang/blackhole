@@ -928,6 +928,9 @@ struct FragmentInput {
 @group(0) @binding(0) var<uniform> params: Params;
 @group(0) @binding(1) var tScene: texture_2d<f32>;
 @group(0) @binding(2) var sceneSampler: sampler;
+// Observer veiling glare at quarter resolution (src/glare.js); scenes without
+// glare bind a 1x1 black texture.
+@group(0) @binding(3) var tGlare: texture_2d<f32>;
 
 fn sampleScene(uv: vec2<f32>) -> vec3<f32> {
   return max(
@@ -1034,6 +1037,8 @@ fn fsMain(input: FragmentInput) -> @location(0) vec4<f32> {
   // below one pixel at this field of view.  Only bright sources receive a
   // restrained, additive telescope halo.
   var color = sampleScene(input.uv) * exposure;
+  // Glare is scattered scene light and takes the same exposure.
+  color = color + max(textureSampleLevel(tGlare, sceneSampler, input.uv, 0.0).rgb, vec3<f32>(0.0)) * exposure;
   let bloomStrength = max(params.postDisplayFrame.y, 0.0);
   if (bloomStrength > 1.0e-5) {
     let cssScale = max(params.postDisplayFrame.x, 0.5);
